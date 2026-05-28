@@ -1,0 +1,50 @@
+repos:
+  # Standard pre-commit hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=1000', '--enforce-all']
+
+  # uv hooks - keep uv.lock in sync with pyproject.toml
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.11.14
+    hooks:
+      - id: uv-lock
+
+  # Ruff - linting and formatting
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.13
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # ty - type checking
+  - repo: local
+    hooks:
+      - id: ty
+        name: ty type checker
+        entry: uv run --no-sync ty check
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: pytest
+        name: unit tests
+        entry: uv run --no-sync pytest -q -m "not integration and not real_pdf"
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      # Auto-sync after pull/checkout
+      - id: uv-sync
+        name: uv sync
+        entry: uv sync
+        language: system
+        always_run: true
+        pass_filenames: false
+        stages: [post-merge, post-checkout]

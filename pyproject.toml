@@ -1,0 +1,72 @@
+[project]
+name = "datasheetindex"
+version = "0.13.0"
+description = "Agent-first parameter extraction from technical datasheets"
+readme = "README.md"
+requires-python = ">=3.13"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Infineon Technologies AG" }]
+dependencies = [
+    "pymupdf>=1.25.0",
+]
+
+[project.optional-dependencies]
+llm = ["openai>=2.16.0", "python-dotenv>=1.0.0", "httpx>=0.27.0"]
+layout = ["pymupdf4llm>=1.27.0"]
+mcp = ["mcp[cli]>=1.26.0"]
+
+[project.scripts]
+datasheetindex = "datasheetindex.cli:main_cli"
+datasheetindex-mcp-server = "datasheetindex.mcp_server:main_cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/datasheetindex"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+    "real_pdf: tests that require the bundled real PDF fixtures",
+    "integration: tests that exercise external or end-to-end integrations",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["datasheetindex"]
+
+[tool.ty.environment]
+python-version = "3.13"
+root = ["./src", "."]
+
+[tool.ty.src]
+include = ["src", "tests"]
+
+[tool.ty.rules]
+possibly-unresolved-reference = "warn"
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.5.1",
+    "pytest>=9.0.2",
+    "ruff>=0.14.11",
+    "ty>=0.0.12",
+]
