@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.14.0] - 2026-06-02
+
+### Added
+- **Multi-pattern `search_text`.** `query` now accepts a single string or a list of strings searched in one call. List searches tag each match with the `pattern` that produced it and dedupe by `(page, start, end)` (first pattern wins), with `max_results` as a global cap across patterns. The MCP and Agent SDK tool schemas accept a string or an array of strings. Single-string behavior is byte-identical to before.
+- **ToC breadcrumb on every search hit.** Each `search_text` match is enriched with the `breadcrumb` of the section whose page range contains the match, so agents can disambiguate hits without a separate ToC lookup. Resolved via the new `find_breadcrumb_for_page()` over the typed `TocNode` tree, once per distinct page per call (deepest covering section wins; on equal-depth overlapping siblings the first in document order wins).
+- **Position header on `get_section_text`.** Output now opens with a `=== Pages X-Y of N ===` (or `=== Page X of N ===` for a single page) header so the agent knows its position in the document and how much remains.
+
+### Changed
+- **`DatasheetArtifacts` retains the typed `TocNode` tree** (new `nodes` field). Breadcrumb resolution walks `TocNode` attributes instead of reaching into the serialized `json_data["toc"]` dicts, so the lookup is type-checked by `ty` and fails loudly on schema drift rather than silently dropping (or mis-attributing) breadcrumbs. The `.json` artifact is unchanged; the tree is in-memory only. New `TextSearchMatch` keys (`pattern`, `breadcrumb`) are `NotRequired`, so existing consumers are unaffected.
+- **Tool descriptions adopt a "what vs. where" framing.** `search_text` is for when you know *what* to look for; `get_section_text` is for when you know *where* to read. Both the MCP and Agent SDK descriptions document the new multi-pattern, breadcrumb, and position-header behavior.
+- **Documentation corrected.** The README and architecture doc referenced `get_toc`/`get_page_text` tools that do not exist; the tool surface (`build_datasheet`, `get_section_text`, `search_text`, `inspect_page`, `extract_table_markdown`) and the new behaviors are now documented accurately.
+
+### Dependency upgrades
+- Refreshed the lock with all extras (`llm`, `layout`, `mcp`) installed. `openai` 2.38.0 -> 2.40.0, `ty` 0.0.40 -> 0.0.42, `typer` 0.26.4 -> 0.26.5, `python-multipart` 0.0.29 -> 0.0.30, `virtualenv` 21.4.1 -> 21.4.2.
+
 ## [0.13.0] - 2026-05-15
 
 ### Added
