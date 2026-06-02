@@ -74,6 +74,10 @@ class DatasheetArtifacts:
     json_data: dict = field(default_factory=dict)
     text_content: str = ""
     toc_quality: TocQuality | None = None
+    # The typed enriched ToC tree (same content as ``json_data["toc"]`` before
+    # serialization). Retained so tools can resolve structure via TocNode
+    # attributes instead of reaching into the serialized dict shape.
+    nodes: list[TocNode] = field(default_factory=list)
 
 
 def flatten_nodes(nodes: list[TocNode]) -> list[TocNode]:

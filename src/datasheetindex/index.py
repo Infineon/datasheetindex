@@ -377,6 +377,7 @@ class DatasheetIndex:
                 json_data=json_data,
                 text_content=text_content,
                 toc_quality=toc_quality,
+                nodes=nodes,
             )
         finally:
             if owns_llm_callable:

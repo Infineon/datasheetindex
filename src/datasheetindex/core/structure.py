@@ -130,42 +130,35 @@ def assign_breadcrumbs(nodes: list[TocNode], parent_path: str = "") -> None:
             assign_breadcrumbs(node.nodes, node.breadcrumb)
 
 
-def find_breadcrumb_for_page(toc: list[dict], page: int) -> str | None:
+def find_breadcrumb_for_page(nodes: list[TocNode], page: int) -> str | None:
     """Return the breadcrumb of the deepest ToC section containing ``page``.
 
-    Walks the serialized ToC dicts (as stored in ``json_data["toc"]``) and
-    returns the ``breadcrumb`` of the most specific node whose
-    ``[start_page, end_page]`` range covers ``page``. Returns ``None`` when no
-    section covers the page or no covering node carries a breadcrumb.
+    Walks the enriched ``TocNode`` tree and returns the ``breadcrumb`` of the
+    most specific node whose ``[start_page, end_page]`` range covers ``page``.
+    Returns ``None`` when no section covers the page or no covering node carries
+    a breadcrumb.
 
     When sibling sections have overlapping ranges that cover the same page at
     the same depth (e.g. siblings sharing a start page), the first one in
     document order wins -- a nested child is strictly deeper than its parent, so
     "most specific" still selects the deepest covering section.
     """
-    best: dict | None = None
+    best: TocNode | None = None
 
-    def _walk(nodes: list[dict]) -> None:
+    def _walk(items: list[TocNode]) -> None:
         nonlocal best
-        for node in nodes:
-            start = node.get("start_page")
-            end = node.get("end_page")
-            if (
-                isinstance(start, int)
-                and isinstance(end, int)
-                and start <= page <= end
-                and (best is None or node.get("level", 0) > best.get("level", 0))
+        for node in items:
+            if node.start_page <= page <= node.end_page and (
+                best is None or node.level > best.level
             ):
                 best = node
-            children = node.get("nodes")
-            if children:
-                _walk(children)
+            if node.nodes:
+                _walk(node.nodes)
 
-    _walk(toc)
-    if best is None:
+    _walk(nodes)
+    if best is None or not best.breadcrumb:
         return None
-    breadcrumb = best.get("breadcrumb")
-    return breadcrumb if breadcrumb else None
+    return best.breadcrumb
 
 
 def _count_tables_on_page(args: tuple[str, int]) -> tuple[int, int]:

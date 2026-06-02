@@ -215,8 +215,7 @@ class DatasheetTools:
             case_sensitive=case_sensitive,
             max_results=max_results,
         )
-        toc = artifacts.json_data.get("toc")
-        if isinstance(toc, list):
+        if artifacts.nodes:
             # Matches commonly cluster on a few pages; resolve each page's
             # breadcrumb once rather than re-walking the ToC per match.
             breadcrumb_by_page: dict[int, str | None] = {}
@@ -224,7 +223,7 @@ class DatasheetTools:
                 page_number = match["page"]
                 if page_number not in breadcrumb_by_page:
                     breadcrumb_by_page[page_number] = find_breadcrumb_for_page(
-                        toc, page_number
+                        artifacts.nodes, page_number
                     )
                 breadcrumb = breadcrumb_by_page[page_number]
                 if breadcrumb:
