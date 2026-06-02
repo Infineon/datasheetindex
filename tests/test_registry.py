@@ -309,6 +309,12 @@ def test_create_server_registers_tools(monkeypatch, tmp_path):
     search_result = asyncio.run(server.tools["search_text"]({"query": "registry"}))
     assert search_result["is_error"] is False
 
+    # The SDK tool accepts a list query (multi-pattern) just like a string.
+    multi_search_result = asyncio.run(
+        server.tools["search_text"]({"query": ["registry", "test"]})
+    )
+    assert multi_search_result["is_error"] is False
+
     inspect_result = asyncio.run(server.tools["inspect_page"]({"page": 1}))
     assert inspect_result["is_error"] is False
 
