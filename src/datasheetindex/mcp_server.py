@@ -182,7 +182,7 @@ def create_local_mcp_server(
         }
 
     def search_text_tool(
-        query: str,
+        query: str | list[str],
         page: int | None = None,
         case_sensitive: bool = False,
         max_results: int = 20,
@@ -230,18 +230,24 @@ def create_local_mcp_server(
         name="get_section_text",
         description=(
             "Read the extracted text for a page range (inclusive, 1-indexed). "
-            "Pass start_page/end_page from ToC nodes to read specific sections. "
-            "For a single page use the same value for both. Prefer reading "
-            "whole sections rather than page-by-page."
+            "Use when you know WHERE to read -- pass start_page/end_page from "
+            "ToC nodes to read specific sections. For a single page use the same "
+            "value for both. Prefer reading whole sections rather than "
+            "page-by-page. The text opens with a '=== Pages X-Y of N ===' header "
+            "so you know your position in the document."
         ),
     )(get_section_text_tool)
     server.tool(
         name="search_text",
         description=(
-            "Search the full extracted text for a substring and return "
-            "page-aware snippets with surrounding context. Use to locate "
-            "parameters, values, or keywords across the entire datasheet "
-            "before reading specific sections."
+            "Search the full extracted text and return page-aware snippets with "
+            "surrounding context. Use when you know WHAT to look for -- a "
+            "parameter name, value, or keyword -- to locate it across the "
+            "datasheet before reading specific sections. 'query' may be a single "
+            "string or a list of strings to search several terms in one call. "
+            "Each result includes the ToC 'breadcrumb' of the section containing "
+            "the match; list searches also tag each result with the matching "
+            "'pattern'. Omit 'page' to search all pages."
         ),
     )(search_text_tool)
     server.tool(

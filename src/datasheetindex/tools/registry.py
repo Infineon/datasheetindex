@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from datasheetindex.core.structure import find_breadcrumb_for_page
 from datasheetindex.core.textfile import TextSearchMatch, extract_section_text
 from datasheetindex.core.textfile import search_text as search_text_content
 from datasheetindex.index import DatasheetIndex
@@ -170,7 +171,9 @@ class DatasheetTools:
     def get_section_text(self, start_page: int, end_page: int) -> str:
         """Return extracted text for a page range from the latest build.
 
-        Returns text WITH ``--- PAGE N ---`` markers so the agent can orient.
+        The text opens with a ``=== Pages X-Y of N ===`` position header for
+        orientation, followed by the section text WITH ``--- PAGE N ---``
+        markers so the agent can orient within the range.
         """
         artifacts = self._require_artifacts()
         total_pages = self._total_pages(artifacts)
@@ -179,28 +182,54 @@ class DatasheetTools:
                 f"start_page/end_page must satisfy "
                 f"1 <= start_page <= end_page <= {total_pages}"
             )
-        return extract_section_text(artifacts.text_content, start_page, end_page)
+        if start_page == end_page:
+            header = f"=== Page {start_page} of {total_pages} ==="
+        else:
+            header = f"=== Pages {start_page}-{end_page} of {total_pages} ==="
+        section = extract_section_text(artifacts.text_content, start_page, end_page)
+        return f"{header}\n{section}"
 
     def search_text(
         self,
-        query: str,
+        query: str | list[str],
         *,
         page: int | None = None,
         case_sensitive: bool = False,
         max_results: int = 20,
     ) -> list[TextSearchMatch]:
-        """Search the built page-matched text and return page-aware snippets."""
+        """Search the built page-matched text and return page-aware snippets.
+
+        ``query`` may be a single pattern or a list of patterns searched in one
+        call (each match is tagged with the ``pattern`` that produced it). Every
+        match is enriched with the ToC ``breadcrumb`` of the section that
+        contains its page, when one is found.
+        """
         artifacts = self._require_artifacts()
         total_pages = self._total_pages(artifacts)
         if page is not None and (page < 1 or page > total_pages):
             raise ValueError(f"page must be between 1 and {total_pages}")
-        return search_text_content(
+        matches = search_text_content(
             artifacts.text_content,
             query,
             page=page,
             case_sensitive=case_sensitive,
             max_results=max_results,
         )
+        toc = artifacts.json_data.get("toc")
+        if isinstance(toc, list):
+            # Matches commonly cluster on a few pages; resolve each page's
+            # breadcrumb once rather than re-walking the ToC per match.
+            breadcrumb_by_page: dict[int, str | None] = {}
+            for match in matches:
+                page_number = match["page"]
+                if page_number not in breadcrumb_by_page:
+                    breadcrumb_by_page[page_number] = find_breadcrumb_for_page(
+                        toc, page_number
+                    )
+                breadcrumb = breadcrumb_by_page[page_number]
+                if breadcrumb:
+                    match["breadcrumb"] = breadcrumb
+        return matches
 
     def _require_artifacts(self) -> DatasheetArtifacts:
         if self._artifacts is None:
@@ -316,10 +345,12 @@ def create_datasheet_tools_server():
 
     @tool(
         "get_section_text",
-        "Read the extracted text for a page range (inclusive, 1-indexed). "
-        "Pass start_page/end_page from ToC nodes to read specific sections. "
-        "For a single page use the same value for both. Prefer reading whole "
-        "sections rather than page-by-page.",
+        "Read the extracted text for a page range (inclusive, 1-indexed). Use "
+        "when you know WHERE to read -- pass start_page/end_page from ToC nodes "
+        "to read specific sections. For a single page use the same value for "
+        "both. Prefer reading whole sections rather than page-by-page. The text "
+        "opens with a '=== Pages X-Y of N ===' header so you know your position "
+        "in the document.",
         {
             "type": "object",
             "properties": {
@@ -344,14 +375,23 @@ def create_datasheet_tools_server():
 
     @tool(
         "search_text",
-        "Search the full extracted text for a substring and return page-aware "
-        "snippets with surrounding context. Use to locate parameters, values, "
-        "or keywords across the entire datasheet before reading specific sections. "
-        "Omit 'page' to search all pages.",
+        "Search the full extracted text and return page-aware snippets with "
+        "surrounding context. Use when you know WHAT to look for -- a parameter "
+        "name, value, or keyword -- to locate it across the datasheet before "
+        "reading specific sections. 'query' may be a single string or a list of "
+        "strings to search several terms in one call. Each result includes the "
+        "ToC 'breadcrumb' of the section containing the match; list searches also "
+        "tag each result with the matching 'pattern'. Omit 'page' to search all.",
         {
             "type": "object",
             "properties": {
-                "query": {"type": "string"},
+                "query": {
+                    "oneOf": [
+                        {"type": "string"},
+                        {"type": "array", "items": {"type": "string"}},
+                    ],
+                    "description": "A single pattern or a list of patterns.",
+                },
                 "page": {
                     "type": "integer",
                     "minimum": 1,

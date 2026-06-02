@@ -56,8 +56,10 @@ def test_datasheet_tools_build_and_query_artifacts(tmp_path):
 
     assert artifacts.json_path is not None
     assert artifacts.text_path is not None
+    assert section_text.startswith("=== Page 1 of 1 ===")
     assert "--- PAGE 1 ---" in section_text
     assert "Supply voltage" in section_text
+    # No ToC in this synthetic PDF, so no breadcrumb is attached.
     assert matches == [
         {
             "page": 1,
@@ -66,6 +68,96 @@ def test_datasheet_tools_build_and_query_artifacts(tmp_path):
             "snippet": "Supply voltage 4.5V to 5.5V",
         }
     ]
+
+
+def test_get_section_text_multi_page_header(tmp_path):
+    pdf_path = tmp_path / "test.pdf"
+    doc = pymupdf.open()
+    for _ in range(3):
+        doc.new_page()
+    doc.save(str(pdf_path))
+    doc.close()
+
+    tools = DatasheetTools(str(pdf_path))
+    tools.build_datasheet(output_dir=str(tmp_path / "out"))
+    section_text = tools.get_section_text(1, 2)
+    tools.close()
+
+    assert section_text.startswith("=== Pages 1-2 of 3 ===")
+
+
+def test_search_text_attaches_breadcrumb_and_multi_pattern(tmp_path):
+    pdf_path = tmp_path / "test.pdf"
+    doc = pymupdf.open()
+    for label in ("Absolute maximum ratings here", "Thermal resistance value here"):
+        page = doc.new_page()
+        writer = pymupdf.TextWriter(page.rect)
+        writer.append((72, 72), label)
+        writer.write_text(page)
+    doc.set_toc(
+        [
+            [1, "5 Electrical Characteristics", 1],
+            [2, "5.1 Absolute Maximum Ratings", 1],
+            [1, "6 Thermal", 2],
+        ]
+    )
+    doc.save(str(pdf_path))
+    doc.close()
+
+    tools = DatasheetTools(str(pdf_path))
+    tools.build_datasheet(output_dir=str(tmp_path / "out"))
+
+    single = tools.search_text("maximum ratings")
+    multi = tools.search_text(["maximum ratings", "Thermal resistance"])
+    tools.close()
+
+    assert len(single) == 1
+    assert single[0]["page"] == 1
+    assert single[0]["breadcrumb"] == (
+        "5 Electrical Characteristics > 5.1 Absolute Maximum Ratings"
+    )
+
+    by_page = {m["page"]: m for m in multi}
+    assert by_page[1]["pattern"] == "maximum ratings"
+    assert by_page[1]["breadcrumb"] == (
+        "5 Electrical Characteristics > 5.1 Absolute Maximum Ratings"
+    )
+    assert by_page[2]["pattern"] == "Thermal resistance"
+    assert by_page[2]["breadcrumb"] == "6 Thermal"
+
+
+def test_search_text_resolves_breadcrumb_once_per_page(tmp_path, monkeypatch):
+    pdf_path = tmp_path / "test.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page()
+    writer = pymupdf.TextWriter(page.rect)
+    # Three matches for "voltage", all on the same page.
+    writer.append((72, 72), "voltage here, voltage there, voltage everywhere")
+    writer.write_text(page)
+    doc.set_toc([[1, "1 Supply", 1]])
+    doc.save(str(pdf_path))
+    doc.close()
+
+    import datasheetindex.tools.registry as registry_module
+
+    calls: list[int] = []
+    real = registry_module.find_breadcrumb_for_page
+
+    def counting(toc, page_number):
+        calls.append(page_number)
+        return real(toc, page_number)
+
+    monkeypatch.setattr(registry_module, "find_breadcrumb_for_page", counting)
+
+    tools = DatasheetTools(str(pdf_path))
+    tools.build_datasheet(output_dir=str(tmp_path / "out"))
+    matches = tools.search_text("voltage")
+    tools.close()
+
+    assert len(matches) == 3
+    assert all(m["breadcrumb"] == "1 Supply" for m in matches)
+    # The ToC is walked once for the single distinct page, not once per match.
+    assert calls == [1]
 
 
 def test_build_datasheet_omitted_output_dir_uses_resolver(monkeypatch, tmp_path):

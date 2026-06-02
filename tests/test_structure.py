@@ -10,6 +10,7 @@ from datasheetindex.core.structure import (
     build_tree,
     enrich_with_table_counts,
     extract_toc,
+    find_breadcrumb_for_page,
 )
 from datasheetindex.models import TocNode
 
@@ -125,6 +126,49 @@ def test_breadcrumb_nested():
         " > 5.1.1 Junction Temperature"
     )
     assert nodes[1].breadcrumb == "6 Pin Configuration"
+
+
+def test_find_breadcrumb_for_page_returns_deepest_section():
+    raw = [
+        [1, "5 Electrical Characteristics", 10],
+        [2, "5.1 Absolute Maximum Ratings", 10],
+        [3, "5.1.1 Junction Temperature", 11],
+        [1, "6 Pin Configuration", 15],
+    ]
+    toc = [node.to_dict() for node in build_tree(raw, total_pages=20)]
+
+    # Page 11 is covered by the parent, child, and grandchild; deepest wins.
+    assert find_breadcrumb_for_page(toc, 11) == (
+        "5 Electrical Characteristics > 5.1 Absolute Maximum Ratings"
+        " > 5.1.1 Junction Temperature"
+    )
+    # Page 10 is covered by the parent and 5.1 (not the grandchild on page 11).
+    assert find_breadcrumb_for_page(toc, 10) == (
+        "5 Electrical Characteristics > 5.1 Absolute Maximum Ratings"
+    )
+    assert find_breadcrumb_for_page(toc, 15) == "6 Pin Configuration"
+
+
+def test_find_breadcrumb_for_page_overlapping_siblings_first_wins():
+    # Two same-level siblings share a start page; compute_end_pages gives the
+    # first [1, 1] and the second [1, 20], so both cover page 1 at the same
+    # depth. The section that actually starts there (the first) must win.
+    raw = [
+        [1, "A Intro", 1],
+        [1, "B Body", 1],
+    ]
+    toc = [node.to_dict() for node in build_tree(raw, total_pages=20)]
+
+    assert find_breadcrumb_for_page(toc, 1) == "A Intro"
+
+
+def test_find_breadcrumb_for_page_returns_none_when_uncovered():
+    raw = [[1, "Overview", 5]]
+    toc = [node.to_dict() for node in build_tree(raw, total_pages=10)]
+
+    # Page 1 precedes the only section (which starts on page 5).
+    assert find_breadcrumb_for_page(toc, 1) is None
+    assert find_breadcrumb_for_page([], 3) is None
 
 
 def test_build_tree_populates_boilerplate_category():

@@ -134,6 +134,11 @@ def test_create_local_mcp_server_registers_inspect_page(monkeypatch):
     }
     assert search_calls == [("foo", 2, True, 1)]
     assert search_result["results"][0]["snippet"] == "foo"
+
+    # A list-valued query is forwarded unchanged to the tools layer.
+    server.registered_tools["search_text"]["func"](query=["foo", "bar"], ctx=ctx)
+    assert search_calls[-1] == (["foo", "bar"], None, False, 20)
+
     import asyncio
 
     table_md_result = asyncio.run(

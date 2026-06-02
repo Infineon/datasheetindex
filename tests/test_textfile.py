@@ -77,6 +77,61 @@ def test_search_text_respects_page_filter_and_validation():
         search_text(text, "")
 
 
+def test_search_text_multi_pattern_tags_matches():
+    text = "--- PAGE 1 ---\nAlpha beta\n--- PAGE 2 ---\nGamma alpha delta\n"
+
+    matches = search_text(text, ["beta", "gamma"])
+
+    assert matches == [
+        {"page": 1, "start": 6, "end": 10, "snippet": "Alpha beta", "pattern": "beta"},
+        {
+            "page": 2,
+            "start": 0,
+            "end": 5,
+            "snippet": "Gamma alpha delta",
+            "pattern": "gamma",
+        },
+    ]
+
+
+def test_search_text_multi_pattern_dedups_overlapping_spans():
+    text = "--- PAGE 1 ---\nAlpha beta\n"
+
+    # Both patterns hit the same span; the first pattern wins and it appears once.
+    matches = search_text(text, ["alpha", "alpha"])
+
+    assert len(matches) == 1
+    assert matches[0]["pattern"] == "alpha"
+
+
+def test_search_text_multi_pattern_collects_unique_across_patterns():
+    text = "--- PAGE 1 ---\nAlpha beta\n--- PAGE 2 ---\nAlpha gamma\n"
+
+    # Each pattern is searched up to the full cap, so a later pattern's unique
+    # hits are returned alongside an earlier pattern's (deduped by span).
+    matches = search_text(text, ["alpha", "gamma"], max_results=10)
+
+    tagged = {(m["page"], m["pattern"]) for m in matches}
+    assert tagged == {(1, "alpha"), (2, "alpha"), (2, "gamma")}
+
+
+def test_search_text_multi_pattern_max_results_is_global_cap():
+    text = "--- PAGE 1 ---\nAlpha beta\n--- PAGE 2 ---\nGamma alpha delta\n"
+
+    matches = search_text(text, ["alpha", "gamma"], max_results=1)
+
+    assert len(matches) == 1
+
+
+def test_search_text_multi_pattern_empty_raises():
+    text = "--- PAGE 1 ---\nAlpha beta\n"
+
+    with pytest.raises(ValueError, match="query must not be empty"):
+        search_text(text, [])
+    with pytest.raises(ValueError, match="query must not be empty"):
+        search_text(text, ["", "  "])
+
+
 def test_search_text_matches_across_collapsed_whitespace():
     text = "--- PAGE 1 ---\nTransmitted recessive bit\nwidth at 5 Mbit/s\n"
 

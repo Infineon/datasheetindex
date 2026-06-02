@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from functools import cache, lru_cache
-from typing import TYPE_CHECKING, Any, NamedTuple, TypedDict
+from typing import TYPE_CHECKING, Any, NamedTuple, NotRequired, TypedDict
 
 if TYPE_CHECKING:
     import pymupdf
@@ -18,6 +18,10 @@ class TextSearchMatch(TypedDict):
     start: int
     end: int
     snippet: str
+    # Set only in multi-pattern searches: which query pattern produced this hit.
+    pattern: NotRequired[str]
+    # Attached by the tool layer: ToC breadcrumb of the section containing the page.
+    breadcrumb: NotRequired[str]
 
 
 _PAGE_MARKER_RE = re.compile(r"--- PAGE (\d+) ---")
@@ -494,6 +498,69 @@ def _add_spans(
 
 def search_text(
     text_content: str,
+    query: str | Sequence[str],
+    *,
+    page: int | None = None,
+    case_sensitive: bool = False,
+    max_results: int = 20,
+    context_chars: int = 80,
+) -> list[TextSearchMatch]:
+    """Search extracted page text and return page-aware snippets.
+
+    ``query`` may be a single pattern or a list of patterns. With a single
+    string the result is the plain page-aware match list. With a list, each
+    pattern is searched in turn, every match is tagged with the ``pattern``
+    that produced it, results are deduplicated by ``(page, start, end)``
+    (first pattern wins), and ``max_results`` is a global cap across patterns.
+    """
+    if isinstance(query, str):
+        return _search_single(
+            text_content,
+            query,
+            page=page,
+            case_sensitive=case_sensitive,
+            max_results=max_results,
+            context_chars=context_chars,
+        )
+
+    patterns = [p.strip() for p in query]
+    if not patterns or not any(patterns):
+        raise ValueError("query must not be empty")
+    if max_results < 1:
+        raise ValueError("max_results must be at least 1")
+
+    results: list[TextSearchMatch] = []
+    seen: set[tuple[int, int, int]] = set()
+    for pattern in patterns:
+        if not pattern:
+            continue
+        if len(results) >= max_results:
+            break
+        # Fetch up to the full cap per pattern (not just the remaining slots):
+        # the cross-pattern dedup below may drop a pattern's leading matches as
+        # duplicates, and a per-slot budget would discard its unique hits before
+        # they are ever returned.
+        for match in _search_single(
+            text_content,
+            pattern,
+            page=page,
+            case_sensitive=case_sensitive,
+            max_results=max_results,
+            context_chars=context_chars,
+        ):
+            key = (match["page"], match["start"], match["end"])
+            if key in seen:
+                continue
+            seen.add(key)
+            match["pattern"] = pattern
+            results.append(match)
+            if len(results) >= max_results:
+                break
+    return results
+
+
+def _search_single(
+    text_content: str,
     query: str,
     *,
     page: int | None = None,
@@ -501,7 +568,7 @@ def search_text(
     max_results: int = 20,
     context_chars: int = 80,
 ) -> list[TextSearchMatch]:
-    """Search extracted page text and return page-aware snippets."""
+    """Search extracted page text for a single pattern."""
     query = query.strip()
     if not query:
         raise ValueError("query must not be empty")
