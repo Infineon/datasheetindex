@@ -509,8 +509,11 @@ class DatasheetTools:
 
 The `tools/registry.py` module exposes the concrete handoff point for a consuming
 agent: `create_datasheet_tools_server(pdf_path)`. It creates a bound
-`DatasheetTools` instance and registers `build_datasheet`, `get_toc`,
-`get_page_text`, `search_text`, and `inspect_page` on a `ToolServer`.
+`DatasheetTools` instance and registers `build_datasheet`, `get_section_text`,
+`search_text`, `inspect_page`, and `extract_table_markdown` on a `ToolServer`.
+`build_datasheet` returns the enriched ToC manifest; `search_text` accepts a
+single pattern or a list and tags each hit with its section breadcrumb;
+`get_section_text` returns a page range prefixed with a position header.
 
 ```python
 from claude_agent_sdk import Tool, ToolServer
@@ -746,10 +749,10 @@ Output: {"parameter": "Supply voltage VS relative", "symbol": "VVS_rel_max",
 - **ToC quality assessment** — auto-detect whether summaries are worth generating
 - **Page-matched text file** — PyMuPDF `get_text("blocks")` with column-aware reordering and page markers
 - **Vision as primary escalation** — `inspect_page` for when text isn't sufficient
-- **Agent tools** — `build_datasheet`, `get_toc`, `get_page_text`,
-  `search_text`, and `inspect_page`, with text-first navigation, resilient
-  search across wrapped/interleaved table text, and visual escalation when
-  needed
+- **Agent tools** — `build_datasheet`, `get_section_text`, `search_text`,
+  `inspect_page`, and `extract_table_markdown`, with text-first navigation,
+  breadcrumb-tagged single- or multi-pattern search across wrapped/interleaved
+  table text, position-headed section reads, and visual escalation when needed
 - **Page alignment validation** — ensure JSON page numbers match text file markers
 - **Zero extra dependencies** — only PyMuPDF needed for the happy path (no pymupdf4llm, no pdfplumber)
 - **LLM as injectable callable** — the LLM fallback and summarizer accept a `llm_callable: (system, user) -> str` parameter rather than depending on a specific LLM client library. The consuming application provides its own LLM client (e.g., LiteLLM gateway with gpt-4.1 via the Responses API). This keeps the library dependency-free for the happy path while allowing LLM features when needed.

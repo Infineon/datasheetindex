@@ -116,10 +116,18 @@ instance.
 from datasheetindex import DatasheetTools
 
 with DatasheetTools("datasheet.pdf") as tools:
-    tools.build_datasheet(output_dir="output")
-    toc = tools.get_toc()
+    artifacts = tools.build_datasheet(output_dir="output")
+    toc = artifacts.json_data["toc"]  # enriched ToC tree (with breadcrumbs)
+
+    # Search one term, or several in a single call. Each match carries the
+    # breadcrumb of the section that contains its page; list searches also tag
+    # each match with the `pattern` that produced it.
     matches = tools.search_text("supply voltage")
-    page_text = tools.get_page_text(12)
+    matches = tools.search_text(["V_DS max", "junction temperature"])
+
+    # Read a page range; the text opens with a "=== Pages X-Y of N ===" header.
+    section_text = tools.get_section_text(12, 13)
+
     image = tools.inspect_page(
         page=12,
         region={"top": 0.15, "bottom": 0.55, "left": 0.05, "right": 0.95},
@@ -133,17 +141,20 @@ The optional `region` crop uses percentages from `0.0` to `1.0`.
 You can run the local MCP server directly from the repository. It exposes these
 tools for the bound PDF source:
 
-- `build_datasheet` - build and save the `.json` / `.txt` artifacts
-- `get_toc` - return the enriched ToC JSON, including preamble and quality info
-- `get_page_text` - return extracted text for one page from the latest build
-- `search_text` - find page-aware text snippets in the latest build, even when
-  labels wrap across lines or table values interrupt the phrase
+- `build_datasheet` - build and save the `.json` / `.txt` artifacts, and return
+  the manifest: source info, total pages, ToC quality, and the full enriched ToC
+- `get_section_text` - return extracted text for a page range from the latest
+  build, opening with a `=== Pages X-Y of N ===` position header
+- `search_text` - find page-aware text snippets in the latest build (pass a
+  single pattern or a list of patterns), even when labels wrap across lines or
+  table values interrupt the phrase; each hit carries the section breadcrumb
 - `inspect_page` - render a page image when visual confirmation is needed
+- `extract_table_markdown` - re-extract a page as layout-aware Markdown tables
 
-Build once, then use `get_toc`, `get_page_text`, `search_text`, and
-`inspect_page` together. `search_text` prefers exact matches, then falls back
-to whitespace-normalized and ordered-token matching for line-wrapped table
-rows.
+Build once, then use `get_section_text`, `search_text`, `inspect_page`, and
+`extract_table_markdown` together. `search_text` prefers exact matches, then
+falls back to whitespace-normalized and ordered-token matching for line-wrapped
+table rows.
 
 ```bash
 # stdio transport (for Claude Code or another MCP client)
