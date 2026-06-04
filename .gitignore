@@ -45,3 +45,11 @@ output_*/
 *.png
 *.jpg
 *.jpeg
+
+# Generated product search data
+data/datasheets.json
+data/exact_lookup.json
+data/index.json
+data/products/
+data/bm25/
+data/vectors/
