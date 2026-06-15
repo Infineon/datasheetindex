@@ -653,11 +653,15 @@ Also update that test's docstring count if present ("register 5 agent-ready tool
 Then, inside `test_create_server_registers_tools`, after the `inspect_result` assertion, smoke-test the new handler through its registered async wrapper (the synthetic PDF in that test contains "Registry MCP test", and `build_datasheet` has already bound the document):
 
 ```python
+    import json
+
     locate_result = asyncio.run(
         server.tools["locate_text"]({"query": "Registry", "page": 1})
     )
     assert locate_result["is_error"] is False
-    assert locate_result["content"]
+    locate_payload = json.loads(locate_result["content"][0]["text"])
+    assert locate_payload["results"], "SDK locate_text returned no results"
+    assert locate_payload["results"][0]["match_method"] == "search_for"
 ```
 
 Append a new test:
@@ -947,7 +951,7 @@ git commit -m "feat: register locate_text on local MCP server; harden inspect_pa
 **Files:**
 - Modify: `docs/datasheetindex_architecture.md`
 
-- [ ] **Step 1: Fix the "Agent Tools" intro count**
+- [ ] **Step 1: Reword the "Agent Tools" intro (drop the hardcoded count)**
 
 In `docs/datasheetindex_architecture.md`, in the `## Agent Tools` section, replace:
 
@@ -955,10 +959,10 @@ In `docs/datasheetindex_architecture.md`, in the `## Agent Tools` section, repla
 The agent has one custom tool beyond the built-in file reading capabilities of the Claude Agent SDK.
 ```
 
-with:
+with a count-free phrasing (so it does not go stale again as tools are added):
 
 ```markdown
-The agent has two custom tools beyond the built-in file reading capabilities of the Claude Agent SDK: `inspect_page` (visual inspection) and `locate_text` (text-to-coordinate grounding).
+Beyond the built-in file reading capabilities of the Claude Agent SDK, the agent has custom PDF-native inspection tools: `inspect_page` (visual inspection) and `locate_text` (text-to-coordinate grounding).
 ```
 
 - [ ] **Step 2: Add a `locate_text` subsection under "Agent Tools"**
@@ -1041,7 +1045,41 @@ In the "What we add" list (in the "Building on PageIndex" section), add:
   into a precise highlight or a tightly cropped `inspect_page` call
 ```
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 7: Update the Phase 2 roadmap summary**
+
+In the "Implementation Priority" section, under `### Phase 2: Agent Tools` (which currently lists only `inspect_page`), add a bullet:
+
+```markdown
+- `locate_text` — text-to-coordinate grounding (bounding boxes for highlighting)
+```
+
+- [ ] **Step 8: Update the module structure diagram**
+
+In the `## Module Structure` tree, add these two lines under `core/` (immediately after the `textfile.py` entry), keeping the existing tree-drawing characters aligned:
+
+```
+│   ├── _textmatch.py      # Shared dash/token normalization + matcher
+│   ├── locate.py          # locate_text: text -> bounding-box coordinates
+```
+
+- [ ] **Step 9: Mention `locate_text` in the reference system-prompt block**
+
+In the "Agent System Prompt Guidance" block, replace:
+
+```
+3. MCP tools that can build and read the artifacts, search the extracted text,
+   and call `inspect_page` for visual inspection
+```
+
+with:
+
+```
+3. MCP tools that can build and read the artifacts, search the extracted text,
+   locate a string's coordinates (`locate_text`), and call `inspect_page` for
+   visual inspection
+```
+
+- [ ] **Step 10: Commit**
 
 ```bash
 git add docs/datasheetindex_architecture.md
