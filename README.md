@@ -17,8 +17,9 @@ All page numbers are **1-indexed** across the JSON, the text file markers, and
 `inspect_page(page=...)`.
 
 The library also exposes `create_datasheet_tools_server(pdf_path)`, which packages
-artifact-building, ToC/text access, text search, and `inspect_page` as the
-MCP/tool-server surface the agent can mount.
+artifact-building, ToC/text access, text search, text-to-coordinate grounding
+(`locate_text`), and `inspect_page` as the MCP/tool-server surface the agent can
+mount.
 
 ## Philosophy
 
@@ -132,6 +133,14 @@ with DatasheetTools("datasheet.pdf") as tools:
         page=12,
         region={"top": 0.15, "bottom": 0.55, "left": 0.05, "right": 0.95},
     )
+
+    # Map a located string to its bounding box(es) - returned as percentages
+    # (to crop inspect_page) and PDF points (to annotate the PDF). Matching is
+    # hybrid: verbatim search with a normalized fallback for dash/case/spacing
+    # variation. A string occurring multiple times yields multiple results.
+    hits = tools.locate_text("supply voltage", page=12)
+    if hits:
+        tight = tools.inspect_page(page=12, region=hits[0]["region"]["pct"])
 ```
 
 The optional `region` crop uses percentages from `0.0` to `1.0`.
@@ -149,10 +158,12 @@ tools for the bound PDF source:
   single pattern or a list of patterns), even when labels wrap across lines or
   table values interrupt the phrase; each hit carries the section breadcrumb
 - `inspect_page` - render a page image when visual confirmation is needed
+- `locate_text` - map a string to its bounding-box coordinates (percentages +
+  PDF points) on a page, for highlighting or to crop `inspect_page` precisely
 - `extract_table_markdown` - re-extract a page as layout-aware Markdown tables
 
-Build once, then use `get_section_text`, `search_text`, `inspect_page`, and
-`extract_table_markdown` together. `search_text` prefers exact matches, then
+Build once, then use `get_section_text`, `search_text`, `inspect_page`,
+`locate_text`, and `extract_table_markdown` together. `search_text` prefers exact matches, then
 falls back to whitespace-normalized and ordered-token matching for line-wrapped
 table rows.
 
@@ -220,6 +231,8 @@ src/datasheetindex/
     core/
         structure.py       # ToC extraction + enriched tree JSON
         textfile.py        # PDF -> page-matched text file (column-aware)
+        _textmatch.py      # Shared dash/token normalization + matcher
+        locate.py          # locate_text: text -> bounding-box coordinates
         preamble.py        # Pages 1-2 raw text extraction
         quality.py         # ToC quality assessment
         annotations.py     # Footnote and cross-reference enrichment
