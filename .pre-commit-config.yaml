@@ -11,13 +11,13 @@ repos:
 
   # uv hooks - keep uv.lock in sync with pyproject.toml
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.11.14
+    rev: 0.11.21
     hooks:
       - id: uv-lock
 
   # Ruff - linting and formatting
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.13
+    rev: v0.15.17
     hooks:
       - id: ruff
         args: [--fix]

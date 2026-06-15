@@ -11,6 +11,9 @@ All notable changes to this project will be documented in this file.
 - **`inspect_page` on the local MCP server now raises a clean "No datasheet loaded" error** (via `_require_tools`) instead of an `AttributeError` when called before `build_datasheet`.
 - **Shared text normalization extracted to `core/_textmatch.py`** (dash translation, token normalization, subsequence matcher), used by both `search_text` and `locate_text`. No behavior change to `search_text`.
 
+### Dependency upgrades
+- Refreshed the lock to the latest compatible versions (`uv lock --upgrade`, all extras synced). Notably: `openai` 2.40.0 -> 2.41.1, `pytest` 9.0.3 -> 9.1.0, `ruff` 0.15.15 -> 0.15.17, `ty` 0.0.42 -> 0.0.49, `cryptography` 48.0.0 -> 49.0.0, `typer` 0.26.5 -> 0.26.7, `starlette` 1.2.1 -> 1.3.1, `uvicorn` 0.48.0 -> 0.49.0, plus minor transitive bumps. Full suite, ruff, and ty all pass on the upgraded set.
+
 ## [0.14.0] - 2026-06-02
 
 ### Added
