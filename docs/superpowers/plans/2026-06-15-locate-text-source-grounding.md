@@ -463,9 +463,16 @@ git commit -m "feat: add locate_text fast path (search_for) with list/dedup"
 - Modify: `src/datasheetindex/core/locate.py`
 - Test: `tests/test_locate.py`
 
-- [ ] **Step 1: Write the failing fallback tests**
+- [ ] **Step 1: Write the failing fallback + real-fixture tests**
 
-Append to `tests/test_locate.py`:
+First add `from pathlib import Path` to the imports at the top of `tests/test_locate.py`, and these module-level constants below the imports (matching `tests/test_vision.py` / `tests/test_index.py`):
+
+```python
+DATA2PAGE_DIR = Path(__file__).resolve().parent.parent.parent / "data2page"
+TLE9350_PATH = DATA2PAGE_DIR / "Infineon-TLE9350BSJ-DataSheet-v01_00-EN.pdf"
+```
+
+Then append these tests:
 
 ```python
 def test_dash_mismatch_falls_back_to_tokens():
@@ -482,10 +489,11 @@ def test_dash_mismatch_falls_back_to_tokens():
 
 
 def test_multi_line_phrase_unions_boxes_via_tokens():
-    # "range -9" on one line, "stop" far below on another; the Unicode minus
-    # forces the token path, which groups by (block_no, line_no) into >1 box.
+    # A phrase wrapping across two ADJACENT lines: "range -9" then "stop" one
+    # line below. The Unicode minus forces the token path, which groups the
+    # matched words by (block_no, line_no) into one box per line.
     minus = chr(0x2212)
-    doc = _doc_with([(72, 72, f"range {minus}9"), (72, 400, "stop")])
+    doc = _doc_with([(72, 72, f"range {minus}9"), (72, 94, "stop")])
     results = locate_text(doc, "range -9 stop", page=1)
     doc.close()
 
@@ -501,6 +509,23 @@ def test_multi_line_phrase_unions_boxes_via_tokens():
         max(b["points"]["y1"] for b in loc["boxes"])
     )
     assert loc["region"] != loc["boxes"][0]
+
+
+def test_real_fixture_locates_part_number():
+    # Real-world text/word structure (spec testing-plan case 10). The part
+    # number is in the document title, so it is present on page 1.
+    if not TLE9350_PATH.exists():
+        pytest.skip("Test PDF not found")
+    doc = pymupdf.open(str(TLE9350_PATH))
+    results = locate_text(doc, "TLE9350", page=1)
+    doc.close()
+
+    assert results, "expected to locate the part number on page 1"
+    loc = results[0]
+    assert loc["page"] == 1
+    assert len(loc["boxes"]) >= 1
+    assert 0.0 <= loc["region"]["pct"]["left"] <= 1.0
+    assert 0.0 <= loc["region"]["pct"]["bottom"] <= 1.0
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -624,6 +649,16 @@ In `tests/test_registry.py`, update the assertion inside `test_create_server_reg
 ```
 
 Also update that test's docstring count if present ("register 5 agent-ready tools" -> "register 6 agent-ready tools").
+
+Then, inside `test_create_server_registers_tools`, after the `inspect_result` assertion, smoke-test the new handler through its registered async wrapper (the synthetic PDF in that test contains "Registry MCP test", and `build_datasheet` has already bound the document):
+
+```python
+    locate_result = asyncio.run(
+        server.tools["locate_text"]({"query": "Registry", "page": 1})
+    )
+    assert locate_result["is_error"] is False
+    assert locate_result["content"]
+```
 
 Append a new test:
 
@@ -912,9 +947,23 @@ git commit -m "feat: register locate_text on local MCP server; harden inspect_pa
 **Files:**
 - Modify: `docs/datasheetindex_architecture.md`
 
-- [ ] **Step 1: Add a `locate_text` subsection under "Agent Tools"**
+- [ ] **Step 1: Fix the "Agent Tools" intro count**
 
-In `docs/datasheetindex_architecture.md`, after the `inspect_page` section (before "What the Library Does NOT Do"), add:
+In `docs/datasheetindex_architecture.md`, in the `## Agent Tools` section, replace:
+
+```markdown
+The agent has one custom tool beyond the built-in file reading capabilities of the Claude Agent SDK.
+```
+
+with:
+
+```markdown
+The agent has two custom tools beyond the built-in file reading capabilities of the Claude Agent SDK: `inspect_page` (visual inspection) and `locate_text` (text-to-coordinate grounding).
+```
+
+- [ ] **Step 2: Add a `locate_text` subsection under "Agent Tools"**
+
+After the `inspect_page` section (before "What the Library Does NOT Do"), add:
 
 ```markdown
 ### `locate_text`
@@ -935,7 +984,54 @@ Grounding is string-level, not hit-level: a string appearing multiple times on a
 page returns multiple candidate results; disambiguate with a more specific query.
 ```
 
-- [ ] **Step 2: Add a bullet under "What we add"**
+- [ ] **Step 3: Qualify the "Why only one tool?" heading**
+
+That rationale is specifically about the dropped vision/table tools. Replace:
+
+```markdown
+**Why only one tool?** We evaluated and dropped three other tools during design:
+```
+
+with:
+
+```markdown
+**Why only one *vision/table* tool?** We evaluated and dropped three other tools during design:
+```
+
+- [ ] **Step 4: Update the registry wiring prose (MCP / SDK Integration section)**
+
+Replace:
+
+```markdown
+`DatasheetTools` instance and registers `build_datasheet`, `get_section_text`,
+`search_text`, `inspect_page`, and `extract_table_markdown` on a `ToolServer`.
+```
+
+with:
+
+```markdown
+`DatasheetTools` instance and registers `build_datasheet`, `get_section_text`,
+`search_text`, `inspect_page`, `locate_text`, and `extract_table_markdown` on a
+`ToolServer`.
+```
+
+- [ ] **Step 5: Update the "What we add" agent-tools summary bullet**
+
+Replace:
+
+```markdown
+- **Agent tools** — `build_datasheet`, `get_section_text`, `search_text`,
+  `inspect_page`, and `extract_table_markdown`, with text-first navigation,
+```
+
+with:
+
+```markdown
+- **Agent tools** — `build_datasheet`, `get_section_text`, `search_text`,
+  `inspect_page`, `locate_text`, and `extract_table_markdown`, with text-first navigation,
+```
+
+- [ ] **Step 6: Add a bullet under "What we add"**
 
 In the "What we add" list (in the "Building on PageIndex" section), add:
 
@@ -945,7 +1041,7 @@ In the "What we add" list (in the "Building on PageIndex" section), add:
   into a precise highlight or a tightly cropped `inspect_page` call
 ```
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add docs/datasheetindex_architecture.md
@@ -998,6 +1094,6 @@ git commit -m "chore: bump version to 0.15.0 and update changelog"
 
 ## Self-Review Checklist (completed during planning)
 
-- **Spec coverage:** locate_text core (Tasks 2-3), pct+points+dims contract (Task 2), hybrid match with verbatim fast path + normalized fallback (Tasks 2-3), occurrence grouping by `(block_no, line_no)` and union `region` (Task 3), `_textmatch` extraction with `_TOKEN_RE` and preserved gap/subset short-circuits minus the `<3` guard (Tasks 1, 3), both tool surfaces + both exact-set tests (Tasks 4-5), `inspect_page_tool` guard cleanup (Task 5), no-build behavior (Task 4), dedup key (Task 2), error handling (Task 2), architecture doc + CHANGELOG/version (Tasks 6-7). All covered.
+- **Spec coverage:** locate_text core (Tasks 2-3), pct+points+dims contract (Task 2), hybrid match with verbatim fast path + normalized fallback (Tasks 2-3), occurrence grouping by `(block_no, line_no)` and union `region` (Task 3), `_textmatch` extraction with `_TOKEN_RE` and preserved gap/subset short-circuits minus the `<3` guard (Tasks 1, 3), both tool surfaces + both exact-set assertions + both handler smoke tests — SDK in Task 4, local MCP in Task 5, `inspect_page_tool` guard cleanup (Task 5), no-build behavior (Task 4), dedup key (Task 2), error handling (Task 2), **real-fixture smoke test (`TLE9350_PATH`, Task 3, spec case 10)**, architecture-doc de-staling of all tool counts/enumerations + CHANGELOG/version (Tasks 6-7). All covered.
 - **Placeholder scan:** none — every code/step has concrete content.
 - **Type consistency:** `locate_text`, `TextLocation`, `_Box`, `region`/`boxes`/`match_method`/`page_width`/`page_height`/`pattern`, `_token_locations`, `_search_for_occurrences`, `_box_from_rect`, `_union_region`, `_group_words_by_line`, `_dedup_key`, `locate_text_core` are consistent across tasks.
