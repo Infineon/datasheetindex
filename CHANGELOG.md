@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [0.15.0] - 2026-06-15
 
 ### Added
-- **`locate_text` source grounding.** New tool that maps a query string to its bounding box(es) on a page, returning one result per occurrence with `region` (union rectangle) and `boxes` (one per line) in both normalized percentages and PDF points, plus page dimensions. Matching is hybrid: verbatim `page.search_for` with a normalized word-level token fallback (dash/case/whitespace tolerant). Stateless and works off the live PDF (no `build_datasheet` required). Exposed on both the Agent SDK and local MCP tool surfaces.
+- **`locate_text` source grounding.** New tool that maps a query string to its bounding box(es) on a page, returning a result per match with `region` (a bounding rectangle) and `boxes` (one or more per-line rectangles; `region` is their union) in both normalized percentages and PDF points, plus page dimensions. Matching is hybrid: the verbatim `page.search_for` fast path returns one result per rectangle it finds, and a normalized word-level token fallback (dash/case/whitespace tolerant) groups a wrapped match's lines into a single result. The direct `DatasheetTools` Python API needs no `build_datasheet`; the Agent SDK and local MCP tool surfaces expose it once a document is loaded via `build_datasheet`.
 
 ### Changed
 - **`inspect_page` on the local MCP server now raises a clean "No datasheet loaded" error** (via `_require_tools`) instead of an `AttributeError` when called before `build_datasheet`.

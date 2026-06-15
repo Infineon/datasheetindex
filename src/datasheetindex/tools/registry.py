@@ -487,13 +487,15 @@ def create_datasheet_tools_server():
     @tool(
         "locate_text",
         "Map a piece of text to its bounding-box coordinates on a page, for "
-        "highlighting or precise visual inspection. Returns one result per "
-        "occurrence; each has `region` (the union rectangle) and `boxes` "
-        "(one per line). Feed region['pct'] into inspect_page(region=...) to "
-        "crop to the exact spot; use region['points'] (PDF points) to annotate "
-        "the PDF. Pass `page` when you know it (e.g. from a search_text hit) to "
-        "stay cheap; omit it to scan all pages. `query` may be a single string "
-        "or a list of strings.",
+        "highlighting or precise visual inspection. Returns a result per match, "
+        "each with `region` (a bounding rectangle) and `boxes` (one or more "
+        "per-line rectangles; `region` is their union), in both normalized "
+        "percentages and PDF points. A string that appears more than once "
+        "yields multiple results. Feed region['pct'] into "
+        "inspect_page(region=...) to crop to the exact spot; use "
+        "region['points'] (PDF points) to annotate the PDF. Pass `page` when "
+        "you know it (e.g. from a search_text hit) to stay cheap; omit it to "
+        "scan all pages. `query` may be a single string or a list of strings.",
         {
             "type": "object",
             "properties": {

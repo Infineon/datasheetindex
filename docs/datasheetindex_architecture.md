@@ -312,18 +312,28 @@ Common region patterns:
 
 Maps a query string to its bounding box(es) on a page — the bridge between
 `search_text` (find text) and `inspect_page` (render a region). It returns one
-result per occurrence, each carrying `region` (the union rectangle) and `boxes`
-(one per line), expressed in **both** normalized percentages (0.0-1.0, so they
-feed straight into `inspect_page(region=...)`) and raw PDF points (for
-annotating the PDF directly), plus page dimensions.
+result per match, each carrying `region` (a bounding rectangle) and `boxes`
+(one or more per-line rectangles, with `region` their union), expressed in
+**both** normalized percentages (0.0-1.0, so they feed straight into
+`inspect_page(region=...)`) and raw PDF points (for annotating the PDF
+directly), plus page dimensions.
 
 Matching is hybrid: `page.search_for` on the verbatim query (fast path), with a
 normalized word-level fallback (`page.get_text("words")`) that tolerates the
 dash/case/whitespace variation endemic to datasheets (`-0.3` vs `−0.3`, `±2%`).
-It is stateless and works off the live PDF — no `build_datasheet` required.
+The fast path returns one result per rectangle it finds (a single-line hit is
+one single-box result); the normalized fallback groups a multi-line match's
+words by `(block_no, line_no)` into a single result whose `region` is their
+union.
+
+It is stateless: the direct `DatasheetTools(pdf).locate_text(...)` Python API
+works off the live PDF with no `build_datasheet` call. On the Agent SDK and
+local MCP tool surfaces a document must first be loaded via `build_datasheet`
+(which binds the PDF), after which `locate_text` reads it directly without
+needing the built text/JSON artifacts.
 
 Grounding is string-level, not hit-level: a string appearing multiple times on a
-page returns multiple candidate results; disambiguate with a more specific query.
+page returns multiple results; disambiguate with a more specific query.
 
 ---
 

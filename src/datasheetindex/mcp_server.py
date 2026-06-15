@@ -279,13 +279,15 @@ def create_local_mcp_server(
         name="locate_text",
         description=(
             "Map a piece of text to its bounding-box coordinates on a page, "
-            "for highlighting or precise visual inspection. Returns one result "
-            "per occurrence, each with 'region' (the union rectangle) and "
-            "'boxes' (one per line), in both percentages and PDF points. Feed "
-            "region['pct'] into inspect_page(region=...) to crop to the exact "
-            "spot; use region['points'] to annotate the PDF. Pass 'page' when "
-            "you know it (e.g. from a search_text hit) to stay cheap; omit to "
-            "scan all pages."
+            "for highlighting or precise visual inspection. Returns a result "
+            "per match, each with 'region' (a bounding rectangle) and 'boxes' "
+            "(one or more per-line rectangles; 'region' is their union), in "
+            "both percentages and PDF points. A string that appears more than "
+            "once yields multiple results. Feed region['pct'] into "
+            "inspect_page(region=...) to crop to the exact spot; use "
+            "region['points'] to annotate the PDF. Pass 'page' when you know "
+            "it (e.g. from a search_text hit) to stay cheap; omit to scan all "
+            "pages."
         ),
     )(locate_text_tool)
 
