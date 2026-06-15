@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from datasheetindex.core.locate import TextLocation
+from datasheetindex.core.locate import locate_text as locate_text_core
 from datasheetindex.core.structure import find_breadcrumb_for_page
 from datasheetindex.core.textfile import TextSearchMatch, extract_section_text
 from datasheetindex.core.textfile import search_text as search_text_content
@@ -73,6 +75,20 @@ class DatasheetTools:
         the full tier semantics.
         """
         return inspect_page(self.doc, page, region=region, dpi=dpi, detail=detail)
+
+    def locate_text(
+        self,
+        query: str | list[str],
+        *,
+        page: int | None = None,
+        max_results: int = 20,
+    ) -> list[TextLocation]:
+        """Map a string to its bounding box(es) on a page.
+
+        Works off the live PDF (`self.doc`); unlike `search_text`/`get_section_text`
+        it does NOT require `build_datasheet` to have been called.
+        """
+        return locate_text_core(self.doc, query, page=page, max_results=max_results)
 
     def extract_table_markdown(self, page: int) -> str:
         """Extract a single page as layout-aware markdown with table structure.
@@ -469,6 +485,47 @@ def create_datasheet_tools_server():
             return _err(str(exc))
 
     @tool(
+        "locate_text",
+        "Map a piece of text to its bounding-box coordinates on a page, for "
+        "highlighting or precise visual inspection. Returns one result per "
+        "occurrence; each has `region` (the union rectangle) and `boxes` "
+        "(one per line). Feed region['pct'] into inspect_page(region=...) to "
+        "crop to the exact spot; use region['points'] (PDF points) to annotate "
+        "the PDF. Pass `page` when you know it (e.g. from a search_text hit) to "
+        "stay cheap; omit it to scan all pages. `query` may be a single string "
+        "or a list of strings.",
+        {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "oneOf": [
+                        {"type": "string"},
+                        {"type": "array", "items": {"type": "string"}},
+                    ],
+                    "description": "A single pattern or a list of patterns.",
+                },
+                "page": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "1-indexed page to locate on. Omit to scan all.",
+                },
+                "max_results": {"type": "integer"},
+            },
+            "required": ["query"],
+        },
+    )
+    async def locate_text(args: dict[str, Any]) -> dict[str, Any]:
+        try:
+            results = _require().locate_text(
+                args["query"],
+                page=args.get("page"),
+                max_results=args.get("max_results", 20),
+            )
+            return _ok({"query": args["query"], "results": results})
+        except Exception as exc:
+            return _err(str(exc))
+
+    @tool(
         "extract_table_markdown",
         "Re-extract a single page as layout-aware Markdown with proper table "
         "formatting. Use when get_section_text shows a garbled or misaligned "
@@ -502,6 +559,7 @@ def create_datasheet_tools_server():
             get_section_text,
             search_text,
             inspect_page,
+            locate_text,
             extract_table_markdown,
         ],
     )

@@ -249,7 +249,7 @@ def test_create_server_raises_without_sdk():
 
 
 def test_create_server_registers_tools(monkeypatch, tmp_path):
-    """Server factory should register 5 agent-ready tools via SDK pattern."""
+    """Server factory should register 6 agent-ready tools via SDK pattern."""
     import asyncio
 
     pdf_path = tmp_path / "test.pdf"
@@ -292,6 +292,7 @@ def test_create_server_registers_tools(monkeypatch, tmp_path):
         "search_text",
         "inspect_page",
         "extract_table_markdown",
+        "locate_text",
     }
 
     build_result = asyncio.run(
@@ -317,6 +318,16 @@ def test_create_server_registers_tools(monkeypatch, tmp_path):
 
     inspect_result = asyncio.run(server.tools["inspect_page"]({"page": 1}))
     assert inspect_result["is_error"] is False
+
+    import json
+
+    locate_result = asyncio.run(
+        server.tools["locate_text"]({"query": "Registry", "page": 1})
+    )
+    assert locate_result["is_error"] is False
+    locate_payload = json.loads(locate_result["content"][0]["text"])
+    assert locate_payload["results"], "SDK locate_text returned no results"
+    assert locate_payload["results"][0]["match_method"] == "search_for"
 
     # extract_table_markdown requires pymupdf4llm; verify graceful error
     table_md_result = asyncio.run(server.tools["extract_table_markdown"]({"page": 1}))
@@ -406,3 +417,22 @@ def test_datasheet_tools_supports_url_source(monkeypatch):
     tools.close()
     assert tools._doc is None
     assert not temp_path.exists()
+
+
+def test_datasheet_tools_locate_text_without_build(tmp_path):
+    pdf_path = tmp_path / "locate.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page()
+    writer = pymupdf.TextWriter(page.rect)
+    writer.append((72, 72), "Hello world")
+    writer.write_text(page)
+    doc.save(str(pdf_path))
+    doc.close()
+
+    tools = DatasheetTools(str(pdf_path))
+    results = tools.locate_text("Hello")  # no build_datasheet first
+    tools.close()
+
+    assert len(results) == 1
+    assert results[0]["page"] == 1
+    assert results[0]["match_method"] == "search_for"
