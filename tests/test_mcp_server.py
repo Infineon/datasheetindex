@@ -87,6 +87,7 @@ def test_create_local_mcp_server_registers_inspect_page(monkeypatch):
         "inspect_page",
         "search_text",
         "extract_table_markdown",
+        "locate_text",
     }
 
     calls: list[tuple[int, dict[str, float] | None, int | None, str]] = []
@@ -106,6 +107,24 @@ def test_create_local_mcp_server_registers_inspect_page(monkeypatch):
             or [{"type": "image", "data": "Zm9v", "mime_type": "image/png"}]
         ),
         extract_table_markdown=lambda page: f"| col1 | col2 |\n| p{page} | val |",
+        locate_text=lambda query, page=None, max_results=20: [
+            {
+                "page": 1,
+                "match_method": "search_for",
+                "page_width": 612.0,
+                "page_height": 792.0,
+                "region": {
+                    "pct": {"top": 0.0, "bottom": 0.1, "left": 0.0, "right": 0.1},
+                    "points": {"x0": 0.0, "y0": 0.0, "x1": 61.2, "y1": 79.2},
+                },
+                "boxes": [
+                    {
+                        "pct": {"top": 0.0, "bottom": 0.1, "left": 0.0, "right": 0.1},
+                        "points": {"x0": 0.0, "y0": 0.0, "x1": 61.2, "y1": 79.2},
+                    }
+                ],
+            }
+        ],
     )
     # Pre-load tools in server context (simulates a prior build_datasheet call)
     server_ctx = types.SimpleNamespace(tools=fake_tools)
@@ -148,6 +167,12 @@ def test_create_local_mcp_server_registers_inspect_page(monkeypatch):
         "page": 2,
         "markdown": "| col1 | col2 |\n| p2 | val |",
     }
+    locate_result = server.registered_tools["locate_text"]["func"](
+        query="Hello", page=1, ctx=ctx
+    )
+    assert locate_result["query"] == "Hello"
+    assert locate_result["results"][0]["match_method"] == "search_for"
+
     assert isinstance(result, _FakeCallToolResult)
     assert len(result.content) == 1
     image = result.content[0]
@@ -237,3 +262,33 @@ def test_main_reports_error(monkeypatch, capsys):
 
     assert exit_code == 1
     assert "Error: boom" in captured.err
+
+
+def test_inspect_page_tool_without_datasheet_raises(monkeypatch):
+    _install_fake_mcp(monkeypatch)
+
+    from datasheetindex.mcp_server import create_local_mcp_server
+
+    server = create_local_mcp_server()
+    server_ctx = types.SimpleNamespace(tools=None)
+    ctx = types.SimpleNamespace(
+        request_context=types.SimpleNamespace(lifespan_context=server_ctx)
+    )
+    func = server.registered_tools["inspect_page"]["func"]
+    with pytest.raises(RuntimeError, match="No datasheet loaded"):
+        func(page=1, ctx=ctx)
+
+
+def test_locate_text_tool_without_datasheet_raises(monkeypatch):
+    _install_fake_mcp(monkeypatch)
+
+    from datasheetindex.mcp_server import create_local_mcp_server
+
+    server = create_local_mcp_server()
+    server_ctx = types.SimpleNamespace(tools=None)
+    ctx = types.SimpleNamespace(
+        request_context=types.SimpleNamespace(lifespan_context=server_ctx)
+    )
+    func = server.registered_tools["locate_text"]["func"]
+    with pytest.raises(RuntimeError, match="No datasheet loaded"):
+        func(query="anything", page=1, ctx=ctx)

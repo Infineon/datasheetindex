@@ -7,7 +7,7 @@ import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 from datasheetindex.tools.registry import DatasheetTools
 from datasheetindex.tools.vision import Detail
@@ -93,7 +93,9 @@ def create_local_mcp_server(
             "visual content. You can switch documents by calling "
             "build_datasheet with a new source. When a table in "
             "get_section_text looks garbled, use extract_table_markdown "
-            "for a clean Markdown table (cheaper than inspect_page)."
+            "for a clean Markdown table (cheaper than inspect_page). "
+            "Use locate_text to get the bounding-box coordinates of a string "
+            "on a page (for highlighting or to crop inspect_page precisely)."
         ),
         host=host,
         port=port,
@@ -116,11 +118,11 @@ def create_local_mcp_server(
         "low" (75 dpi, ~650 tokens) for layout overview. `dpi` is a
         power-user override that wins over `detail` when set.
         """
-        if ctx is None:
-            raise RuntimeError("MCP context was not provided")
-
-        blocks = ctx.request_context.lifespan_context.tools.inspect_page(
-            page, region=region, dpi=dpi, detail=detail
+        blocks = _require_tools(ctx).inspect_page(
+            page,
+            region=cast("dict[str, float] | None", region),
+            dpi=dpi,
+            detail=detail,
         )
         if len(blocks) != 1:
             raise RuntimeError("inspect_page returned an unexpected content shape")
@@ -202,6 +204,19 @@ def create_local_mcp_server(
             ),
         }
 
+    def locate_text_tool(
+        query: str | list[str],
+        page: int | None = None,
+        max_results: int = 20,
+        ctx: Context[ServerSession, _ServerContext] | None = None,
+    ) -> dict[str, object]:
+        """Map a string to bounding-box coordinates on a page."""
+        tools = _require_tools(ctx)
+        return {
+            "query": query,
+            "results": tools.locate_text(query, page=page, max_results=max_results),
+        }
+
     server.tool(
         name="build_datasheet",
         description=(
@@ -260,6 +275,19 @@ def create_local_mcp_server(
             "(0.0-1.0)."
         ),
     )(inspect_page_tool)
+    server.tool(
+        name="locate_text",
+        description=(
+            "Map a piece of text to its bounding-box coordinates on a page, "
+            "for highlighting or precise visual inspection. Returns one result "
+            "per occurrence, each with 'region' (the union rectangle) and "
+            "'boxes' (one per line), in both percentages and PDF points. Feed "
+            "region['pct'] into inspect_page(region=...) to crop to the exact "
+            "spot; use region['points'] to annotate the PDF. Pass 'page' when "
+            "you know it (e.g. from a search_text hit) to stay cheap; omit to "
+            "scan all pages."
+        ),
+    )(locate_text_tool)
 
     async def extract_table_markdown_tool(
         page: int,
