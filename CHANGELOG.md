@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.15.0] - 2026-06-15
+
+### Added
+- **`locate_text` source grounding.** New tool that maps a query string to its bounding box(es) on a page, returning one result per occurrence with `region` (union rectangle) and `boxes` (one per line) in both normalized percentages and PDF points, plus page dimensions. Matching is hybrid: verbatim `page.search_for` with a normalized word-level token fallback (dash/case/whitespace tolerant). Stateless and works off the live PDF (no `build_datasheet` required). Exposed on both the Agent SDK and local MCP tool surfaces.
+
+### Changed
+- **`inspect_page` on the local MCP server now raises a clean "No datasheet loaded" error** (via `_require_tools`) instead of an `AttributeError` when called before `build_datasheet`.
+- **Shared text normalization extracted to `core/_textmatch.py`** (dash translation, token normalization, subsequence matcher), used by both `search_text` and `locate_text`. No behavior change to `search_text`.
+
 ## [0.14.0] - 2026-06-02
 
 ### Added
