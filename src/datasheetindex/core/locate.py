@@ -14,6 +14,13 @@ from typing import TYPE_CHECKING, NotRequired, TypedDict
 if TYPE_CHECKING:
     import pymupdf
 
+from datasheetindex.core._textmatch import (
+    _TOKEN_RE,
+    _match_query_tokens,
+    _normalize_token,
+    _TokenSpan,
+)
+
 _Rect = tuple[float, float, float, float]
 
 
@@ -64,9 +71,68 @@ def _search_for_occurrences(page: pymupdf.Page, query: str) -> list[list[_Rect]]
     return [[(r.x0, r.y0, r.x1, r.y1)] for r in page.search_for(query)]
 
 
+def _group_words_by_line(words: list[tuple]) -> list[_Rect]:
+    """Group matched words into one rect per (block_no, line_no), in match order."""
+    groups: dict[tuple[int, int], list[float]] = {}
+    order: list[tuple[int, int]] = []
+    for word in words:
+        key = (word[5], word[6])  # (block_no, line_no); line_no is block-scoped
+        if key not in groups:
+            groups[key] = [word[0], word[1], word[2], word[3]]
+            order.append(key)
+        else:
+            box = groups[key]
+            box[0] = min(box[0], word[0])
+            box[1] = min(box[1], word[1])
+            box[2] = max(box[2], word[2])
+            box[3] = max(box[3], word[3])
+    return [(b[0], b[1], b[2], b[3]) for b in (groups[key] for key in order)]
+
+
 def _token_locations(page: pymupdf.Page, query: str) -> list[list[_Rect]]:
-    """Normalized word-level fallback. Implemented in Task 3."""
-    return []
+    """Normalized word-level fallback: dash/case/whitespace-tolerant matching."""
+    query_tokens = [
+        token
+        for token in (
+            _normalize_token(raw, case_sensitive=False)
+            for raw in _TOKEN_RE.findall(query)
+        )
+        if token
+    ]
+    if not query_tokens:
+        return []
+
+    page_spans: list[_TokenSpan] = []
+    word_refs: list[tuple] = []
+    for word in page.get_text("words"):
+        normalized = _normalize_token(word[4], case_sensitive=False)
+        if not normalized:
+            continue
+        index = len(page_spans)
+        page_spans.append(_TokenSpan(normalized, index, index + 1))
+        word_refs.append(word)
+
+    # Same short-circuits as the search ladder, minus the "< 3 tokens" guard.
+    if len(page_spans) < len(query_tokens):
+        return []
+    page_values = {span.value for span in page_spans}
+    if not set(query_tokens).issubset(page_values):
+        return []
+
+    max_gap_tokens = max(8, len(query_tokens) * 2)
+    occurrences: list[list[_Rect]] = []
+    for start in range(len(page_spans)):
+        if page_spans[start].value != query_tokens[0]:
+            continue
+        matched = _match_query_tokens(
+            page_spans, query_tokens, start, max_gap_tokens=max_gap_tokens
+        )
+        if matched is None:
+            continue
+        occurrences.append(
+            _group_words_by_line([word_refs[index] for index in matched])
+        )
+    return occurrences
 
 
 def _dedup_key(page: int, boxes: list[_Box]) -> tuple:
