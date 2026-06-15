@@ -509,7 +509,7 @@ def create_datasheet_tools_server():
                     "minimum": 1,
                     "description": "1-indexed page to locate on. Omit to scan all.",
                 },
-                "max_results": {"type": "integer"},
+                "max_results": {"type": "integer", "minimum": 1},
             },
             "required": ["query"],
         },

@@ -179,3 +179,19 @@ def test_page_none_scans_all_pages():
 
     assert len(results) == 1
     assert results[0]["page"] == 2
+
+
+def test_repeated_single_line_string_yields_one_result_per_occurrence():
+    # Two occurrences of the same string on one line -> two single-box results
+    # at distinct coordinates. Distinct occurrences must NOT be collapsed by
+    # the dedup (which only suppresses the same box found via two patterns).
+    doc = _doc_with([(72, 72, "needle"), (300, 72, "needle")])
+    results = locate_text(doc, "needle", page=1)
+    doc.close()
+
+    assert len(results) == 2
+    for loc in results:
+        assert loc["match_method"] == "search_for"
+        assert len(loc["boxes"]) == 1
+    xs = sorted(loc["region"]["points"]["x0"] for loc in results)
+    assert xs[0] < xs[1]
