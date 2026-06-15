@@ -256,7 +256,7 @@ may cause permanent damage to the device.
 
 ## Agent Tools
 
-The agent has one custom tool beyond the built-in file reading capabilities of the Claude Agent SDK.
+Beyond the built-in file reading capabilities of the Claude Agent SDK, the agent has custom PDF-native inspection tools: `inspect_page` (visual inspection) and `locate_text` (text-to-coordinate grounding).
 
 ### `inspect_page`
 
@@ -303,10 +303,27 @@ Common region patterns:
 
 **Return format** follows the Claude Agent SDK tool response convention: a list of content blocks. The image is base64-encoded PNG. The calling code in `tools/registry.py` handles this wrapping so the agent receives the image directly.
 
-**Why only one tool?** We evaluated and dropped three other tools during design:
+**Why only one *vision/table* tool?** We evaluated and dropped three other tools during design:
 - `get_table` — PyMuPDF `find_tables()` produces worse results than raw text on complex semiconductor tables. Visual inspection is more reliable.
 - `get_figure` — `get_images()` can't detect vector graphics (which is how 95% of datasheet diagrams are rendered). Visual inspection shows figures in full page context.
 - `get_page_tables_overview` — Returns row/column counts from an unreliable detector. The text file already gives richer information: table titles, column headers, "(continued)" markers, and actual values.
+
+### `locate_text`
+
+Maps a query string to its bounding box(es) on a page — the bridge between
+`search_text` (find text) and `inspect_page` (render a region). It returns one
+result per occurrence, each carrying `region` (the union rectangle) and `boxes`
+(one per line), expressed in **both** normalized percentages (0.0-1.0, so they
+feed straight into `inspect_page(region=...)`) and raw PDF points (for
+annotating the PDF directly), plus page dimensions.
+
+Matching is hybrid: `page.search_for` on the verbatim query (fast path), with a
+normalized word-level fallback (`page.get_text("words")`) that tolerates the
+dash/case/whitespace variation endemic to datasheets (`-0.3` vs `−0.3`, `±2%`).
+It is stateless and works off the live PDF — no `build_datasheet` required.
+
+Grounding is string-level, not hit-level: a string appearing multiple times on a
+page returns multiple candidate results; disambiguate with a more specific query.
 
 ---
 
@@ -510,7 +527,8 @@ class DatasheetTools:
 The `tools/registry.py` module exposes the concrete handoff point for a consuming
 agent: `create_datasheet_tools_server(pdf_path)`. It creates a bound
 `DatasheetTools` instance and registers `build_datasheet`, `get_section_text`,
-`search_text`, `inspect_page`, and `extract_table_markdown` on a `ToolServer`.
+`search_text`, `inspect_page`, `locate_text`, and `extract_table_markdown` on a
+`ToolServer`.
 `build_datasheet` returns the enriched ToC manifest; `search_text` accepts a
 single pattern or a list and tags each hit with its section breadcrumb;
 `get_section_text` returns a page range prefixed with a position header.
@@ -596,7 +614,8 @@ You have access to a datasheet with:
 1. A structured JSON map (enriched ToC) — sections, page ranges, table hints
 2. A text file of the full document with page markers (--- PAGE N ---)
 3. MCP tools that can build and read the artifacts, search the extracted text,
-   and call `inspect_page` for visual inspection
+   locate a string's coordinates (`locate_text`), and call `inspect_page` for
+   visual inspection
 
 WORKFLOW:
 
@@ -749,8 +768,11 @@ Output: {"parameter": "Supply voltage VS relative", "symbol": "VVS_rel_max",
 - **ToC quality assessment** — auto-detect whether summaries are worth generating
 - **Page-matched text file** — PyMuPDF `get_text("blocks")` with column-aware reordering and page markers
 - **Vision as primary escalation** — `inspect_page` for when text isn't sufficient
+- **`locate_text`** — text-to-coordinate source grounding (bounding boxes as
+  percentages + PDF points), so an agent or review UI can turn a located string
+  into a precise highlight or a tightly cropped `inspect_page` call
 - **Agent tools** — `build_datasheet`, `get_section_text`, `search_text`,
-  `inspect_page`, and `extract_table_markdown`, with text-first navigation,
+  `inspect_page`, `locate_text`, and `extract_table_markdown`, with text-first navigation,
   breadcrumb-tagged single- or multi-pattern search across wrapped/interleaved
   table text, position-headed section reads, and visual escalation when needed
 - **Page alignment validation** — ensure JSON page numbers match text file markers
@@ -787,6 +809,8 @@ datasheetindex/
 │   ├── textfile.py        # PDF → page-matched text file
 │   │                      #   Column-aware block extraction with page markers
 │   │                      #   Page alignment validation
+│   ├── _textmatch.py      # Shared dash/token normalization + matcher
+│   ├── locate.py          # locate_text: text -> bounding-box coordinates
 │   ├── preamble.py        # Pages 1-2 raw text for agent orientation
 │   └── quality.py         # Page-level quality scoring
 │                          #   (text density, extraction confidence)
@@ -813,6 +837,7 @@ datasheetindex/
 
 ### Phase 2: Agent Tools
 - `inspect_page` — page rendering as image for visual inspection
+- `locate_text` — text-to-coordinate grounding (bounding boxes for highlighting)
 - Tool registration for Claude Agent SDK
 
 ### Phase 3: LLM Fallbacks
