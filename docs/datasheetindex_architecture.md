@@ -534,85 +534,130 @@ class DatasheetTools:
 
 ### MCP / SDK Integration
 
-The `tools/registry.py` module exposes the concrete handoff point for a consuming
-agent: `create_datasheet_tools_server(pdf_path)`. It creates a bound
-`DatasheetTools` instance and registers `build_datasheet`, `get_section_text`,
-`search_text`, `inspect_page`, `locate_text`, and `extract_table_markdown` on a
-`ToolServer`.
+The tool surface is designed in two layers so the tool *logic* is decoupled from
+any one agent framework:
+
+1. **`tools/defs.py` — the framework-neutral source of truth.**
+   `create_datasheet_tool_defs()` returns the six tools (`build_datasheet`,
+   `get_section_text`, `search_text`, `inspect_page`, `locate_text`,
+   `extract_table_markdown`) as plain `DatasheetToolDef` records -- `name`,
+   `description`, `input_schema` (JSON Schema dict), and an async `handler`
+   returning the `{"content": [...], "is_error": bool}` envelope. It imports **no**
+   `claude-agent-sdk`. Hosts that are not on the Claude Agent SDK (pydantic-ai,
+   plain function-calling agents, custom MCP servers) wrap each `handler`
+   directly.
+2. **`tools/registry.py` — the Claude Agent SDK adapter.**
+   `create_datasheet_tools_server()` is a thin wrapper that lazily imports the SDK
+   and wraps each neutral def with the SDK `@tool` decorator. Because it derives
+   from the same defs, the SDK surface exposes byte-identical tool names,
+   descriptions, and schemas.
+
 `build_datasheet` returns the enriched ToC manifest; `search_text` accepts a
 single pattern or a list and tags each hit with its section breadcrumb;
 `get_section_text` returns a page range prefixed with a position header.
 
+Per-session state lives in the `create_datasheet_tool_defs()` closure: the
+current `DatasheetTools` is bound (and rebound) by the `build_datasheet` handler
+and read by the others, so **one factory call == one session**. The server starts
+**unbound and takes no arguments** -- the agent loads a document at runtime by
+calling `build_datasheet` with a `pdf_source` (local path or URL) before using
+any other tool. A failed switch to a bad source leaves the previously bound
+document intact (the new source is built into a fresh instance and only swapped
+in on success).
+
 ```python
-from claude_agent_sdk import Tool, ToolServer
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from typing import Any
 
-def create_datasheet_tools_server(pdf_path: str):
-    tools = DatasheetTools(pdf_path)
 
-    server = ToolServer()
-    server.register(
-        Tool(
+@dataclass(frozen=True)
+class DatasheetToolDef:
+    name: str
+    description: str
+    input_schema: dict[str, Any]                                    # JSON Schema
+    handler: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]  # -> envelope
+
+
+def create_datasheet_tool_defs() -> list[DatasheetToolDef]:
+    """Framework-neutral: the six tools as plain defs, no claude-agent-sdk import."""
+    tools_instance: DatasheetTools | None = None
+
+    async def build_datasheet(args: dict[str, Any]) -> dict[str, Any]:
+        nonlocal tools_instance
+        ...  # binds/rebinds tools_instance for the current session
+
+    async def inspect_page(args: dict[str, Any]) -> dict[str, Any]:
+        ...  # the other handlers _require() the bound tools_instance
+
+    return [
+        DatasheetToolDef(
             name="inspect_page",
             description=(
-                "Render a PDF page as a PNG image for visual inspection. "
-                "Use when text extraction is insufficient (tables, figures, "
-                "formulas). Returns base64-encoded image."
+                "Render a PDF page as a PNG image for visual inspection. Use when "
+                "text extraction is insufficient (tables, figures, formulas)."
             ),
-            parameters={
-                "page": {
-                    "type": "integer",
-                    "description": "1-indexed page number to inspect",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "page": {"type": "integer", "minimum": 1},
+                    "region": {"type": "object", "description": "Crop 0.0-1.0"},
+                    "detail": {"type": "string", "enum": ["low", "medium", "high"]},
+                    "dpi": {"type": "integer"},
                 },
-                "region": {
-                    "type": "object",
-                    "description": (
-                        "Optional crop region with top/bottom/left/right "
-                        "as percentages (0.0-1.0)"
-                    ),
-                    "properties": {
-                        "top": {"type": "number"},
-                        "bottom": {"type": "number"},
-                        "left": {"type": "number"},
-                        "right": {"type": "number"},
-                    },
-                },
-                "detail": {
-                    "type": "string",
-                    "enum": ["low", "medium", "high"],
-                    "description": (
-                        "Vision-token-cost tier. low=75 dpi, "
-                        "medium=100 dpi (default), high=150 dpi."
-                    ),
-                },
-                "dpi": {
-                    "type": "integer",
-                    "description": "Explicit override; wins over `detail`.",
-                },
+                "required": ["page"],
             },
-            handler=lambda page, region=None, detail="medium", dpi=None: (
-                tools.inspect_page(page, region=region, detail=detail, dpi=dpi)
-            ),
-        )
+            handler=inspect_page,
+        ),
+        ...  # build_datasheet, get_section_text, search_text, locate_text, ...
+    ]
+
+
+def create_datasheet_tools_server():
+    """Thin Claude Agent SDK adapter over create_datasheet_tool_defs().
+
+    Requires claude-agent-sdk. Takes no arguments and starts unbound.
+    """
+    from claude_agent_sdk import create_sdk_mcp_server, tool
+
+    return create_sdk_mcp_server(
+        name="datasheetindex",
+        version="1.0.0",
+        tools=[
+            tool(d.name, d.description, d.input_schema)(d.handler)
+            for d in create_datasheet_tool_defs()
+        ],
     )
-    return server
 ```
 
-This server object is the thing the consuming agent mounts. `claude-agent-sdk`
-is intentionally optional so the core preprocessing path stays lightweight.
+The server object is the thing a Claude Agent SDK host mounts. `claude-agent-sdk`
+is intentionally optional -- it is needed only for `create_datasheet_tools_server`,
+not for the tool logic -- so the core preprocessing path stays lightweight and
+non-SDK hosts pull in nothing extra.
 
 The consuming agent sets this up alongside the pre-processed artifacts:
 
 ```python
-from datasheetindex import DatasheetIndex, create_datasheet_tools_server
+from datasheetindex import create_datasheet_tools_server
 
-artifacts = DatasheetIndex("datasheet.pdf").build(output_dir="output")
-datasheet_tools_server = create_datasheet_tools_server("datasheet.pdf")
+# No arguments; starts unbound. The agent calls the build_datasheet tool with a
+# pdf_source before using any other tool.
+datasheet_tools_server = create_datasheet_tools_server()
 
 # Pseudocode: the exact agent wiring depends on the host runtime.
 agent = SomeAgentRuntime(
     mcp_servers={"datasheet-tools": datasheet_tools_server},
-    system_prompt=build_extraction_prompt(artifacts),
+    system_prompt=build_extraction_prompt(...),
 )
+```
+
+A non-SDK host instead wraps the neutral defs directly:
+
+```python
+from datasheetindex import create_datasheet_tool_defs
+
+for d in create_datasheet_tool_defs():
+    register_with_your_host(d.name, d.description, d.input_schema, d.handler)
 ```
 
 ### Agent System Prompt Guidance
