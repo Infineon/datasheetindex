@@ -181,8 +181,8 @@ class LocalMcpServer:
         )
         uvicorn.run(app, host=self.host, port=self.port)
 
-    def _serve_sse(self) -> None:
-        import uvicorn
+    def _build_sse_app(self) -> Any:
+        """Build the Starlette app for the SSE transport (extracted for testing)."""
         from mcp.server.sse import SseServerTransport
         from starlette.applications import Starlette
         from starlette.responses import Response
@@ -199,13 +199,17 @@ class LocalMcpServer:
                 )
             return Response()
 
-        app = Starlette(
+        return Starlette(
             routes=[
                 Route("/sse", endpoint=handle_sse),
                 Mount("/messages/", app=sse.handle_post_message),
             ]
         )
-        uvicorn.run(app, host=self.host, port=self.port)
+
+    def _serve_sse(self) -> None:
+        import uvicorn
+
+        uvicorn.run(self._build_sse_app(), host=self.host, port=self.port)
 
 
 def create_local_mcp_server(
