@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any
 
@@ -39,12 +39,14 @@ class DatasheetToolDef:
             itself is mutable and shared by reference -- treat it as read-only;
             deep-copy before mutating if your host needs to adapt it.
         handler: ``async (args: dict) -> {"content": [...], "is_error": bool}``.
+            It is an ``async def``, so ``handler(args)`` returns a coroutine you
+            can ``await`` or pass straight to ``asyncio.run``.
     """
 
     name: str
     description: str
     input_schema: dict[str, Any]
-    handler: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
+    handler: Callable[[dict[str, Any]], Coroutine[Any, Any, dict[str, Any]]]
 
 
 def create_datasheet_tool_defs() -> list[DatasheetToolDef]:
@@ -61,6 +63,11 @@ def create_datasheet_tool_defs() -> list[DatasheetToolDef]:
     this factory's closure: one call == one session. The tools start unbound;
     call the ``build_datasheet`` handler with a ``pdf_source`` (local path or
     URL) to load a document.
+
+    Because that state is per-call, **call this factory once per session and do
+    not share the returned defs across sessions.** A host that registers one set
+    of defs globally and routes several independent conversations through them
+    would have every conversation share (and clobber) a single bound document.
 
     The handlers are not safe under *concurrent* invocation within one session:
     ``build_datasheet`` mutates the shared bound document, so overlapping calls
@@ -85,6 +92,15 @@ def create_datasheet_tool_defs() -> list[DatasheetToolDef]:
                 "No datasheet loaded. Call build_datasheet with a pdf_source first."
             )
         return tools_instance
+
+    def _safe_close(instance: DatasheetTools) -> None:
+        # Closing a document is best-effort cleanup: its failure must never undo a
+        # successful switch (orphaning the freshly built document) nor mask the
+        # error that triggered the cleanup.
+        try:
+            instance.close()
+        except Exception:
+            pass
 
     async def build_datasheet(args: dict[str, Any]) -> dict[str, Any]:
         nonlocal tools_instance
@@ -111,13 +127,18 @@ def create_datasheet_tool_defs() -> list[DatasheetToolDef]:
                     force_rebuild=args.get("force_rebuild", False),
                 )
             except Exception:
+                # Discard the fresh instance; best-effort close so cleanup failure
+                # cannot replace the real build error being raised.
                 if not same_source:
-                    target.close()
+                    _safe_close(target)
                 raise
 
-            if not same_source and tools_instance is not None:
-                tools_instance.close()
+            # Commit the switch: rebind BEFORE closing the predecessor so a failure
+            # to close it cannot orphan the freshly built document.
+            previous = None if same_source else tools_instance
             tools_instance = target
+            if previous is not None:
+                _safe_close(previous)
             return _ok(tools_instance.get_artifact_manifest())
         except Exception as exc:
             return _err(str(exc))
