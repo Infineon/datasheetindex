@@ -24,7 +24,7 @@ from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any
 
-from datasheetindex.tools.registry import DatasheetTools
+from datasheetindex.tools.bound import DatasheetTools
 
 
 @dataclass(frozen=True)

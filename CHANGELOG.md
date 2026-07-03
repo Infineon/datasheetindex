@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.16.1] - 2026-07-03
+
+### Changed
+- **Internal: `DatasheetTools` moved to a neutral `tools/bound.py` module.** The document-bound tool class now lives in its own leaf module that imports no agent-framework code, so the tool modules form a one-directional import graph (`registry -> defs -> bound`). Previously the framework-neutral `tools/defs.py` imported `DatasheetTools` from the SDK adapter `tools/registry.py`, which in turn imported the defs lazily inside a function purely to avoid the resulting import cycle; that workaround is gone. **No public API change** -- `DatasheetTools` is still importable from `datasheetindex`, `datasheetindex.tools`, and `datasheetindex.tools.registry` (verified by test). Closes #6.
+
 ## [0.16.0] - 2026-07-03
 
 ### Added
