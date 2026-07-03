@@ -224,6 +224,10 @@ uv run --extra mcp datasheetindex-mcp-server \
 With `streamable-http`, the default MCP endpoint is
 `http://127.0.0.1:8000/mcp`.
 
+Every tool returns its result as a single JSON string in a `TextContent` block
+(except `inspect_page`, which returns an image); read it with
+`json.loads(result.content[0].text)`. This matches the SDK tool surface exactly.
+
 This local server is for direct MCP testing. If you need an in-process SDK
 server object inside another Python runtime, use
 `create_datasheet_tools_server()` instead; it exposes the same tool surface, with
