@@ -11,6 +11,9 @@ All notable changes to this project will be documented in this file.
 - **`create_datasheet_tools_server()` is now a thin adapter over `create_datasheet_tool_defs()`.** It wraps each neutral def with the SDK `@tool` decorator and hands them to `create_sdk_mcp_server`, deleting ~260 lines of duplicated handler/metadata code. Tool names, descriptions, and JSON schemas are **identical** to before (locked by a parity test), so existing SDK consumers see zero behavior change; `claude-agent-sdk` becomes a wrapper-only dependency. Closes #3.
 - **Tool handlers are now testable without the SDK.** Because the logic no longer requires `claude-agent-sdk` (which is not a declared dependency), `tests/test_defs.py` drives every tool handler end-to-end in CI -- including the "no datasheet loaded" guard, rebind-on-new-source, and per-factory-call session isolation.
 
+### Fixed
+- **A failed document switch no longer destroys the working session.** `build_datasheet` now builds a new `pdf_source` into a fresh `DatasheetTools` instance and only closes the previously bound document and rebinds *after* the build succeeds. Previously it closed the old document before validating the new source, so switching to a bad/unavailable path stranded every subsequent `get_section_text`/`search_text`/`locate_text` call with "No datasheet loaded" until a full re-build. (This latent bug also existed in the pre-refactor SDK-only handler.)
+
 ### Security
 - Fixes GHSA (medium) in `pydantic-settings` (< 2.14.2): `NestedSecretsSettingsSource` followed symlinks outside `secrets_dir`, enabling local file reads and bypassing `secrets_dir_max_size`. Pulled in transitively via `mcp`; resolved by the dependency refresh below.
 

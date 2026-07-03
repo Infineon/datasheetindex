@@ -144,6 +144,34 @@ def test_build_datasheet_rebinds_on_new_source(tmp_path):
     assert json.loads(bravo["content"][0]["text"])["results"]
 
 
+def test_failed_switch_preserves_working_document(tmp_path):
+    """A failed switch to a bad source must leave the working document intact."""
+    pdf_a = tmp_path / "a.pdf"
+    _make_pdf(pdf_a, text="Alpha marker one")
+    defs = _defs_by_name()
+
+    ok = _run(
+        defs["build_datasheet"].handler,
+        {"pdf_source": str(pdf_a), "output_dir": str(tmp_path / "out_a")},
+    )
+    assert ok["is_error"] is False
+
+    # Switch to a source that cannot be opened -> the build must fail.
+    bad = _run(
+        defs["build_datasheet"].handler,
+        {
+            "pdf_source": str(tmp_path / "does_not_exist.pdf"),
+            "output_dir": str(tmp_path / "out_b"),
+        },
+    )
+    assert bad["is_error"] is True
+
+    # ...but document A must still be bound and queryable, not closed.
+    section = _run(defs["get_section_text"].handler, {"start_page": 1, "end_page": 1})
+    assert section["is_error"] is False
+    assert "Alpha marker" in json.loads(section["content"][0]["text"])["text"]
+
+
 def test_build_datasheet_requires_pdf_source():
     defs = _defs_by_name()
     result = _run(defs["build_datasheet"].handler, {})

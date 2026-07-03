@@ -83,19 +83,32 @@ def create_datasheet_tool_defs() -> list[DatasheetToolDef]:
             pdf_source = args.get("pdf_source", "")
             if not pdf_source:
                 return _err("pdf_source is required")
-            # Re-bind if source changed
-            if tools_instance is None or tools_instance.pdf_path != pdf_source:
-                if tools_instance is not None:
-                    tools_instance.close()
-                tools_instance = DatasheetTools(pdf_source)
-            await asyncio.to_thread(
-                tools_instance.build_datasheet,
-                output_dir=args.get("output_dir"),
-                output_stem=args.get("output_stem"),
-                include_summaries=args.get("include_summaries", False),
-                model=args.get("model"),
-                force_rebuild=args.get("force_rebuild", False),
+
+            same_source = (
+                tools_instance is not None and tools_instance.pdf_path == pdf_source
             )
+            # For a switch, build into a FRESH instance and only commit (close the
+            # old document, rebind) once the build succeeds -- a failed switch to a
+            # bad/unavailable source must leave the working document intact rather
+            # than close it and strand every later query.
+            target = tools_instance if same_source else DatasheetTools(pdf_source)
+            try:
+                await asyncio.to_thread(
+                    target.build_datasheet,
+                    output_dir=args.get("output_dir"),
+                    output_stem=args.get("output_stem"),
+                    include_summaries=args.get("include_summaries", False),
+                    model=args.get("model"),
+                    force_rebuild=args.get("force_rebuild", False),
+                )
+            except Exception:
+                if not same_source:
+                    target.close()
+                raise
+
+            if not same_source and tools_instance is not None:
+                tools_instance.close()
+            tools_instance = target
             return _ok(tools_instance.get_artifact_manifest())
         except Exception as exc:
             return _err(str(exc))
