@@ -248,6 +248,44 @@ def test_create_server_raises_without_sdk():
         create_datasheet_tools_server()
 
 
+def test_sdk_server_wraps_neutral_defs_verbatim(monkeypatch):
+    """The SDK server must expose exactly the neutral defs' names/descriptions/schemas.
+
+    This locks the two surfaces together: the SDK adapter is a thin wrapper over
+    create_datasheet_tool_defs(), so a non-SDK host and an SDK host see identical
+    tool metadata.
+    """
+    from datasheetindex.tools.defs import create_datasheet_tool_defs
+
+    captured: list[tuple] = []
+
+    def fake_tool(name, description, params):
+        def decorator(func):
+            captured.append((name, description, params))
+            func._tool_name = name
+            return func
+
+        return decorator
+
+    def fake_create_sdk_mcp_server(name, version, tools):
+        return types.SimpleNamespace(name=name, version=version, tools=tools)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "claude_agent_sdk",
+        types.SimpleNamespace(
+            tool=fake_tool, create_sdk_mcp_server=fake_create_sdk_mcp_server
+        ),
+    )
+
+    create_datasheet_tools_server()
+
+    expected = [
+        (d.name, d.description, d.input_schema) for d in create_datasheet_tool_defs()
+    ]
+    assert captured == expected
+
+
 def test_create_server_registers_tools(monkeypatch, tmp_path):
     """Server factory should register 6 agent-ready tools via SDK pattern."""
     import asyncio

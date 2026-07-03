@@ -69,7 +69,10 @@ uv pip install claude-agent-sdk
 For LLM-backed ToC fallback and summaries, configure `LITELLM_BASE_URL` and
 `LITELLM_MASTER_KEY` (see `.env.example`).
 
-`claude-agent-sdk` is only required if you want the MCP/tool-server handoff.
+`claude-agent-sdk` is only required for the SDK-flavored handoff
+(`create_datasheet_tools_server`). The tool logic itself is framework-neutral --
+non-SDK hosts get it via `create_datasheet_tool_defs()` with no SDK import (see
+["Realize the tools without the Claude Agent SDK"](#realize-the-tools-without-the-claude-agent-sdk)).
 The `mcp` extra is only required if you want to run a local stdio/HTTP MCP
 server from this repository.
 
@@ -108,6 +111,35 @@ agent = SomeAgentRuntime(
     system_prompt=build_prompt_from(artifacts),
 )
 ```
+
+## Realize the tools without the Claude Agent SDK
+
+Hosts that are not on the Claude Agent SDK (pydantic-ai, plain function-calling
+agents, custom MCP servers) can get the same tools as framework-neutral
+definitions -- **no `claude-agent-sdk` import required** -- via
+`create_datasheet_tool_defs()`:
+
+```python
+from datasheetindex import create_datasheet_tool_defs
+
+# One call == one session. build_datasheet binds the document; the other tools
+# read it. Each def is a frozen dataclass: name, description, input_schema
+# (JSON Schema), and an async handler.
+tool_defs = create_datasheet_tool_defs()
+
+for d in tool_defs:
+    register_with_your_host(
+        name=d.name,
+        description=d.description,
+        input_schema=d.input_schema,
+        # async (args: dict) -> {"content": [...], "is_error": bool}
+        handler=d.handler,
+    )
+```
+
+`create_datasheet_tools_server()` is a thin adapter over this factory -- it wraps
+each def with the SDK `@tool` decorator -- so the two surfaces expose identical
+tool names, descriptions, and schemas.
 
 If you want direct Python access instead of an MCP server, use `DatasheetTools`
 to build artifacts, search text, and call `inspect_page()` on the bound

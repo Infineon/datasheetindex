@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.16.0] - 2026-07-03
+
+### Added
+- **Framework-neutral tool-definitions factory.** New `create_datasheet_tool_defs()` (and the `DatasheetToolDef` frozen dataclass) realize the six datasheet tools -- `build_datasheet`, `get_section_text`, `search_text`, `inspect_page`, `locate_text`, `extract_table_markdown` -- as plain definitions (`name`, `description`, `input_schema`, async `handler`) **without importing `claude-agent-sdk`**. Hosts that are not on the Claude Agent SDK (pydantic-ai, plain function-calling agents, custom MCP servers) can wrap each `handler` directly; the `{"content": [...], "is_error": bool}` envelope already matches what most hosts expect. Per-session state (the `DatasheetTools` bound by `build_datasheet` and read by the other tools) lives in the factory's closure -- one call == one session -- exactly as before. Exported from both `datasheetindex` and `datasheetindex.tools`.
+
+### Changed
+- **`create_datasheet_tools_server()` is now a thin adapter over `create_datasheet_tool_defs()`.** It wraps each neutral def with the SDK `@tool` decorator and hands them to `create_sdk_mcp_server`, deleting ~260 lines of duplicated handler/metadata code. Tool names, descriptions, and JSON schemas are **identical** to before (locked by a parity test), so existing SDK consumers see zero behavior change; `claude-agent-sdk` becomes a wrapper-only dependency. Closes #3.
+- **Tool handlers are now testable without the SDK.** Because the logic no longer requires `claude-agent-sdk` (which is not a declared dependency), `tests/test_defs.py` drives every tool handler end-to-end in CI -- including the "no datasheet loaded" guard, rebind-on-new-source, and per-factory-call session isolation.
+
+### Security
+- Fixes GHSA (medium) in `pydantic-settings` (< 2.14.2): `NestedSecretsSettingsSource` followed symlinks outside `secrets_dir`, enabling local file reads and bypassing `secrets_dir_max_size`. Pulled in transitively via `mcp`; resolved by the dependency refresh below.
+
+### Dependency upgrades
+- Refreshed the lock to the latest compatible versions (`uv lock --upgrade`, all extras synced). Notably: `pydantic-settings` 2.14.1 -> 2.14.2 (security fix above), `mcp` 1.27.2 -> 1.28.1, `openai` 2.41.1 -> 2.44.0, `pymupdf` 1.27.2.3 -> 1.28.0 (and `pymupdf4llm`/`pymupdf-layout` to 1.28.0), `numpy` 2.4.6 -> 2.5.0, `onnxruntime` 1.26.0 -> 1.27.0, `ruff` 0.15.17 -> 0.15.20, `ty` 0.0.49 -> 0.0.56, `pytest` 9.1.0 -> 9.1.1, plus minor transitive bumps. Full suite, ruff, and ty all pass on the upgraded set.
+
 ## [0.15.0] - 2026-06-15
 
 ### Added
