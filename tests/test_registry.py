@@ -497,13 +497,49 @@ def test_datasheet_tools_reexported_for_backward_compat():
         "datasheetindex.tools.registry",
     ],
 )
-def test_cold_import_has_no_cycle(module):
-    """Each module imports cleanly from a fresh interpreter, in any order (no cycle)."""
+def test_module_cold_imports_cleanly(module):
+    """Each module imports cleanly as the entry point of a fresh interpreter.
+
+    Catches a cycle that raises during import; the ``timeout`` turns a cycle
+    that *deadlocks* (rather than raising) into a clean failure instead of a
+    hung subprocess.
+    """
     import subprocess
 
     result = subprocess.run(
         [sys.executable, "-c", f"import {module}"],
         capture_output=True,
         text=True,
+        timeout=60,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_neutral_tool_modules_do_not_import_registry():
+    """Lock the layering: the neutral tool modules must not depend on the SDK adapter.
+
+    A cold-import test only catches a reintroduced ``bound``/``defs`` -> ``registry``
+    dependency if it happens to *raise*; a benign one (late import, function-local,
+    or under ``TYPE_CHECKING``) would import cleanly and silently invert the layers
+    again. Parsing the source for an actual import statement locks the invariant
+    directly, regardless of load order or package-init side effects.
+    """
+    import ast
+    from pathlib import Path
+
+    import datasheetindex.tools.bound as bound_mod
+    import datasheetindex.tools.defs as defs_mod
+
+    for module in (bound_mod, defs_mod):
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        imported: set[str] = set()
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module)
+            elif isinstance(node, ast.Import):
+                imported.update(alias.name for alias in node.names)
+        offending = {name for name in imported if "tools.registry" in name}
+        assert not offending, (
+            f"{module.__name__} must not import the SDK adapter registry "
+            f"(found: {sorted(offending)}) -- it would reintroduce the layer inversion"
+        )

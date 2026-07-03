@@ -274,7 +274,9 @@ src/datasheetindex/
         boilerplate.py     # Title-pattern boilerplate classification
     tools/
         vision.py          # inspect_page (page -> image)
-        registry.py        # MCP/tool-server factory for agent runtimes
+        bound.py           # DatasheetTools (document-bound tool logic)
+        defs.py            # create_datasheet_tool_defs (framework-neutral defs)
+        registry.py        # Claude Agent SDK adapter (re-exports DatasheetTools)
     mcp_server.py          # Local stdio/HTTP MCP server entry point
     llm/
         client.py          # LLM client factory

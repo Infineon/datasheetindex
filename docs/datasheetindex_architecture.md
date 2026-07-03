@@ -877,7 +877,9 @@ datasheetindex/
 │                          #   (text density, extraction confidence)
 ├── tools/
 │   ├── vision.py          # inspect_page (page → image for visual inspection)
-│   └── registry.py        # Tool registration for Agent SDK / MCP
+│   ├── bound.py           # DatasheetTools (document-bound tool logic; neutral leaf)
+│   ├── defs.py            # create_datasheet_tool_defs (framework-neutral tool defs)
+│   └── registry.py        # Claude Agent SDK adapter (re-exports DatasheetTools)
 ├── llm/
 │   ├── toc_fallback.py    # PageIndex-style LLM ToC generation
 │   └── summarizer.py      # Optional section summaries
