@@ -55,11 +55,16 @@ class DatasheetToolSession:
 
     Attributes:
         defs: The framework-neutral :class:`DatasheetToolDef` list for this
-            session (see :func:`create_datasheet_tool_defs`).
+            session (see :func:`create_datasheet_tool_defs`). The dataclass is
+            frozen (the attribute cannot be rebound), but the list itself is
+            mutable -- treat it as read-only; mutating it (append/reorder) can
+            desync a host that snapshots it against one that re-reads it live.
         close: Release the session's bound document. Idempotent and safe to call
             when nothing has been built yet. Long-running hosts should call this
             when the session ends so a document loaded from a URL has its
             temporary file cleaned up rather than lingering until process exit.
+            Not safe to call concurrently with an in-flight ``build_datasheet``
+            (see the concurrency note on :func:`create_datasheet_tool_session`).
     """
 
     defs: list[DatasheetToolDef]
@@ -98,11 +103,12 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
     of defs globally and routes several independent conversations through them
     would have every conversation share (and clobber) a single bound document.
 
-    The handlers are not safe under *concurrent* invocation within one session:
-    ``build_datasheet`` mutates the shared bound document, so overlapping calls
-    on the same set of defs can race. This matches agent tool-call semantics
-    (tool calls are issued serially); a host that fans out concurrent calls
-    against a single session should serialize ``build_datasheet`` itself.
+    The handlers -- and ``close`` -- are not safe under *concurrent* invocation
+    within one session: ``build_datasheet`` mutates the shared bound document, so
+    overlapping calls on the same set of defs (or a ``close`` racing an in-flight
+    ``build_datasheet``) can race. This matches agent tool-call semantics (tool
+    calls are issued serially); a host that fans out concurrent calls against a
+    single session should serialize ``build_datasheet`` (and ``close``) itself.
     """
     tools_instance: DatasheetTools | None = None
 
@@ -235,9 +241,8 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                 _require().extract_table_markdown, args["page"]
             )
             return _ok({"page": args["page"], "markdown": md})
-        except ImportError as exc:
-            return _err(str(exc))
         except Exception as exc:
+            # Includes the ImportError when the optional pymupdf4llm is missing.
             return _err(str(exc))
 
     def _close() -> None:

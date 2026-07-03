@@ -103,7 +103,9 @@ def _build_mcp_server(
         envelope = await definition.handler(arguments or {})
         if envelope.get("is_error"):
             content = envelope.get("content") or []
-            message = content[0]["text"] if content else f"{name} failed"
+            # Error envelopes are text-only today; fall back defensively if a
+            # future handler surfaces a non-text first block.
+            message = (content[0].get("text") if content else None) or f"{name} failed"
             # Surface a tool-level failure as an MCP tool error (isError=True).
             raise RuntimeError(message)
         return _envelope_to_content(envelope, types_module)
@@ -167,16 +169,14 @@ class LocalMcpServer:
 
         manager = StreamableHTTPSessionManager(app=self.mcp_server)
 
-        async def handle(scope: Any, receive: Any, send: Any) -> None:
-            await manager.handle_request(scope, receive, send)
-
         @contextlib.asynccontextmanager
         async def lifespan(_app: Any):
             async with manager.run():
                 yield
 
+        # manager.handle_request is itself a valid ASGI callable.
         app = Starlette(
-            routes=[Mount(self.streamable_http_path, app=handle)],
+            routes=[Mount(self.streamable_http_path, app=manager.handle_request)],
             lifespan=lifespan,
         )
         uvicorn.run(app, host=self.host, port=self.port)

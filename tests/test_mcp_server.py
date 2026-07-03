@@ -89,6 +89,9 @@ def test_call_tool_end_to_end(tmp_path):
     )
     assert build.isError is False
     assert build.content[0].type == "text"
+    manifest = json.loads(build.content[0].text)
+    assert manifest["total_pages"] == 1
+    assert "toc" in manifest
 
     section = _call(server, types, "get_section_text", {"start_page": 1, "end_page": 1})
     assert section.isError is False
@@ -111,6 +114,13 @@ def test_call_tool_end_to_end(tmp_path):
     assert image.isError is False
     assert image.content[0].type == "image"
     assert image.content[0].mimeType == "image/png"
+
+    # extract_table_markdown goes through the adapter too. It needs the optional
+    # pymupdf4llm; with it, isError is False and we get markdown text; without it,
+    # the handler returns a clean tool error. Either way the adapter path runs.
+    table = _call(server, types, "extract_table_markdown", {"page": 1})
+    assert isinstance(table.isError, bool)
+    assert table.content[0].type == "text"
 
 
 def test_call_tool_before_build_is_tool_error():
@@ -226,3 +236,141 @@ def test_main_reports_error(monkeypatch, capsys):
 
     assert exit_code == 1
     assert "Error: boom" in captured.err
+
+
+def test_envelope_to_content_translation():
+    """Pure envelope -> MCP content translation; needs no mcp extra."""
+    from datasheetindex.mcp_server import _envelope_to_content
+
+    class _Block:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    fake_types = types.SimpleNamespace(TextContent=_Block, ImageContent=_Block)
+
+    text_out = _envelope_to_content(
+        {"content": [{"type": "text", "text": "hi"}], "is_error": False}, fake_types
+    )
+    assert len(text_out) == 1
+    assert text_out[0].type == "text" and text_out[0].text == "hi"
+
+    image_out = _envelope_to_content(
+        {
+            "content": [{"type": "image", "data": "Zm9v", "mime_type": "image/png"}],
+            "is_error": False,
+        },
+        fake_types,
+    )
+    assert len(image_out) == 1
+    assert image_out[0].type == "image"
+    assert image_out[0].data == "Zm9v"
+    assert image_out[0].mimeType == "image/png"
+
+
+# --- Integration: real MCP client <-> server over a live transport ------------
+# Marked `integration` (excluded from the fast pre-commit subset) because they
+# spawn the server as a subprocess. They back the "verified end-to-end with a
+# real MCP client" claim and exercise the actual _serve_* transport wiring.
+
+_SERVER_ARGS = ["-c", "from datasheetindex.mcp_server import main_cli; main_cli()"]
+_EXPECTED = {
+    "build_datasheet",
+    "get_section_text",
+    "search_text",
+    "inspect_page",
+    "locate_text",
+    "extract_table_markdown",
+}
+
+
+@pytest.mark.integration
+def test_stdio_roundtrip_with_real_client(tmp_path):
+    pytest.importorskip("mcp")
+    import sys
+
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+    from mcp.types import TextContent
+
+    pdf = tmp_path / "t.pdf"
+    _make_pdf(pdf)
+
+    async def go():
+        params = StdioServerParameters(command=sys.executable, args=_SERVER_ARGS)
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                tools = await session.list_tools()
+                assert {t.name for t in tools.tools} == _EXPECTED
+                build = await session.call_tool(
+                    "build_datasheet",
+                    {"pdf_source": str(pdf), "output_dir": str(tmp_path / "out")},
+                )
+                assert build.isError is False
+                search = await session.call_tool("search_text", {"query": "5.5v"})
+                block = search.content[0]
+                assert isinstance(block, TextContent)
+                assert json.loads(block.text)["results"][0]["page"] == 1
+
+    asyncio.run(asyncio.wait_for(go(), timeout=60))
+
+
+@pytest.mark.integration
+def test_streamable_http_roundtrip_with_real_client(tmp_path):
+    pytest.importorskip("mcp")
+    import signal
+    import subprocess
+    import sys
+
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamable_http_client
+
+    pdf = tmp_path / "t.pdf"
+    _make_pdf(pdf)
+    port = 8973
+
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            *_SERVER_ARGS,
+            "--transport",
+            "streamable-http",
+            "--port",
+            str(port),
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    async def go():
+        last: Exception | None = None
+        for _ in range(40):
+            await asyncio.sleep(0.5)
+            try:
+                async with streamable_http_client(f"http://127.0.0.1:{port}/mcp") as (
+                    read,
+                    write,
+                    _,
+                ):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        tools = await session.list_tools()
+                        assert {t.name for t in tools.tools} == _EXPECTED
+                        build = await session.call_tool(
+                            "build_datasheet",
+                            {
+                                "pdf_source": str(pdf),
+                                "output_dir": str(tmp_path / "out"),
+                            },
+                        )
+                        assert build.isError is False
+                        return
+            except Exception as exc:  # server not up yet / transient
+                last = exc
+        raise AssertionError(f"could not reach streamable-http server: {last!r}")
+
+    try:
+        asyncio.run(asyncio.wait_for(go(), timeout=60))
+    finally:
+        proc.send_signal(signal.SIGINT)
+        proc.wait(timeout=15)

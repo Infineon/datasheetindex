@@ -329,10 +329,13 @@ def test_session_close_closes_bound_document(tmp_path, monkeypatch):
         handlers["build_datasheet"].handler,
         {"pdf_source": str(pdf_a), "output_dir": str(tmp_path / "out")},
     )
-    assert created and all(t.close_calls == 0 for t in created)
+    bound = created[-1]
+    assert bound.close_calls == 0
+    assert bound._doc is not None  # building opened the document
 
     session.close()
-    assert all(t.close_calls >= 1 for t in created)
+    assert bound.close_calls >= 1
+    assert bound._doc is None  # the underlying document handle was released
 
 
 def test_session_close_is_safe_when_unbound_and_idempotent():
