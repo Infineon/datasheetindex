@@ -16,10 +16,11 @@ Agent-first parameter extraction from technical datasheets.
 All page numbers are **1-indexed** across the JSON, the text file markers, and
 `inspect_page(page=...)`.
 
-The library also exposes `create_datasheet_tools_server(pdf_path)`, which packages
+The library also exposes `create_datasheet_tools_server()`, which packages
 artifact-building, ToC/text access, text search, text-to-coordinate grounding
 (`locate_text`), and `inspect_page` as the MCP/tool-server surface the agent can
-mount.
+mount. The server starts without a bound PDF; the agent loads one at runtime by
+calling the `build_datasheet` tool with a `pdf_source`.
 
 ## Philosophy
 
@@ -98,17 +99,19 @@ The pre-commit pytest hook runs the fast subset only:
 ## Hand the MCP server to an agent
 
 ```python
-from datasheetindex import DatasheetIndex, create_datasheet_tools_server
+from datasheetindex import create_datasheet_tools_server
 
-artifacts = DatasheetIndex("datasheet.pdf").build(output_dir="output")
-datasheet_tools_server = create_datasheet_tools_server("datasheet.pdf")
+# The server starts WITHOUT a bound PDF and takes no arguments. The agent loads a
+# document at runtime by calling the build_datasheet tool with a pdf_source (local
+# path or URL) before using any other tool.
+datasheet_tools_server = create_datasheet_tools_server()
 
 # Pass datasheet_tools_server into your agent runtime's MCP server configuration.
 # The exact wiring depends on the host agent framework; this server object is the
 # concrete handoff point from datasheetindex to the agent.
 agent = SomeAgentRuntime(
     mcp_servers={"datasheet-tools": datasheet_tools_server},
-    system_prompt=build_prompt_from(artifacts),
+    system_prompt="...tell the agent to call build_datasheet first...",
 )
 ```
 
@@ -219,8 +222,8 @@ With `streamable-http`, the default MCP endpoint is
 
 This local server is for direct MCP testing. If you need an in-process SDK
 server object inside another Python runtime, use
-`create_datasheet_tools_server(pdf_path)` instead; it exposes the same tool
-surface for the bound PDF.
+`create_datasheet_tools_server()` instead; it exposes the same tool surface, with
+the document loaded at runtime via the `build_datasheet` tool.
 
 ## Python API
 
