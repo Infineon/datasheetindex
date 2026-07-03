@@ -34,7 +34,10 @@ class DatasheetToolDef:
     Attributes:
         name: The tool name exposed to the agent.
         description: The natural-language description the agent sees.
-        input_schema: JSON Schema (a plain dict) for the tool arguments.
+        input_schema: JSON Schema (a plain dict) for the tool arguments. The
+            dataclass is frozen (the attribute cannot be rebound), but the dict
+            itself is mutable and shared by reference -- treat it as read-only;
+            deep-copy before mutating if your host needs to adapt it.
         handler: ``async (args: dict) -> {"content": [...], "is_error": bool}``.
     """
 
@@ -58,6 +61,12 @@ def create_datasheet_tool_defs() -> list[DatasheetToolDef]:
     this factory's closure: one call == one session. The tools start unbound;
     call the ``build_datasheet`` handler with a ``pdf_source`` (local path or
     URL) to load a document.
+
+    The handlers are not safe under *concurrent* invocation within one session:
+    ``build_datasheet`` mutates the shared bound document, so overlapping calls
+    on the same set of defs can race. This matches agent tool-call semantics
+    (tool calls are issued serially); a host that fans out concurrent calls
+    against a single session should serialize ``build_datasheet`` itself.
     """
     tools_instance: DatasheetTools | None = None
 
