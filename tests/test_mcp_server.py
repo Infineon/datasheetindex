@@ -162,6 +162,17 @@ def test_run_dispatches_transport_and_closes_session(monkeypatch):
         server.run(transport="bogus")
 
 
+def test_sse_app_builds_with_expected_routes():
+    """The hand-wired SSE transport constructs with its /sse + /messages/ routes."""
+    pytest.importorskip("mcp")
+    from datasheetindex.mcp_server import create_local_mcp_server
+
+    app = create_local_mcp_server()._build_sse_app()
+    paths = {getattr(r, "path", getattr(r, "path_format", None)) for r in app.routes}
+    assert "/sse" in paths
+    assert any(p and p.startswith("/messages") for p in paths)
+
+
 def test_run_mcp_server_builds_and_runs(monkeypatch):
     from datasheetindex import mcp_server
 
@@ -315,6 +326,15 @@ def test_stdio_roundtrip_with_real_client(tmp_path):
     asyncio.run(asyncio.wait_for(go(), timeout=60))
 
 
+def _free_port() -> int:
+    """Pick an available localhost port (small TOCTOU window, fine for tests)."""
+    import socket
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
 @pytest.mark.integration
 def test_streamable_http_roundtrip_with_real_client(tmp_path):
     pytest.importorskip("mcp")
@@ -327,7 +347,7 @@ def test_streamable_http_roundtrip_with_real_client(tmp_path):
 
     pdf = tmp_path / "t.pdf"
     _make_pdf(pdf)
-    port = 8973
+    port = _free_port()
 
     proc = subprocess.Popen(
         [
@@ -373,4 +393,8 @@ def test_streamable_http_roundtrip_with_real_client(tmp_path):
         asyncio.run(asyncio.wait_for(go(), timeout=60))
     finally:
         proc.send_signal(signal.SIGINT)
-        proc.wait(timeout=15)
+        try:
+            proc.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
