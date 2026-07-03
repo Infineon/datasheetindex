@@ -44,14 +44,10 @@ def _defs_by_name():
 def _run(handler, args):
     """Drive a neutral tool handler synchronously.
 
-    The handler contract is ``Callable[[dict], Awaitable[dict]]``; awaiting it
-    inside a coroutine keeps the call type-clean for asyncio.run.
+    The handler contract is ``Callable[[dict], Coroutine[..., dict]]``, so
+    ``handler(args)`` is a coroutine that ``asyncio.run`` accepts directly.
     """
-
-    async def _invoke():
-        return await handler(args)
-
-    return asyncio.run(_invoke())
+    return asyncio.run(handler(args))
 
 
 def test_create_tool_defs_returns_expected_tools():
@@ -119,6 +115,13 @@ def test_build_then_query_end_to_end(tmp_path):
     assert inspect_result["is_error"] is False
     assert inspect_result["content"][0]["type"] == "image"
 
+    # Drive extract_table_markdown too, so every tool handler is exercised here.
+    # It needs the optional pymupdf4llm (layout extra); without it the handler
+    # returns a clean error envelope rather than raising -- either way is_error
+    # is a bool, which is what we assert.
+    table_result = _run(defs["extract_table_markdown"].handler, {"page": 1})
+    assert isinstance(table_result["is_error"], bool)
+
 
 def test_build_datasheet_rebinds_on_new_source(tmp_path):
     """A second build with a different source switches the active document."""
@@ -170,6 +173,87 @@ def test_failed_switch_preserves_working_document(tmp_path):
     section = _run(defs["get_section_text"].handler, {"start_page": 1, "end_page": 1})
     assert section["is_error"] is False
     assert "Alpha marker" in json.loads(section["content"][0]["text"])["text"]
+
+
+def test_failed_switch_closes_fresh_instance(tmp_path, monkeypatch):
+    """A failed switch closes the fresh instance (no leak) and leaves A open."""
+    import datasheetindex.tools.defs as defs_mod
+
+    created: list = []
+    real_tools = defs_mod.DatasheetTools
+
+    class TrackingTools(real_tools):
+        def __init__(self, pdf_path):
+            super().__init__(pdf_path)
+            self.close_calls = 0
+            created.append(self)
+
+        def close(self):
+            self.close_calls += 1
+            super().close()
+
+    monkeypatch.setattr(defs_mod, "DatasheetTools", TrackingTools)
+
+    pdf_a = tmp_path / "a.pdf"
+    _make_pdf(pdf_a, text="Alpha marker one")
+    defs = _defs_by_name()
+
+    _run(
+        defs["build_datasheet"].handler,
+        {"pdf_source": str(pdf_a), "output_dir": str(tmp_path / "out_a")},
+    )
+    bad_source = str(tmp_path / "does_not_exist.pdf")
+    bad = _run(
+        defs["build_datasheet"].handler,
+        {"pdf_source": bad_source, "output_dir": str(tmp_path / "out_b")},
+    )
+    assert bad["is_error"] is True
+
+    bad_instances = [t for t in created if t.pdf_path == bad_source]
+    a_instances = [t for t in created if t.pdf_path == str(pdf_a)]
+    # The fresh instance built for the bad source must have been closed...
+    assert bad_instances and all(t.close_calls >= 1 for t in bad_instances)
+    # ...and the still-bound document A must NOT have been closed.
+    assert a_instances and all(t.close_calls == 0 for t in a_instances)
+
+
+def test_successful_switch_survives_old_close_failure(tmp_path, monkeypatch):
+    """A successful switch must bind the new document even if closing the old raises."""
+    import datasheetindex.tools.defs as defs_mod
+
+    real_tools = defs_mod.DatasheetTools
+    fail_close_for: dict = {}
+
+    class FlakyClose(real_tools):
+        def close(self):
+            if fail_close_for.get("path") == self.pdf_path:
+                raise OSError("temp file vanished during cleanup")
+            super().close()
+
+    monkeypatch.setattr(defs_mod, "DatasheetTools", FlakyClose)
+
+    pdf_a = tmp_path / "a.pdf"
+    pdf_b = tmp_path / "b.pdf"
+    _make_pdf(pdf_a, text="Alpha marker one")
+    _make_pdf(pdf_b, text="Bravo marker two")
+    defs = _defs_by_name()
+
+    _run(
+        defs["build_datasheet"].handler,
+        {"pdf_source": str(pdf_a), "output_dir": str(tmp_path / "out_a")},
+    )
+    # Now make closing A blow up, then switch to B.
+    fail_close_for["path"] = str(pdf_a)
+    res = _run(
+        defs["build_datasheet"].handler,
+        {"pdf_source": str(pdf_b), "output_dir": str(tmp_path / "out_b")},
+    )
+    # The switch succeeds and B is bound, despite A's close() raising.
+    assert res["is_error"] is False
+    bravo = _run(defs["search_text"].handler, {"query": "Bravo"})
+    assert json.loads(bravo["content"][0]["text"])["results"]
+    alpha = _run(defs["search_text"].handler, {"query": "Alpha"})
+    assert json.loads(alpha["content"][0]["text"])["results"] == []
 
 
 def test_build_datasheet_requires_pdf_source():
