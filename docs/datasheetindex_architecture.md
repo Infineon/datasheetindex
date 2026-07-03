@@ -657,14 +657,28 @@ agent = SomeAgentRuntime(
 )
 ```
 
-A non-SDK host instead wraps the neutral defs directly:
+A non-SDK host instead wraps the neutral defs directly. When the session needs
+end-of-life cleanup (a URL source leaves a temporary file behind until closed),
+use `create_datasheet_tool_session`, which returns the same defs plus a `close`:
 
 ```python
-from datasheetindex import create_datasheet_tool_defs
+from datasheetindex import create_datasheet_tool_session
 
-for d in create_datasheet_tool_defs():
+session = create_datasheet_tool_session()
+for d in session.defs:
     register_with_your_host(d.name, d.description, d.input_schema, d.handler)
+# ... on shutdown:
+session.close()
 ```
+
+**All three surfaces share one source of truth.** The local MCP server
+(`mcp_server.py`, run via `datasheetindex-mcp-server`) is a third thin adapter:
+it serves `create_datasheet_tool_session()` on a low-level `mcp` `Server`
+(one `list_tools` + one `call_tool` that translates the neutral envelope into MCP
+content blocks), and wires it onto the stdio / streamable-http / sse transports.
+So the SDK server, the local MCP server, and non-SDK hosts all present identical
+tool names, descriptions, and JSON schemas -- a change to a tool def propagates to
+every surface from one place.
 
 ### Agent System Prompt Guidance
 

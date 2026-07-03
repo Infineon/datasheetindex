@@ -1,185 +1,172 @@
-"""Tests for the local MCP server entry point."""
+"""Tests for the local MCP server entry point.
+
+The server is a thin adapter over the framework-neutral tool session, so the
+behavioural tests drive the real low-level MCP ``Server`` handlers (guarded by
+``importorskip`` since ``mcp`` is an optional extra). The ImportError and CLI
+tests don't need ``mcp`` installed.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import importlib
-import sys
+import json
 import types
 
+import pymupdf
 import pytest
 
 
-def _install_fake_mcp(monkeypatch):
-    class _FakeContext:
-        @classmethod
-        def __class_getitem__(cls, _item):
-            return cls
+def _make_pdf(path, text="Supply voltage 4.5V to 5.5V"):
+    doc = pymupdf.open()
+    page = doc.new_page()
+    writer = pymupdf.TextWriter(page.rect)
+    writer.append((72, 72), text)
+    writer.write_text(page)
+    doc.save(str(path))
+    doc.close()
 
-    class _FakeImageContent:
-        def __init__(self, *, type: str, data: str, mimeType: str) -> None:
-            self.type = type
-            self.data = data
-            self.mimeType = mimeType
 
-    class _FakeCallToolResult:
-        def __init__(self, *, content: list[object]) -> None:
-            self.content = content
+def _drive(server, request):
+    """Invoke a low-level Server request handler and return the result payload."""
+    handler = server.request_handlers[type(request)]
+    return asyncio.run(handler(request)).root
 
-    class _FakeFastMCP:
-        def __init__(self, *args, **kwargs) -> None:
-            self.args = args
-            self.kwargs = kwargs
-            self.registered_tools: dict[str, dict[str, object]] = {}
-            self.run_calls: list[tuple[str, str | None]] = []
 
-        def tool(self, name=None, description=None, **_kwargs):
-            def decorator(func):
-                tool_name = name or func.__name__
-                self.registered_tools[tool_name] = {
-                    "func": func,
-                    "description": description,
-                }
-                return func
+def _list_tools(server, types):
+    return _drive(server, types.ListToolsRequest(method="tools/list")).tools
 
-            return decorator
 
-        def run(self, transport="stdio", mount_path=None) -> None:
-            self.run_calls.append((transport, mount_path))
-
-    monkeypatch.setitem(
-        sys.modules,
-        "mcp.server.fastmcp",
-        types.SimpleNamespace(FastMCP=_FakeFastMCP, Context=_FakeContext),
+def _call(server, types, name, arguments):
+    request = types.CallToolRequest(
+        method="tools/call",
+        params=types.CallToolRequestParams(name=name, arguments=arguments),
     )
-    monkeypatch.setitem(
-        sys.modules,
-        "mcp.server.session",
-        types.SimpleNamespace(ServerSession=object),
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "mcp.types",
-        types.SimpleNamespace(
-            CallToolResult=_FakeCallToolResult,
-            ImageContent=_FakeImageContent,
-        ),
-    )
-    return _FakeCallToolResult, _FakeImageContent
+    return _drive(server, request)
 
 
-def test_create_local_mcp_server_registers_inspect_page(monkeypatch):
-    _FakeCallToolResult, _FakeImageContent = _install_fake_mcp(monkeypatch)
-
+def test_create_local_mcp_server_stores_config():
+    pytest.importorskip("mcp")
     from datasheetindex.mcp_server import create_local_mcp_server
 
     server = create_local_mcp_server(
-        host="0.0.0.0",
-        port=9001,
-        streamable_http_path="/custom-mcp",
+        host="0.0.0.0", port=9001, streamable_http_path="/custom-mcp"
     )
+    assert server.host == "0.0.0.0"
+    assert server.port == 9001
+    assert server.streamable_http_path == "/custom-mcp"
 
-    assert server.kwargs["host"] == "0.0.0.0"
-    assert server.kwargs["port"] == 9001
-    assert server.kwargs["streamable_http_path"] == "/custom-mcp"
-    assert set(server.registered_tools) == {
+
+def test_serves_neutral_tool_defs_verbatim():
+    """The local server exposes exactly the neutral defs' names/descriptions/schemas."""
+    types = pytest.importorskip("mcp.types")
+    from datasheetindex.mcp_server import create_local_mcp_server
+    from datasheetindex.tools.defs import create_datasheet_tool_defs
+
+    server = create_local_mcp_server()
+    served = {t.name: t for t in _list_tools(server.mcp_server, types)}
+    neutral = {d.name: d for d in create_datasheet_tool_defs()}
+
+    assert set(served) == set(neutral)
+    for name, d in neutral.items():
+        assert served[name].description == d.description
+        assert served[name].inputSchema == d.input_schema
+
+
+def test_call_tool_end_to_end(tmp_path):
+    types = pytest.importorskip("mcp.types")
+    from datasheetindex.mcp_server import create_local_mcp_server
+
+    pdf = tmp_path / "t.pdf"
+    _make_pdf(pdf)
+    server = create_local_mcp_server().mcp_server
+
+    build = _call(
+        server,
+        types,
         "build_datasheet",
-        "get_section_text",
-        "inspect_page",
-        "search_text",
-        "extract_table_markdown",
-        "locate_text",
-    }
-
-    calls: list[tuple[int, dict[str, float] | None, int | None, str]] = []
-    search_calls: list[tuple[str, int | None, bool, int]] = []
-
-    fake_tools = types.SimpleNamespace(
-        pdf_path="sample.pdf",
-        get_section_text=lambda start_page, end_page: (
-            f"--- PAGE {start_page} ---\npage {start_page} text"
-        ),
-        search_text=lambda query, page=None, case_sensitive=False, max_results=20: (
-            search_calls.append((query, page, case_sensitive, max_results))
-            or [{"page": 2, "start": 0, "end": 3, "snippet": "foo"}]
-        ),
-        inspect_page=lambda page, region=None, dpi=None, detail="medium": (
-            calls.append((page, region, dpi, detail))
-            or [{"type": "image", "data": "Zm9v", "mime_type": "image/png"}]
-        ),
-        extract_table_markdown=lambda page: f"| col1 | col2 |\n| p{page} | val |",
-        locate_text=lambda query, page=None, max_results=20: [
-            {
-                "page": 1,
-                "match_method": "search_for",
-                "page_width": 612.0,
-                "page_height": 792.0,
-                "region": {
-                    "pct": {"top": 0.0, "bottom": 0.1, "left": 0.0, "right": 0.1},
-                    "points": {"x0": 0.0, "y0": 0.0, "x1": 61.2, "y1": 79.2},
-                },
-                "boxes": [
-                    {
-                        "pct": {"top": 0.0, "bottom": 0.1, "left": 0.0, "right": 0.1},
-                        "points": {"x0": 0.0, "y0": 0.0, "x1": 61.2, "y1": 79.2},
-                    }
-                ],
-            }
-        ],
+        {"pdf_source": str(pdf), "output_dir": str(tmp_path / "out")},
     )
-    # Pre-load tools in server context (simulates a prior build_datasheet call)
-    server_ctx = types.SimpleNamespace(tools=fake_tools)
-    ctx = types.SimpleNamespace(
-        request_context=types.SimpleNamespace(lifespan_context=server_ctx)
-    )
+    assert build.isError is False
+    assert build.content[0].type == "text"
 
-    tool = server.registered_tools["inspect_page"]["func"]
-    result = tool(page=2, region={"top": 0.1}, dpi=200, ctx=ctx)
-    section_text_result = server.registered_tools["get_section_text"]["func"](
-        start_page=2, end_page=2, ctx=ctx
-    )
-    search_result = server.registered_tools["search_text"]["func"](
-        query="foo",
-        page=2,
-        case_sensitive=True,
-        max_results=1,
-        ctx=ctx,
+    section = _call(server, types, "get_section_text", {"start_page": 1, "end_page": 1})
+    assert section.isError is False
+    assert "Supply voltage" in json.loads(section.content[0].text)["text"]
+
+    search = _call(server, types, "search_text", {"query": "5.5v"})
+    assert search.isError is False
+    assert json.loads(search.content[0].text)["results"][0]["page"] == 1
+
+    # list-valued query is forwarded unchanged
+    multi = _call(server, types, "search_text", {"query": ["5.5v", "voltage"]})
+    assert multi.isError is False
+
+    locate = _call(server, types, "locate_text", {"query": "Supply", "page": 1})
+    assert locate.isError is False
+    located = json.loads(locate.content[0].text)["results"][0]
+    assert located["match_method"] == "search_for"
+
+    image = _call(server, types, "inspect_page", {"page": 1})
+    assert image.isError is False
+    assert image.content[0].type == "image"
+    assert image.content[0].mimeType == "image/png"
+
+
+def test_call_tool_before_build_is_tool_error():
+    types = pytest.importorskip("mcp.types")
+    from datasheetindex.mcp_server import create_local_mcp_server
+
+    server = create_local_mcp_server().mcp_server
+    result = _call(server, types, "search_text", {"query": "anything"})
+    assert result.isError is True
+    assert "No datasheet loaded" in result.content[0].text
+
+
+def test_run_dispatches_transport_and_closes_session(monkeypatch):
+    pytest.importorskip("mcp")
+    from datasheetindex.mcp_server import create_local_mcp_server
+
+    server = create_local_mcp_server()
+    calls: list[str] = []
+    # stdio is served via `anyio.run(self._serve_stdio)`; stub anyio.run so no
+    # real event loop starts. http/sse call their runners directly.
+    monkeypatch.setattr("datasheetindex.mcp_server._preload_layout_model", lambda: None)
+    monkeypatch.setattr("anyio.run", lambda fn, *a, **k: calls.append("stdio"))
+    monkeypatch.setattr(server, "_serve_streamable_http", lambda: calls.append("http"))
+    monkeypatch.setattr(server, "_serve_sse", lambda: calls.append("sse"))
+    closed: list[bool] = []
+    server.session.close()  # the real session must close cleanly when unbound
+    monkeypatch.setattr(
+        server, "session", types.SimpleNamespace(close=lambda: closed.append(True))
     )
 
-    assert calls == [(2, {"top": 0.1}, 200, "medium")]
-    assert section_text_result == {
-        "start_page": 2,
-        "end_page": 2,
-        "text": "--- PAGE 2 ---\npage 2 text",
-    }
-    assert search_calls == [("foo", 2, True, 1)]
-    assert search_result["results"][0]["snippet"] == "foo"
+    server.run(transport="streamable-http")
+    server.run(transport="sse")
+    server.run(transport="stdio")
 
-    # A list-valued query is forwarded unchanged to the tools layer.
-    server.registered_tools["search_text"]["func"](query=["foo", "bar"], ctx=ctx)
-    assert search_calls[-1] == (["foo", "bar"], None, False, 20)
+    assert calls == ["http", "sse", "stdio"]
+    assert closed == [True, True, True]  # session closed after each transport run
 
-    import asyncio
+    with pytest.raises(ValueError, match="unsupported transport"):
+        server.run(transport="bogus")
 
-    table_md_result = asyncio.run(
-        server.registered_tools["extract_table_markdown"]["func"](page=2, ctx=ctx)
-    )
-    assert table_md_result == {
-        "page": 2,
-        "markdown": "| col1 | col2 |\n| p2 | val |",
-    }
-    locate_result = server.registered_tools["locate_text"]["func"](
-        query="Hello", page=1, ctx=ctx
-    )
-    assert locate_result["query"] == "Hello"
-    assert locate_result["results"][0]["match_method"] == "search_for"
 
-    assert isinstance(result, _FakeCallToolResult)
-    assert len(result.content) == 1
-    image = result.content[0]
-    assert isinstance(image, _FakeImageContent)
-    assert image.type == "image"
-    assert image.data == "Zm9v"
-    assert image.mimeType == "image/png"
+def test_run_mcp_server_builds_and_runs(monkeypatch):
+    from datasheetindex import mcp_server
+
+    class _FakeServer:
+        def __init__(self):
+            self.calls: list[str] = []
+
+        def run(self, transport="stdio"):
+            self.calls.append(transport)
+
+    fake = _FakeServer()
+    monkeypatch.setattr(mcp_server, "create_local_mcp_server", lambda **kwargs: fake)
+
+    mcp_server.run_mcp_server(transport="streamable-http")
+    assert fake.calls == ["streamable-http"]
 
 
 def test_create_local_mcp_server_raises_without_mcp(monkeypatch):
@@ -187,7 +174,7 @@ def test_create_local_mcp_server_raises_without_mcp(monkeypatch):
 
     original_import_module = importlib.import_module
 
-    def _fake_import_module(name: str, package=None):
+    def _fake_import_module(name, package=None):
         if name.startswith("mcp"):
             raise ImportError("missing mcp")
         return original_import_module(name, package)
@@ -196,29 +183,6 @@ def test_create_local_mcp_server_raises_without_mcp(monkeypatch):
 
     with pytest.raises(ImportError, match="uv sync --extra mcp"):
         mcp_server.create_local_mcp_server()
-
-
-def test_run_mcp_server_invokes_fastmcp_run(monkeypatch):
-    from datasheetindex import mcp_server
-
-    class _FakeServer:
-        def __init__(self) -> None:
-            self.calls: list[tuple[str, str | None]] = []
-
-        def run(self, transport="stdio", mount_path=None) -> None:
-            self.calls.append((transport, mount_path))
-
-    fake_server = _FakeServer()
-
-    def _fake_create(*args, **kwargs):
-        _ = args, kwargs
-        return fake_server
-
-    monkeypatch.setattr(mcp_server, "create_local_mcp_server", _fake_create)
-
-    mcp_server.run_mcp_server(transport="streamable-http")
-
-    assert fake_server.calls == [("streamable-http", None)]
 
 
 def test_main_runs_server(monkeypatch):
@@ -262,33 +226,3 @@ def test_main_reports_error(monkeypatch, capsys):
 
     assert exit_code == 1
     assert "Error: boom" in captured.err
-
-
-def test_inspect_page_tool_without_datasheet_raises(monkeypatch):
-    _install_fake_mcp(monkeypatch)
-
-    from datasheetindex.mcp_server import create_local_mcp_server
-
-    server = create_local_mcp_server()
-    server_ctx = types.SimpleNamespace(tools=None)
-    ctx = types.SimpleNamespace(
-        request_context=types.SimpleNamespace(lifespan_context=server_ctx)
-    )
-    func = server.registered_tools["inspect_page"]["func"]
-    with pytest.raises(RuntimeError, match="No datasheet loaded"):
-        func(page=1, ctx=ctx)
-
-
-def test_locate_text_tool_without_datasheet_raises(monkeypatch):
-    _install_fake_mcp(monkeypatch)
-
-    from datasheetindex.mcp_server import create_local_mcp_server
-
-    server = create_local_mcp_server()
-    server_ctx = types.SimpleNamespace(tools=None)
-    ctx = types.SimpleNamespace(
-        request_context=types.SimpleNamespace(lifespan_context=server_ctx)
-    )
-    func = server.registered_tools["locate_text"]["func"]
-    with pytest.raises(RuntimeError, match="No datasheet loaded"):
-        func(query="anything", page=1, ctx=ctx)

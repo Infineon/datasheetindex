@@ -49,20 +49,49 @@ class DatasheetToolDef:
     handler: Callable[[dict[str, Any]], Coroutine[Any, Any, dict[str, Any]]]
 
 
+@dataclass(frozen=True)
+class DatasheetToolSession:
+    """One datasheet tool session: the tool defs plus their lifecycle handle.
+
+    Attributes:
+        defs: The framework-neutral :class:`DatasheetToolDef` list for this
+            session (see :func:`create_datasheet_tool_defs`).
+        close: Release the session's bound document. Idempotent and safe to call
+            when nothing has been built yet. Long-running hosts should call this
+            when the session ends so a document loaded from a URL has its
+            temporary file cleaned up rather than lingering until process exit.
+    """
+
+    defs: list[DatasheetToolDef]
+    close: Callable[[], None]
+
+
 def create_datasheet_tool_defs() -> list[DatasheetToolDef]:
     """Build the datasheet tools as framework-neutral definitions.
+
+    Convenience wrapper over :func:`create_datasheet_tool_session` that returns
+    just the ``defs`` list. Use :func:`create_datasheet_tool_session` instead
+    when you need to close the bound document at end of session (URL sources
+    leave a temporary file behind until closed).
 
     Returns the same six tools that
     :func:`datasheetindex.tools.registry.create_datasheet_tools_server` exposes
     -- ``build_datasheet``, ``get_section_text``, ``search_text``,
     ``inspect_page``, ``locate_text``, ``extract_table_markdown`` -- without
     importing ``claude-agent-sdk``.
+    """
+    return create_datasheet_tool_session().defs
+
+
+def create_datasheet_tool_session() -> DatasheetToolSession:
+    """Build a datasheet tool session: the neutral tool defs plus a ``close``.
 
     Per-session state (the current :class:`DatasheetTools` bound by
     ``build_datasheet`` and read by the other tools via ``_require()``) lives in
     this factory's closure: one call == one session. The tools start unbound;
     call the ``build_datasheet`` handler with a ``pdf_source`` (local path or
-    URL) to load a document.
+    URL) to load a document, and call :attr:`DatasheetToolSession.close` when the
+    session ends.
 
     Because that state is per-call, **call this factory once per session and do
     not share the returned defs across sessions.** A host that registers one set
@@ -211,7 +240,14 @@ def create_datasheet_tool_defs() -> list[DatasheetToolDef]:
         except Exception as exc:
             return _err(str(exc))
 
-    return [
+    def _close() -> None:
+        # End-of-session cleanup: release the bound document (idempotent).
+        nonlocal tools_instance
+        if tools_instance is not None:
+            _safe_close(tools_instance)
+            tools_instance = None
+
+    defs = [
         DatasheetToolDef(
             name="build_datasheet",
             description=(
@@ -398,3 +434,5 @@ def create_datasheet_tool_defs() -> list[DatasheetToolDef]:
             handler=extract_table_markdown,
         ),
     ]
+
+    return DatasheetToolSession(defs=defs, close=_close)

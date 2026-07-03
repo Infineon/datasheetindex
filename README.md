@@ -202,18 +202,22 @@ Build once, then use `get_section_text`, `search_text`, `inspect_page`,
 falls back to whitespace-normalized and ordered-token matching for line-wrapped
 table rows.
 
+The server takes no PDF argument; it starts unbound and the client loads a
+document at runtime by calling `build_datasheet` with a `pdf_source`.
+
 ```bash
 # stdio transport (for Claude Code or another MCP client)
-uv run --extra mcp datasheetindex-mcp-server datasheet.pdf
+uv run --extra mcp datasheetindex-mcp-server
 
-# then call build_datasheet(output_dir="output") from the MCP client
+# then call build_datasheet(pdf_source="datasheet.pdf", output_dir="output")
+# from the MCP client
 ```
 
 You can also expose it over HTTP:
 
 ```bash
 # streamable HTTP transport (useful with MCP Inspector)
-uv run --extra mcp datasheetindex-mcp-server datasheet.pdf \
+uv run --extra mcp datasheetindex-mcp-server \
   --transport streamable-http --port 8000
 ```
 

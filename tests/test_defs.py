@@ -14,7 +14,12 @@ import sys
 import pymupdf
 import pytest
 
-from datasheetindex.tools.defs import DatasheetToolDef, create_datasheet_tool_defs
+from datasheetindex.tools.defs import (
+    DatasheetToolDef,
+    DatasheetToolSession,
+    create_datasheet_tool_defs,
+    create_datasheet_tool_session,
+)
 
 EXPECTED_TOOL_NAMES = {
     "build_datasheet",
@@ -280,3 +285,58 @@ def test_each_defs_call_is_an_independent_session(tmp_path):
     result_b = _run(session_b["search_text"].handler, {"query": "voltage"})
     assert result_b["is_error"] is True
     assert "No datasheet loaded" in result_b["content"][0]["text"]
+
+
+def test_create_tool_session_exposes_defs_and_close():
+    session = create_datasheet_tool_session()
+    assert isinstance(session, DatasheetToolSession)
+    assert {d.name for d in session.defs} == EXPECTED_TOOL_NAMES
+    assert all(isinstance(d, DatasheetToolDef) for d in session.defs)
+    assert callable(session.close)
+
+
+def test_create_datasheet_tool_defs_matches_session_defs():
+    """The list factory stays backward-compatible: same six defs a session exposes."""
+    defs = create_datasheet_tool_defs()
+    assert {d.name for d in defs} == EXPECTED_TOOL_NAMES
+
+
+def test_session_close_closes_bound_document(tmp_path, monkeypatch):
+    """session.close() must close the currently bound DatasheetTools (temp cleanup)."""
+    import datasheetindex.tools.defs as defs_mod
+
+    created: list = []
+    real_tools = defs_mod.DatasheetTools
+
+    class TrackingTools(real_tools):
+        def __init__(self, pdf_path):
+            super().__init__(pdf_path)
+            self.close_calls = 0
+            created.append(self)
+
+        def close(self):
+            self.close_calls += 1
+            super().close()
+
+    monkeypatch.setattr(defs_mod, "DatasheetTools", TrackingTools)
+
+    pdf_a = tmp_path / "a.pdf"
+    _make_pdf(pdf_a)
+    session = create_datasheet_tool_session()
+    handlers = {d.name: d for d in session.defs}
+
+    _run(
+        handlers["build_datasheet"].handler,
+        {"pdf_source": str(pdf_a), "output_dir": str(tmp_path / "out")},
+    )
+    assert created and all(t.close_calls == 0 for t in created)
+
+    session.close()
+    assert all(t.close_calls >= 1 for t in created)
+
+
+def test_session_close_is_safe_when_unbound_and_idempotent():
+    session = create_datasheet_tool_session()
+    # No document ever bound -> must not raise; and calling twice is safe.
+    session.close()
+    session.close()

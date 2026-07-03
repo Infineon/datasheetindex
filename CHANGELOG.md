@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.17.0] - 2026-07-03
+
+### Changed
+- **The local MCP server now serves the framework-neutral tool defs -- single source of truth across all three surfaces.** `mcp_server.py` was rebuilt as a thin adapter over `create_datasheet_tool_session()` on a low-level `mcp` `Server` (one `list_tools` + one `call_tool` that translates the neutral `{"content": [...], "is_error": bool}` envelope into MCP content blocks), replacing its hand-maintained, drifted copies of the six tools' descriptions/handlers. The SDK server (`create_datasheet_tools_server`), the local MCP server, and non-SDK hosts now present **identical** tool names, descriptions, and JSON schemas; a change to a tool def propagates everywhere from one place. Both the stdio and streamable-http transports are verified end-to-end with a real MCP client. Closes #5.
+- **Wire-schema change on the local MCP server (behavioural, not a Python API break).** Its tool input schemas are now the canonical neutral JSON schemas (e.g. `oneOf` unions, `minimum`, per-field `description`) rather than FastMCP's signature-derived ones (`anyOf`/`title`/`$ref`). Property names and `required` are unchanged; the server is documented as "for direct MCP testing", so this only affects local clients.
+- **`create_local_mcp_server()` now returns a `LocalMcpServer`** (with the same `run(transport=...)` method) instead of a `FastMCP` instance. Callers that only build the server and call `.run()` (the documented pattern) are unaffected.
+
+### Added
+- **`create_datasheet_tool_session()` + `DatasheetToolSession`.** A session bundles the neutral tool defs with a `close()` that releases the bound document -- fixing a latent gap where a document loaded from a URL left a temporary file behind until process exit. `create_datasheet_tool_defs()` is unchanged (now a thin wrapper over the session). Exported from `datasheetindex` and `datasheetindex.tools`.
+
 ## [0.16.1] - 2026-07-03
 
 ### Changed
