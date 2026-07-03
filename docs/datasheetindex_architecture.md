@@ -506,6 +506,12 @@ class DatasheetIndex:
 
 ### The `DatasheetTools` Class
 
+Lives in `tools/bound.py` -- a framework-neutral leaf module (it imports no
+agent-framework code). Both the neutral tool defs and the SDK adapter build on
+it, giving a one-directional import graph: `registry -> defs -> bound`. It is
+re-exported from `tools/registry`, `tools`, and the top-level package for
+backward compatibility.
+
 ```python
 class DatasheetTools:
     """Bound datasheet tools the consuming agent can call."""

@@ -138,16 +138,16 @@ def test_search_text_resolves_breadcrumb_once_per_page(tmp_path, monkeypatch):
     doc.save(str(pdf_path))
     doc.close()
 
-    import datasheetindex.tools.registry as registry_module
+    import datasheetindex.tools.bound as bound_module
 
     calls: list[int] = []
-    real = registry_module.find_breadcrumb_for_page
+    real = bound_module.find_breadcrumb_for_page
 
     def counting(toc, page_number):
         calls.append(page_number)
         return real(toc, page_number)
 
-    monkeypatch.setattr(registry_module, "find_breadcrumb_for_page", counting)
+    monkeypatch.setattr(bound_module, "find_breadcrumb_for_page", counting)
 
     tools = DatasheetTools(str(pdf_path))
     tools.build_datasheet(output_dir=str(tmp_path / "out"))
@@ -474,3 +474,36 @@ def test_datasheet_tools_locate_text_without_build(tmp_path):
     assert len(results) == 1
     assert results[0]["page"] == 1
     assert results[0]["match_method"] == "search_for"
+
+
+def test_datasheet_tools_reexported_for_backward_compat():
+    """DatasheetTools now lives in tools.bound but must stay importable everywhere."""
+    from datasheetindex import DatasheetTools as top_level
+    from datasheetindex.tools import DatasheetTools as pkg
+    from datasheetindex.tools.bound import DatasheetTools as canonical
+    from datasheetindex.tools.registry import DatasheetTools as via_registry
+
+    # Every historical import path must resolve to the one canonical class.
+    assert canonical is via_registry is pkg is top_level
+
+
+@pytest.mark.parametrize(
+    "module",
+    [
+        "datasheetindex",
+        "datasheetindex.tools",
+        "datasheetindex.tools.bound",
+        "datasheetindex.tools.defs",
+        "datasheetindex.tools.registry",
+    ],
+)
+def test_cold_import_has_no_cycle(module):
+    """Each module imports cleanly from a fresh interpreter, in any order (no cycle)."""
+    import subprocess
+
+    result = subprocess.run(
+        [sys.executable, "-c", f"import {module}"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
