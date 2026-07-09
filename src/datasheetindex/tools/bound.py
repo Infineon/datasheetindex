@@ -14,6 +14,7 @@ top-level :mod:`datasheetindex` package.
 
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -111,8 +112,10 @@ class DatasheetTools:
         total = len(self.doc)
         if page < 1 or page > total:
             raise ValueError(f"page must be between 1 and {total}")
+        # Imported by name, like the other optional dependencies, so a checker
+        # does not require the [layout] extra to be installed.
         try:
-            import pymupdf4llm
+            pymupdf4llm = importlib.import_module("pymupdf4llm")
         except ImportError:
             raise ImportError(
                 "pymupdf4llm is required for table markdown extraction. "

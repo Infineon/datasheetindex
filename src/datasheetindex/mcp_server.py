@@ -43,7 +43,7 @@ def _preload_layout_model() -> None:
     which can cause MCP client timeouts.
     """
     try:
-        import pymupdf4llm  # noqa: F401
+        importlib.import_module("pymupdf4llm")
     except ImportError:
         pass  # optional dependency; extract_table_markdown will report the error
 

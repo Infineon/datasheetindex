@@ -1,6 +1,6 @@
 [project]
 name = "datasheetindex"
-version = "0.17.1"
+version = "0.17.2"
 description = "Agent-first parameter extraction from technical datasheets"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -69,4 +69,11 @@ dev = [
     "pytest>=9.0.2",
     "ruff>=0.14.11",
     "ty>=0.0.12",
+    # The checks need the mcp extra: tests/test_mcp_server.py imports `mcp`
+    # directly, and ty cannot resolve it otherwise. uv has no way to enable an
+    # extra by default, so declare it here -- a plain `uv sync`, which both the
+    # post-checkout hook and CI run, then yields a checkable environment.
+    # The layout extra is deliberately excluded: importing pymupdf4llm swaps
+    # PyMuPDF's find_tables() for the ML layout engine, ~50x slower.
+    "datasheetindex[mcp]",
 ]
