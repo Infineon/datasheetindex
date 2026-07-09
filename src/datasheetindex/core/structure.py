@@ -328,12 +328,14 @@ def _mp_context() -> BaseContext:
     so it must not fork one. This also keeps behaviour identical across Python
     3.13 (which defaults to ``fork``) and 3.14 (which defaults to
     ``forkserver``).
+
+    ``spawn`` is available on every platform CPython supports, so there is no
+    path back to ``fork`` here.
     """
     methods = multiprocessing.get_all_start_methods()
-    for method in ("forkserver", "spawn"):
-        if method in methods:
-            return multiprocessing.get_context(method)
-    return multiprocessing.get_context()  # pragma: no cover
+    return multiprocessing.get_context(
+        "forkserver" if "forkserver" in methods else "spawn"
+    )
 
 
 def _build_table_count_cache_parallel(
@@ -394,7 +396,10 @@ def enrich_with_table_counts(
         try:
             cache = _build_table_count_cache_parallel(pdf_path, total_pages)
         except Exception:
-            logger.debug(
+            # Warning, not debug: a pool that fails to start degrades silently
+            # to a ~3x slower scan, and that invisibility is how the fan-out
+            # bug this fallback guards went unnoticed in production.
+            logger.warning(
                 "Parallel table counting failed, falling back to sequential",
                 exc_info=True,
             )
