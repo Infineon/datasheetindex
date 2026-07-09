@@ -461,6 +461,40 @@ def test_cgroup_unreadable_proc_falls_back_to_root(tmp_path):
     assert _read_cgroup_cpu_quota(root, tmp_path / "missing") == 3
 
 
+def test_cgroup_v1_decoy_controllers_do_not_match_cpu(tmp_path):
+    """'cpuset' and 'cpuacct' contain 'cpu' as a substring; only the exact
+    controller token may select the cgroup path."""
+    root = tmp_path / "sys"
+    correct = root / "cpu" / "right"
+    correct.mkdir(parents=True)
+    (correct / "cpu.cfs_quota_us").write_text("200000", encoding="utf-8")
+    (correct / "cpu.cfs_period_us").write_text("100000", encoding="utf-8")
+    # A quota on the path a substring match would wrongly select.
+    wrong = root / "cpu" / "wrong"
+    wrong.mkdir(parents=True)
+    (wrong / "cpu.cfs_quota_us").write_text("700000", encoding="utf-8")
+    (wrong / "cpu.cfs_period_us").write_text("100000", encoding="utf-8")
+
+    proc = _write_proc_cgroup(
+        tmp_path,
+        "12:cpuset:/wrong\n11:cpuacct:/wrong\n5:cpu,cpuacct:/right\n",
+    )
+    assert _read_cgroup_cpu_quota(root, proc) == 2
+
+
+def test_cgroup_v1_co_mounted_cpu_cpuacct_directory(tmp_path):
+    """Some runtimes bind-mount the real 'cpu,cpuacct' name with no 'cpu'
+    compat symlink; the quota must still be found."""
+    root = tmp_path / "sys"
+    base = root / "cpu,cpuacct"
+    base.mkdir(parents=True)
+    (base / "cpu.cfs_quota_us").write_text("100000", encoding="utf-8")
+    (base / "cpu.cfs_period_us").write_text("100000", encoding="utf-8")
+    proc = _write_proc_cgroup(tmp_path, "5:cpu,cpuacct:/docker/abc\n")
+
+    assert _read_cgroup_cpu_quota(root, proc) == 1
+
+
 def test_available_cpus_clamps_to_cgroup_quota(monkeypatch):
     """A 1-CPU container on a 128-core host must report 1, not 128."""
     monkeypatch.setattr(structure.os, "process_cpu_count", lambda: 128)
@@ -542,6 +576,113 @@ def test_parallel_pool_redirects_worker_stdio(monkeypatch, fake_pool):
 
 
 def test_parallel_cache_covers_every_page(monkeypatch, fake_pool):
+    """Every page index is present. Values come from the fake, so they prove
+    nothing -- real per-page counts are covered by the unmocked pool test."""
     monkeypatch.setattr(structure, "_available_cpus", lambda: 4)
     cache = _build_table_count_cache_parallel("doc.pdf", 20)
-    assert cache == dict.fromkeys(range(20), 0)
+    assert sorted(cache) == list(range(20))
+
+
+def test_mp_context_falls_back_to_spawn_without_forkserver(monkeypatch):
+    """Windows has no forkserver; the fallback must be spawn, never fork."""
+    monkeypatch.setattr(
+        structure.multiprocessing, "get_all_start_methods", lambda: ["fork", "spawn"]
+    )
+    assert _mp_context().get_start_method() == "spawn"
+
+
+# --- The real pool, with nothing mocked ---
+
+
+def _write_table_pdf(path: Path, pages: int) -> None:
+    doc = pymupdf.open()
+    for p in range(pages):
+        page = doc.new_page()
+        for row in range(4):
+            for col in range(3):
+                rect = pymupdf.Rect(
+                    50 + col * 90,
+                    60 + row * 25,
+                    50 + (col + 1) * 90,
+                    60 + (row + 1) * 25,
+                )
+                page.draw_rect(rect, color=(0, 0, 0), width=0.7)
+                page.insert_text(
+                    (rect.x0 + 3, rect.y0 + 15), f"{p}{row}{col}", fontsize=7
+                )
+    doc.save(str(path))
+    doc.close()
+
+
+def test_real_pool_matches_sequential(tmp_path):
+    """Spawns actual workers under the real start method.
+
+    The mocked pool tests assert construction kwargs but never start a process,
+    so they cannot catch an unpicklable argument, an initializer that raises, or
+    a forkserver that fails to bootstrap -- exactly the bug class this module
+    exists to avoid. enrich_with_table_counts swallows such failures, so without
+    this test a permanently broken pool would pass CI.
+    """
+    pdf = tmp_path / "tables.pdf"
+    _write_table_pdf(pdf, pages=13)
+
+    parallel = _build_table_count_cache_parallel(str(pdf), 13)
+
+    doc = pymupdf.open(str(pdf))
+    try:
+        sequential = structure._build_table_count_cache_sequential(doc)
+    finally:
+        doc.close()
+
+    assert parallel == sequential
+    assert sum(parallel.values()) > 0  # the fixture really does contain tables
+
+
+# --- enrich_with_table_counts dispatch and degradation ---
+
+
+def _blank_doc(pages: int):
+    doc = pymupdf.open()
+    for _ in range(pages):
+        doc.new_page()
+    return doc
+
+
+@pytest.mark.parametrize(
+    ("pages", "expect_parallel"),
+    [(11, False), (12, True)],
+)
+def test_parallel_dispatch_respects_page_threshold(monkeypatch, pages, expect_parallel):
+    calls = []
+    monkeypatch.setattr(
+        structure,
+        "_build_table_count_cache_parallel",
+        lambda path, total: calls.append(total) or dict.fromkeys(range(total), 0),
+    )
+    doc = _blank_doc(pages)
+    try:
+        nodes = build_tree([[1, "S", 1]], total_pages=pages)
+        enrich_with_table_counts(nodes, doc, pdf_path="doc.pdf")
+    finally:
+        doc.close()
+    assert bool(calls) is expect_parallel
+
+
+def test_parallel_failure_degrades_to_sequential_and_warns(monkeypatch, caplog):
+    """A pool that cannot start must not fail the build -- but must be audible."""
+
+    def _boom(path, total):
+        raise RuntimeError("pool did not start")
+
+    monkeypatch.setattr(structure, "_build_table_count_cache_parallel", _boom)
+    doc = _blank_doc(15)
+    try:
+        nodes = build_tree([[1, "S", 1]], total_pages=15)
+        with caplog.at_level("WARNING", logger=structure.logger.name):
+            result = enrich_with_table_counts(nodes, doc, pdf_path="doc.pdf")
+    finally:
+        doc.close()
+
+    assert result[0].table_count == 0  # sequential scan still ran
+    assert "falling back to sequential" in caplog.text
+    assert any(r.levelname == "WARNING" for r in caplog.records)
