@@ -20,7 +20,9 @@ class LlmCallable(Protocol):
 
 
 class _ResponsesOutput(Protocol):
-    output_text: str
+    @property
+    def output_text(self) -> str:
+        """Concatenated text output of the response."""
 
 
 class _ResponsesApi(Protocol):
