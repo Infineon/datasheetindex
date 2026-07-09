@@ -197,7 +197,8 @@ def _subprocess_init() -> None:
     not inherit the parent's open file descriptors -- except 0, 1 and 2, which
     survive ``exec`` on every platform. When the parent is an MCP stdio server,
     an inherited stdin/stdout collides with JSON-RPC communication, causing
-    deadlocks.
+    deadlocks. Only 0 and 1 are redirected; stderr is deliberately left intact
+    so worker tracebacks still reach the parent's logs.
     """
     devnull = os.open(os.devnull, os.O_RDWR)
     os.dup2(devnull, 0)  # stdin
@@ -287,17 +288,24 @@ def _read_cgroup_cpu_quota(
     if quotas:
         return min(quotas)
 
-    # cgroup v1: quota and period live in separate files under the cpu controller.
-    v1_root = root / "cpu"
-    for directory in _cgroup_chain(v1_root, _own_cgroup_relpath(proc_cgroup, "cpu")):
-        try:
-            quota = int((directory / "cpu.cfs_quota_us").read_text(encoding="utf-8"))
-            period = int((directory / "cpu.cfs_period_us").read_text(encoding="utf-8"))
-            cpus = _cpus_from_quota(quota, period)
-        except (OSError, ValueError):
-            continue
-        if cpus is not None:
-            quotas.append(cpus)
+    # cgroup v1: quota and period live in separate files under the cpu
+    # controller, which is co-mounted as "cpu,cpuacct". The plain "cpu" name is
+    # only a compat symlink, and some runtimes bind-mount the real name alone.
+    v1_relpath = _own_cgroup_relpath(proc_cgroup, "cpu")
+    for v1_root in (root / "cpu", root / "cpu,cpuacct"):
+        for directory in _cgroup_chain(v1_root, v1_relpath):
+            try:
+                quota = int(
+                    (directory / "cpu.cfs_quota_us").read_text(encoding="utf-8")
+                )
+                period = int(
+                    (directory / "cpu.cfs_period_us").read_text(encoding="utf-8")
+                )
+                cpus = _cpus_from_quota(quota, period)
+            except (OSError, ValueError):
+                continue
+            if cpus is not None:
+                quotas.append(cpus)
 
     return min(quotas) if quotas else None
 
