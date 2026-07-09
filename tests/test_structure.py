@@ -533,6 +533,14 @@ def test_parallel_pool_does_not_fork(monkeypatch, fake_pool):
     assert fake_pool.kwargs["mp_context"].get_start_method() != "fork"
 
 
+def test_parallel_pool_redirects_worker_stdio(monkeypatch, fake_pool):
+    """Workers still inherit fds 0-2 across exec; without _subprocess_init an
+    MCP stdio parent's JSON-RPC channel collides with worker output."""
+    monkeypatch.setattr(structure, "_available_cpus", lambda: 4)
+    _build_table_count_cache_parallel("doc.pdf", 20)
+    assert fake_pool.kwargs["initializer"] is structure._subprocess_init
+
+
 def test_parallel_cache_covers_every_page(monkeypatch, fake_pool):
     monkeypatch.setattr(structure, "_available_cpus", lambda: 4)
     cache = _build_table_count_cache_parallel("doc.pdf", 20)
