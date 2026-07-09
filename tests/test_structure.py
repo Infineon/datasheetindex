@@ -594,24 +594,36 @@ def test_mp_context_falls_back_to_spawn_without_forkserver(monkeypatch):
 # --- The real pool, with nothing mocked ---
 
 
+def _tables_on(page_index: int) -> int:
+    """Table count `_write_table_pdf` draws on a page. Alternates 1 and 2 so a
+    worker that returns a constant without reading the page cannot pass."""
+    return 1 + (page_index % 2)
+
+
 def _write_table_pdf(path: Path, pages: int) -> None:
     doc = pymupdf.open()
     for p in range(pages):
         page = doc.new_page()
-        for row in range(4):
-            for col in range(3):
-                rect = pymupdf.Rect(
-                    50 + col * 90,
-                    60 + row * 25,
-                    50 + (col + 1) * 90,
-                    60 + (row + 1) * 25,
-                )
-                page.draw_rect(rect, color=(0, 0, 0), width=0.7)
-                page.insert_text(
-                    (rect.x0 + 3, rect.y0 + 15), f"{p}{row}{col}", fontsize=7
-                )
+        for grid in range(_tables_on(p)):
+            top = 60 + grid * 330  # separated enough to read as distinct tables
+            for row in range(4):
+                for col in range(3):
+                    rect = pymupdf.Rect(
+                        50 + col * 90,
+                        top + row * 25,
+                        50 + (col + 1) * 90,
+                        top + (row + 1) * 25,
+                    )
+                    page.draw_rect(rect, color=(0, 0, 0), width=0.7)
+                    page.insert_text(
+                        (rect.x0 + 3, rect.y0 + 15), f"{p}{grid}{row}{col}", fontsize=7
+                    )
     doc.save(str(path))
     doc.close()
+
+
+def _expected_counts(pages: int) -> dict[int, int]:
+    return {i: _tables_on(i) for i in range(pages)}
 
 
 def test_real_pool_counts_tables(tmp_path):
@@ -623,11 +635,10 @@ def test_real_pool_counts_tables(tmp_path):
     exists to avoid. enrich_with_table_counts swallows such failures, so without
     this test a permanently broken pool would pass CI.
 
-    Counts are asserted against the fixture, which is built with exactly one
-    ruled grid per page, rather than against an in-process sequential scan: if
-    any earlier test has imported pymupdf4llm, the parent's find_tables() is
-    backed by the ML layout engine while the workers' is not, so the two sides
-    would be comparing different engines.
+    Counts are asserted against the fixture rather than against an in-process
+    sequential scan: if any earlier test has imported pymupdf4llm, the parent's
+    find_tables() is backed by the ML layout engine while the workers' is not,
+    so the two sides would be comparing different engines.
     """
     pages = 13
     pdf = tmp_path / "tables.pdf"
@@ -635,7 +646,28 @@ def test_real_pool_counts_tables(tmp_path):
 
     parallel = _build_table_count_cache_parallel(str(pdf), pages)
 
-    assert parallel == dict.fromkeys(range(pages), 1)
+    assert parallel == _expected_counts(pages)
+
+
+def test_sequential_counts_tables(tmp_path):
+    """The fallback path must count real tables, not just avoid raising.
+
+    Asserted against the same fixture as the parallel test, which pins the two
+    paths to the same answer without comparing them directly -- a direct
+    comparison would pit the parent's find_tables() against the workers', and
+    those are different engines once pymupdf4llm is imported.
+    """
+    pages = 7
+    pdf = tmp_path / "tables.pdf"
+    _write_table_pdf(pdf, pages=pages)
+
+    doc = pymupdf.open(str(pdf))
+    try:
+        sequential = structure._build_table_count_cache_sequential(doc)
+    finally:
+        doc.close()
+
+    assert sequential == _expected_counts(pages)
 
 
 # --- enrich_with_table_counts dispatch and degradation ---
