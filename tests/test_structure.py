@@ -614,7 +614,7 @@ def _write_table_pdf(path: Path, pages: int) -> None:
     doc.close()
 
 
-def test_real_pool_matches_sequential(tmp_path):
+def test_real_pool_counts_tables(tmp_path):
     """Spawns actual workers under the real start method.
 
     The mocked pool tests assert construction kwargs but never start a process,
@@ -622,20 +622,20 @@ def test_real_pool_matches_sequential(tmp_path):
     a forkserver that fails to bootstrap -- exactly the bug class this module
     exists to avoid. enrich_with_table_counts swallows such failures, so without
     this test a permanently broken pool would pass CI.
+
+    Counts are asserted against the fixture, which is built with exactly one
+    ruled grid per page, rather than against an in-process sequential scan: if
+    any earlier test has imported pymupdf4llm, the parent's find_tables() is
+    backed by the ML layout engine while the workers' is not, so the two sides
+    would be comparing different engines.
     """
+    pages = 13
     pdf = tmp_path / "tables.pdf"
-    _write_table_pdf(pdf, pages=13)
+    _write_table_pdf(pdf, pages=pages)
 
-    parallel = _build_table_count_cache_parallel(str(pdf), 13)
+    parallel = _build_table_count_cache_parallel(str(pdf), pages)
 
-    doc = pymupdf.open(str(pdf))
-    try:
-        sequential = structure._build_table_count_cache_sequential(doc)
-    finally:
-        doc.close()
-
-    assert parallel == sequential
-    assert sum(parallel.values()) > 0  # the fixture really does contain tables
+    assert parallel == dict.fromkeys(range(pages), 1)
 
 
 # --- enrich_with_table_counts dispatch and degradation ---

@@ -211,7 +211,7 @@ wheels = [
 
 [[package]]
 name = "datasheetindex"
-version = "0.17.1"
+version = "0.17.2"
 source = { editable = "." }
 dependencies = [
     { name = "pymupdf" },
@@ -232,6 +232,7 @@ mcp = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "datasheetindex", extra = ["mcp"] },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "ruff" },
@@ -251,6 +252,7 @@ provides-extras = ["llm", "layout", "mcp"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "datasheetindex", extras = ["mcp"] },
     { name = "pre-commit", specifier = ">=4.5.1" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "ruff", specifier = ">=0.14.11" },
