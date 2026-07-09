@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
+import multiprocessing
 import os
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from datasheetindex.core.boilerplate import flag_boilerplate
@@ -13,9 +15,19 @@ from datasheetindex.core.textfile import extract_section_text
 from datasheetindex.models import TocNode
 
 if TYPE_CHECKING:
+    from multiprocessing.context import BaseContext
+
     import pymupdf
 
 logger = logging.getLogger(__name__)
+
+# Page-level find_tables() does not scale past a handful of processes, and each
+# worker costs real memory. Cap the fan-out so a large PDF on a many-core host
+# cannot spawn one process per page.
+_MAX_PARALLEL_WORKERS = 8
+
+_CGROUP_ROOT = Path("/sys/fs/cgroup")
+_PROC_SELF_CGROUP = Path("/proc/self/cgroup")
 
 
 def extract_toc(doc: pymupdf.Document) -> list[list]:
@@ -181,9 +193,11 @@ def _count_tables_on_page(args: tuple[str, int]) -> tuple[int, int]:
 def _subprocess_init() -> None:
     """Redirect stdin/stdout to devnull in worker subprocesses.
 
-    On Windows, child processes inherit the parent's file descriptors.
-    When the parent is an MCP stdio server, inherited stdin/stdout
-    collide with JSON-RPC communication, causing deadlocks.
+    Workers start under a non-fork method (see :func:`_mp_context`), so they do
+    not inherit the parent's open file descriptors -- except 0, 1 and 2, which
+    survive ``exec`` on every platform. When the parent is an MCP stdio server,
+    an inherited stdin/stdout collides with JSON-RPC communication, causing
+    deadlocks.
     """
     devnull = os.open(os.devnull, os.O_RDWR)
     os.dup2(devnull, 0)  # stdin
@@ -191,14 +205,147 @@ def _subprocess_init() -> None:
     os.close(devnull)
 
 
+def _cpus_from_quota(quota: int, period: int) -> int | None:
+    """Effective CPU count for a bandwidth quota, or ``None`` if unlimited.
+
+    A non-positive quota means unlimited; a non-positive period is malformed
+    (and would divide by zero).
+    """
+    if quota <= 0 or period <= 0:
+        return None
+    return max(1, quota // period)
+
+
+def _own_cgroup_relpath(proc_cgroup: Path, controller: str | None) -> str:
+    """This process's cgroup path, relative to the hierarchy root.
+
+    Parses ``/proc/self/cgroup``. *controller* is ``None`` for the cgroup v2
+    unified hierarchy (whose lines start with ``0::``), or a v1 controller name
+    such as ``cpu``. Returns ``""`` (the root) when no match is found -- which
+    is also what a container in its own cgroup namespace reports.
+    """
+    try:
+        lines = proc_cgroup.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ""
+
+    for line in lines:
+        hierarchy_id, _, rest = line.partition(":")
+        controllers, _, path = rest.partition(":")
+        if controller is None:
+            if hierarchy_id == "0":
+                return path.strip("/")
+        elif controller in controllers.split(","):
+            return path.strip("/")
+    return ""
+
+
+def _cgroup_chain(base: Path, relpath: str) -> list[Path]:
+    """*base* and each descendant along *relpath*, root first."""
+    chain = [base]
+    current = base
+    for part in relpath.split("/"):
+        if part and part != "..":
+            current = current / part
+            chain.append(current)
+    return chain
+
+
+def _read_cgroup_cpu_quota(
+    root: Path | None = None, proc_cgroup: Path | None = None
+) -> int | None:
+    """Effective CPU count from the cgroup CPU bandwidth quota.
+
+    Resolves the process's *own* cgroup via ``/proc/self/cgroup`` rather than
+    reading the hierarchy root, because a quota is commonly applied to a nested
+    cgroup (e.g. systemd's ``CPUQuota=`` on ``/system.slice/x.service``) while
+    the root always reports unlimited. A quota on any ancestor also constrains
+    us, so the tightest one along the chain wins. In a container's own cgroup
+    namespace the chain collapses to the root, which is where its quota lives.
+
+    Returns ``None`` when no quota applies or none can be read.
+    """
+    root = _CGROUP_ROOT if root is None else root
+    proc_cgroup = _PROC_SELF_CGROUP if proc_cgroup is None else proc_cgroup
+
+    quotas: list[int] = []
+
+    # cgroup v2: "<quota> <period>", or "max <period>" when unlimited.
+    for directory in _cgroup_chain(root, _own_cgroup_relpath(proc_cgroup, None)):
+        try:
+            quota_s, period_s = (
+                (directory / "cpu.max").read_text(encoding="utf-8").split()
+            )
+            if quota_s == "max":
+                continue
+            cpus = _cpus_from_quota(int(quota_s), int(period_s))
+        except (OSError, ValueError):
+            continue
+        if cpus is not None:
+            quotas.append(cpus)
+
+    if quotas:
+        return min(quotas)
+
+    # cgroup v1: quota and period live in separate files under the cpu controller.
+    v1_root = root / "cpu"
+    for directory in _cgroup_chain(v1_root, _own_cgroup_relpath(proc_cgroup, "cpu")):
+        try:
+            quota = int((directory / "cpu.cfs_quota_us").read_text(encoding="utf-8"))
+            period = int((directory / "cpu.cfs_period_us").read_text(encoding="utf-8"))
+            cpus = _cpus_from_quota(quota, period)
+        except (OSError, ValueError):
+            continue
+        if cpus is not None:
+            quotas.append(cpus)
+
+    return min(quotas) if quotas else None
+
+
+def _available_cpus() -> int:
+    """CPUs this process may actually use.
+
+    ``os.cpu_count()`` reports the host's cores and ignores the cgroup CPU
+    quota, so in a 1-CPU container on a 128-core node it overstates the budget
+    by 128x. Affinity does not help either: a CFS bandwidth quota is not an
+    affinity mask. Take the tighter of the two signals.
+    """
+    cpus = os.process_cpu_count() or 1  # affinity-aware, quota-blind
+    quota = _read_cgroup_cpu_quota()
+    if quota is not None:
+        cpus = min(cpus, quota)
+    return max(1, cpus)
+
+
+def _mp_context() -> BaseContext:
+    """A start method that does not fork the calling process.
+
+    ``fork()`` gives the child only the calling thread but a full copy of every
+    mutex, including any held by threads that do not exist in the child -- such
+    a child can deadlock on its first allocation. It also copies every open file
+    descriptor, and an inherited ``flock`` fd keeps the lock held no matter which
+    process acquired it. A library cannot know whether its caller is threaded,
+    so it must not fork one. This also keeps behaviour identical across Python
+    3.13 (which defaults to ``fork``) and 3.14 (which defaults to
+    ``forkserver``).
+    """
+    methods = multiprocessing.get_all_start_methods()
+    for method in ("forkserver", "spawn"):
+        if method in methods:
+            return multiprocessing.get_context(method)
+    return multiprocessing.get_context()  # pragma: no cover
+
+
 def _build_table_count_cache_parallel(
     pdf_path: str, total_pages: int
 ) -> dict[int, int]:
     """Scan all pages for tables using multiprocessing."""
-    workers = min(os.cpu_count() or 1, total_pages)
+    workers = min(_available_cpus(), total_pages, _MAX_PARALLEL_WORKERS)
     args = [(pdf_path, i) for i in range(total_pages)]
     with concurrent.futures.ProcessPoolExecutor(
-        max_workers=workers, initializer=_subprocess_init
+        max_workers=workers,
+        initializer=_subprocess_init,
+        mp_context=_mp_context(),
     ) as pool:
         results = pool.map(_count_tables_on_page, args)
     return dict(results)
@@ -229,8 +376,10 @@ def enrich_with_table_counts(
 
     Modifies nodes in-place and returns them for convenience.
     """
-    # Subprocess spawn overhead on Windows (~3.5s) outweighs parallelism
-    # gains for small documents. Only parallelize above this threshold.
+    # Workers never fork the caller (see _mp_context), so every platform pays a
+    # fixed process-startup cost that outweighs parallelism on small documents.
+    # Only parallelize above this threshold. Measured on ~200ms/page documents:
+    # ~1.4x at 12 pages, ~3.7x at 40.
     _PARALLEL_PAGE_THRESHOLD = 12
 
     total_pages = len(doc)

@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.17.1] - 2026-07-09
+
+### Fixed
+- **Parallel table counting no longer forks the caller, and sizes its pool from the cgroup CPU quota.** `_build_table_count_cache_parallel` derived `max_workers` from `os.cpu_count()`, which reports the *host's* cores and is blind to the cgroup CPU quota, so a 42-page PDF in a 1-CPU container on a 128-core node spawned 42 workers. Combined with the `fork` start method (multiprocessing's default on Python <= 3.13) this caused two production failures in long-running services: container OOM kills (each copy-on-write child costs ~26 MiB of the parent's heap), and a permanently wedged pod -- a child forked while another thread held an allocator lock deadlocked on a mutex it could never see released, and because it also inherited every open file descriptor it held the parent's `flock`-based admission lock open forever, while `pool.map` blocked on it indefinitely. Two independent changes fix this:
+  - Workers are now `min(available_cpus, total_pages, 8)`. `_available_cpus()` reads the cgroup CPU bandwidth quota (v2 `cpu.max`, v1 `cpu.cfs_quota_us`) and takes the tighter of that and `os.process_cpu_count()`; note that `sched_getaffinity` cannot see a CFS quota, since it is not an affinity mask. The quota is resolved against the process's *own* cgroup via `/proc/self/cgroup`, with the tightest quota along the ancestor chain winning -- reading the hierarchy root alone would miss a quota applied to a nested cgroup, as systemd's `CPUQuota=` does on a bare host. The hard ceiling of 8 also bounds memory on an unconstrained host, where page-level `find_tables()` does not scale past a handful of processes anyway.
+  - The pool now runs under `forkserver` (falling back to `spawn` where forkserver is unavailable, i.e. Windows) instead of `fork`. Children are no longer forked from the caller, so they inherit neither its open file descriptors nor its held mutexes -- this is what actually eliminates the deadlock. A library cannot know whether its caller is multithreaded, so it must not fork one. Behaviour is now identical on Python 3.13 and 3.14 (which changed its own default to `forkserver`). Closes #9.
+
+  **Compatibility.** The parallel path now obeys multiprocessing's "safe importing of main module" rule on Linux, as it already did on Windows and macOS: a caller whose `__main__` script runs `build_datasheet()` at module scope without an `if __name__ == "__main__":` guard will have that top-level code imported one additional time, in the forkserver process (once, not once per worker). The calling process keeps both correct results and its parallelism; guard your entry point to avoid running module-level side effects twice. Callers using the `datasheetindex` CLI, `python -m`, or any guarded entry point are unaffected. Throughput is unchanged: on ~200 ms/page documents the pool still delivers ~3.7x over sequential at 40 pages, and ~1.4x at the 12-page parallelism threshold.
+
+### Changed
+- **`_ResponsesOutput.output_text` is now declared as a read-only property** rather than a mutable attribute. The pipeline only ever reads it, and openai's `Response.output_text` is a `@property`, which cannot satisfy a mutable protocol attribute -- a latent declaration error that the upgraded `ty` correctly rejects.
+
+### Dependency upgrades
+- Refreshed the lock to the latest compatible versions (`uv lock --upgrade`, all extras synced): `cffi` 2.0.0 -> 2.1.0, `filelock` 3.29.5 -> 3.29.7, `numpy` 2.5.0 -> 2.5.1, `python-discovery` 1.4.2 -> 1.4.4, `tqdm` 4.68.3 -> 4.68.4, `ty` 0.0.56 -> 0.0.57, `uvicorn` 0.49.0 -> 0.51.0, `virtualenv` 21.5.1 -> 21.6.0. No runtime dependency of the library changed. Pre-commit hooks refreshed (`pre-commit autoupdate`): `uv-pre-commit` 0.11.26 -> 0.11.28. Full suite, ruff, and ty all pass on the upgraded set.
+
 ## [0.17.0] - 2026-07-03
 
 ### Compatibility at a glance
