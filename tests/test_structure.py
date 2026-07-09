@@ -1,11 +1,17 @@
 """Tests for ToC tree building and enrichment."""
 
+import concurrent.futures
 from pathlib import Path
 
 import pymupdf
 import pytest
 
+from datasheetindex.core import structure
 from datasheetindex.core.structure import (
+    _available_cpus,
+    _build_table_count_cache_parallel,
+    _mp_context,
+    _read_cgroup_cpu_quota,
     assign_breadcrumbs,
     build_tree,
     enrich_with_table_counts,
@@ -328,3 +334,206 @@ def _collect_all(nodes, result):
     for node in nodes:
         result.append(node)
         _collect_all(node.nodes, result)
+
+
+# --- Worker pool sizing and start method ---
+
+
+def _write_cgroup_v2(root: Path, contents: str) -> Path:
+    (root / "cpu.max").write_text(contents, encoding="utf-8")
+    return root
+
+
+def _write_cgroup_v1(root: Path, quota: str, period: str) -> Path:
+    cpu_dir = root / "cpu"
+    cpu_dir.mkdir(parents=True, exist_ok=True)
+    (cpu_dir / "cpu.cfs_quota_us").write_text(quota, encoding="utf-8")
+    (cpu_dir / "cpu.cfs_period_us").write_text(period, encoding="utf-8")
+    return root
+
+
+@pytest.mark.parametrize(
+    ("cpu_max", "expected"),
+    [
+        ("100000 100000", 1),  # 1.0 CPU
+        ("50000 100000", 1),  # 0.5 CPU rounds up to one worker
+        ("250000 100000", 2),  # 2.5 CPU truncates to two workers
+        ("800000 100000", 8),
+    ],
+)
+def test_cgroup_v2_quota_is_read(tmp_path, cpu_max, expected):
+    root = _write_cgroup_v2(tmp_path, cpu_max)
+    assert _read_cgroup_cpu_quota(root) == expected
+
+
+def test_cgroup_v2_unlimited_reports_no_quota(tmp_path):
+    root = _write_cgroup_v2(tmp_path, "max 100000")
+    assert _read_cgroup_cpu_quota(root) is None
+
+
+def test_cgroup_v1_quota_is_read(tmp_path):
+    root = _write_cgroup_v1(tmp_path, "200000", "100000")
+    assert _read_cgroup_cpu_quota(root) == 2
+
+
+def test_cgroup_v1_unlimited_reports_no_quota(tmp_path):
+    root = _write_cgroup_v1(tmp_path, "-1", "100000")
+    assert _read_cgroup_cpu_quota(root) is None
+
+
+def test_cgroup_absent_reports_no_quota(tmp_path):
+    assert _read_cgroup_cpu_quota(tmp_path) is None
+
+
+def test_cgroup_garbage_reports_no_quota(tmp_path):
+    root = _write_cgroup_v2(tmp_path, "not-a-quota")
+    assert _read_cgroup_cpu_quota(root) is None
+
+
+@pytest.mark.parametrize("cpu_max", ["100000 0", "100000 -1"])
+def test_cgroup_v2_zero_period_does_not_raise(tmp_path, cpu_max):
+    """A malformed period must degrade to None, not ZeroDivisionError."""
+    root = _write_cgroup_v2(tmp_path, cpu_max)
+    assert _read_cgroup_cpu_quota(root) is None
+
+
+def test_cgroup_v1_zero_period_does_not_raise(tmp_path):
+    root = _write_cgroup_v1(tmp_path, "100000", "0")
+    assert _read_cgroup_cpu_quota(root) is None
+
+
+def _write_proc_cgroup(tmp_path: Path, contents: str) -> Path:
+    proc = tmp_path / "proc_self_cgroup"
+    proc.write_text(contents, encoding="utf-8")
+    return proc
+
+
+def test_cgroup_v2_quota_on_nested_cgroup_is_found(tmp_path):
+    """systemd applies CPUQuota to a nested slice; the root reports 'max'."""
+    root = tmp_path / "sys"
+    service = root / "system.slice" / "app.service"
+    service.mkdir(parents=True)
+    _write_cgroup_v2(root, "max 100000")
+    _write_cgroup_v2(service, "200000 100000")
+    proc = _write_proc_cgroup(tmp_path, "0::/system.slice/app.service\n")
+
+    assert _read_cgroup_cpu_quota(root, proc) == 2
+
+
+def test_cgroup_v2_tightest_ancestor_quota_wins(tmp_path):
+    """A quota on a parent slice constrains us even if our own is looser."""
+    root = tmp_path / "sys"
+    slice_dir = root / "system.slice"
+    service = slice_dir / "app.service"
+    service.mkdir(parents=True)
+    _write_cgroup_v2(root, "max 100000")
+    _write_cgroup_v2(slice_dir, "100000 100000")  # parent: 1 CPU
+    _write_cgroup_v2(service, "800000 100000")  # own: 8 CPUs
+    proc = _write_proc_cgroup(tmp_path, "0::/system.slice/app.service\n")
+
+    assert _read_cgroup_cpu_quota(root, proc) == 1
+
+
+def test_cgroup_v2_container_namespace_reads_root(tmp_path):
+    """In its own cgroup namespace a container reports '0::/'."""
+    root = tmp_path / "sys"
+    root.mkdir()
+    _write_cgroup_v2(root, "100000 100000")
+    proc = _write_proc_cgroup(tmp_path, "0::/\n")
+
+    assert _read_cgroup_cpu_quota(root, proc) == 1
+
+
+def test_cgroup_v1_quota_on_nested_cgroup_is_found(tmp_path):
+    root = tmp_path / "sys"
+    service = root / "cpu" / "system.slice" / "app.service"
+    service.mkdir(parents=True)
+    _write_cgroup_v1(root, "-1", "100000")  # root: unlimited
+    (service / "cpu.cfs_quota_us").write_text("400000", encoding="utf-8")
+    (service / "cpu.cfs_period_us").write_text("100000", encoding="utf-8")
+    proc = _write_proc_cgroup(tmp_path, "4:cpu,cpuacct:/system.slice/app.service\n")
+
+    assert _read_cgroup_cpu_quota(root, proc) == 4
+
+
+def test_cgroup_unreadable_proc_falls_back_to_root(tmp_path):
+    root = _write_cgroup_v2(tmp_path, "300000 100000")
+    assert _read_cgroup_cpu_quota(root, tmp_path / "missing") == 3
+
+
+def test_available_cpus_clamps_to_cgroup_quota(monkeypatch):
+    """A 1-CPU container on a 128-core host must report 1, not 128."""
+    monkeypatch.setattr(structure.os, "process_cpu_count", lambda: 128)
+    monkeypatch.setattr(structure, "_read_cgroup_cpu_quota", lambda: 1)
+    assert _available_cpus() == 1
+
+
+def test_available_cpus_falls_back_to_process_cpu_count(monkeypatch):
+    monkeypatch.setattr(structure.os, "process_cpu_count", lambda: 4)
+    monkeypatch.setattr(structure, "_read_cgroup_cpu_quota", lambda: None)
+    assert _available_cpus() == 4
+
+
+def test_available_cpus_never_returns_zero(monkeypatch):
+    monkeypatch.setattr(structure.os, "process_cpu_count", lambda: None)
+    monkeypatch.setattr(structure, "_read_cgroup_cpu_quota", lambda: None)
+    assert _available_cpus() == 1
+
+
+def test_mp_context_never_forks():
+    """fork() in a threaded host copies held mutexes and every open fd."""
+    assert _mp_context().get_start_method() != "fork"
+
+
+class _FakePool:
+    """Stand-in for ProcessPoolExecutor that records how it was constructed."""
+
+    kwargs: dict = {}
+
+    def __init__(self, **kwargs):
+        _FakePool.kwargs = kwargs
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def map(self, fn, args):
+        return [(page_idx, 0) for _, page_idx in args]
+
+
+@pytest.fixture
+def fake_pool(monkeypatch):
+    _FakePool.kwargs = {}
+    monkeypatch.setattr(
+        concurrent.futures, "ProcessPoolExecutor", _FakePool, raising=True
+    )
+    return _FakePool
+
+
+@pytest.mark.parametrize(
+    ("cpus", "total_pages", "expected"),
+    [
+        (128, 42, 8),  # hard cap bounds a big host
+        (1, 42, 1),  # a 1-CPU cgroup quota bounds the fan-out
+        (128, 3, 3),  # never more workers than pages
+        (4, 42, 4),
+    ],
+)
+def test_parallel_pool_is_bounded(monkeypatch, fake_pool, cpus, total_pages, expected):
+    monkeypatch.setattr(structure, "_available_cpus", lambda: cpus)
+    _build_table_count_cache_parallel("doc.pdf", total_pages)
+    assert fake_pool.kwargs["max_workers"] == expected
+
+
+def test_parallel_pool_does_not_fork(monkeypatch, fake_pool):
+    monkeypatch.setattr(structure, "_available_cpus", lambda: 4)
+    _build_table_count_cache_parallel("doc.pdf", 20)
+    assert fake_pool.kwargs["mp_context"].get_start_method() != "fork"
+
+
+def test_parallel_cache_covers_every_page(monkeypatch, fake_pool):
+    monkeypatch.setattr(structure, "_available_cpus", lambda: 4)
+    cache = _build_table_count_cache_parallel("doc.pdf", 20)
+    assert cache == dict.fromkeys(range(20), 0)
