@@ -33,6 +33,7 @@ pythonpath = ["src"]
 markers = [
     "real_pdf: tests that require the bundled real PDF fixtures",
     "integration: tests that exercise external or end-to-end integrations",
+    "layout: tests that require the optional [layout] extra (pymupdf4llm)",
 ]
 
 [tool.ruff]
