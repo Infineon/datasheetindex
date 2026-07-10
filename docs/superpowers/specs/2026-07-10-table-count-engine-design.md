@@ -144,17 +144,22 @@ different set of errors. This change makes the number trustworthy and stable.
 
 ### 1. New module: `src/datasheetindex/core/engine.py`
 
-The single owner of PyMuPDF's layout global. Roughly 35 lines.
+The single owner of PyMuPDF's layout global **and of the `pymupdf4llm` import
+that installs it**. Roughly 55 lines.
 
 ```python
 _LAYOUT_LOCK = threading.RLock()
+_MISSING = object()
 
 
 @contextmanager
 def classic_tables() -> Iterator[None]:
     """Pin find_tables() to PyMuPDF's classic detector for the duration."""
     with _LAYOUT_LOCK:
-        saved = getattr(pymupdf, "_get_layout", None)
+        saved = getattr(pymupdf, "_get_layout", _MISSING)
+        if saved is _MISSING:
+            yield  # no hook in this PyMuPDF: find_tables() is already classic
+            return
         pymupdf._get_layout = None
         try:
             yield
@@ -163,22 +168,50 @@ def classic_tables() -> Iterator[None]:
 
 
 @contextmanager
-def layout_engine() -> Iterator[None]:
-    """Hold the layout engine stable while pymupdf4llm uses it."""
+def layout_engine() -> Iterator[Any]:
+    """Import pymupdf4llm under the lock and yield it with its hook installed."""
     with _LAYOUT_LOCK:
-        yield
+        try:
+            module = importlib.import_module("pymupdf4llm")
+        except ImportError:
+            raise ImportError(
+                "pymupdf4llm is required for table markdown extraction. "
+                "Install it with: uv sync --extra layout"
+            ) from None
+        # Invariant: if pymupdf4llm believes layout is on, the hook must exist.
+        # Anything else makes to_markdown() raise inside _layout_to_markdown.
+        if getattr(module, "_use_layout", False) and (
+            getattr(pymupdf, "_get_layout", None) is None
+        ):
+            module.use_layout(True)  # reinstalls the hook (~1.1 s, rare)
+        yield module
 ```
 
 Notes:
 
-- `getattr` with a `None` default means that if a future PyMuPDF removes the
-  `_get_layout` hook, `classic_tables()` degrades to a no-op. That is correct:
-  with no hook there is no layout engine to suppress. (The assignment would then
-  create an inert `pymupdf._get_layout = None` attribute that nothing reads.)
+- **`layout_engine()` performs the import.** This is the whole point, not an
+  incidental tidy-up. `pymupdf4llm`'s import is what calls
+  `pymupdf.layout.activate()` and installs the hook, so an import outside the
+  lock can interleave with `classic_tables()`: A saves `None`, B's import
+  installs the hook, A restores the stale `None`. Because
+  `pymupdf4llm._use_layout` remains `True`, `to_markdown()` then routes into
+  `_layout_to_markdown`, which iterates `page.layout_information` -- now `None`
+  -- and raises `TypeError: 'NoneType' object is not iterable`. The module is
+  cached, so re-importing never reactivates: **every subsequent
+  `extract_table_markdown()` call in that process raises.** Verified.
+- The `_use_layout` invariant check makes that state unreachable and
+  self-healing even if a third party nulls the global. It is gated on
+  `_use_layout` so that a legitimate non-layout `pymupdf4llm` install (one whose
+  `import pymupdf.layout` failed, leaving `use_layout(False)`) is not
+  "repaired" into an engine it does not have.
+- `_MISSING` sentinel, not a `None` default: a PyMuPDF with no `_get_layout`
+  attribute is a genuine no-op, and the early `return` leaves no attribute
+  behind. Assigning `None` and restoring `None` would have created one.
 - `RLock`, not `Lock`, so that nesting cannot deadlock.
 - Restoring the saved callable directly, rather than calling
-  `pymupdf4llm.use_layout(True)`, keeps the exit path free (~20 us vs ~1.1 s)
-  and avoids importing `pymupdf4llm` in a process that never needed it.
+  `pymupdf4llm.use_layout(True)`, keeps `classic_tables()`'s exit free
+  (~20 us vs ~1.1 s) and avoids importing `pymupdf4llm` in a process that never
+  needed it.
 
 `core/` is the right home: `tools/bound.py` already imports from `core/`
 (`core.locate`, `core.structure`, `core.textfile`), so this introduces no new
@@ -200,8 +233,19 @@ classic detector regardless of process state.
 
 ### 3. `src/datasheetindex/tools/bound.py`
 
-`extract_table_markdown` acquires `layout_engine()` around the `to_markdown`
-call, so it cannot observe a neutralized global.
+`extract_table_markdown` delegates both the import and the call to
+`layout_engine()`, so the activation and the use of the hook happen inside one
+critical section:
+
+```python
+with layout_engine() as pymupdf4llm:
+    return pymupdf4llm.to_markdown(self.doc, pages=[page - 1], show_progress=False)
+```
+
+The local `importlib.import_module("pymupdf4llm")` and its `ImportError`
+message move into `engine.py`, leaving `bound.py` with no direct knowledge of
+the optional dependency. Keeping the import here -- outside the lock -- is
+precisely the defect described above, so this is not a stylistic choice.
 
 This is necessary because `build_datasheet` and `extract_table_markdown` both
 run under `asyncio.to_thread` (`tools/defs.py:156` and `:240`), so they can
@@ -222,9 +266,21 @@ sequential scan. Acceptable: the sequential path runs only for documents under
 
 ### 4. `src/datasheetindex/mcp_server.py`
 
-No change. `_preload_layout_model()` stays exactly as-is. Once counting is
-pinned, warming the ONNX model at server start benefits only
-`extract_table_markdown`, which is what it was for.
+`_preload_layout_model()` keeps its purpose and its docstring -- warming the
+ONNX model at server start, which once counting is pinned benefits only
+`extract_table_markdown` -- but stops importing `pymupdf4llm` itself:
+
+```python
+def _preload_layout_model() -> None:
+    with contextlib.suppress(ImportError):
+        with layout_engine():
+            pass
+```
+
+It runs before serving begins, so it cannot actually race today. Routing it
+through `engine.py` anyway leaves exactly one import site for `pymupdf4llm` in
+the package, which is what makes "the hook is only ever installed under the
+lock" a property you can check by grepping rather than by reasoning.
 
 ## Testing
 
@@ -240,9 +296,23 @@ New `tests/test_engine.py`:
 - `classic_tables()` clears the hook inside the block and restores it after.
 - It restores the hook when the body raises.
 - It nests without deadlocking, and the innermost exit restores correctly.
-- It is a no-op when `pymupdf` has no `_get_layout` attribute.
-- `layout_engine()` and `classic_tables()` mutually exclude (assert the lock is
-  the shared `_LAYOUT_LOCK`; a full thread-race test is not worth its flakiness).
+- When `pymupdf` has no `_get_layout` attribute (simulate with
+  `monkeypatch.delattr`), `classic_tables()` is a true no-op: the body runs and
+  the attribute is **still absent afterwards** (`not hasattr(pymupdf,
+  "_get_layout")`). This is the assertion the previous sketch would have failed.
+- `layout_engine()` yields the module and holds `_LAYOUT_LOCK` for the whole
+  body (assert `_LAYOUT_LOCK` is held inside; a full thread-race test is not
+  worth its flakiness).
+- `layout_engine()` raises the friendly `ImportError` when `pymupdf4llm` is
+  absent (simulate by making `importlib.import_module` raise).
+- **The stale-restore regression**, with a stub `pymupdf4llm` module: enter
+  `classic_tables()` while no hook is installed, have the stub's import install
+  one, exit, and assert `layout_engine()` still yields a module whose hook is
+  live. Reproduces the permanent-`TypeError` corruption if the import ever
+  escapes the lock.
+- The `_use_layout` invariant repair fires when the hook is `None` but the
+  module reports `_use_layout = True`, and does **not** fire when `_use_layout`
+  is `False`.
 
 In `tests/test_structure.py`:
 
@@ -281,6 +351,14 @@ Nothing here needs the `[layout]` extra, so CI coverage is real.
   module docstring.
 - **The lock serializes table-markdown behind index builds.** Bounded by the
   sequential path's rarity (see above), and absent entirely without `[layout]`.
+- **`RLock` permits `layout_engine()` nested inside `classic_tables()` on one
+  thread**, which would call `to_markdown()` with the hook suppressed. No such
+  path exists, and the `_use_layout` invariant check reinstalls the hook rather
+  than crashing, but the nesting is silently wrong rather than loud. Noted in
+  the module docstring; not worth a re-entrancy guard for a path nothing takes.
+- **A third party importing `pymupdf4llm` directly** (a host application, a
+  notebook) still installs the hook outside our lock. `engine.py` owns every
+  import inside the package, which is all it can own.
 
 ## Acceptance criteria
 
@@ -290,5 +368,11 @@ Nothing here needs the `[layout]` extra, so CI coverage is real.
 2. `table_count` for a given PDF is unchanged by installing `[layout]`.
 3. `extract_table_markdown` still returns layout-aware markdown (pipe-delimited
    tables) when `[layout]` is installed.
-4. The full test suite passes under a plain `uv sync` and under
+4. In a process that has **never** imported `pymupdf4llm`, an index build
+   (which enters and exits `classic_tables()`) followed by an
+   `extract_table_markdown()` call returns layout-aware markdown rather than
+   raising `TypeError`. This is the corruption the original design admitted.
+5. `pymupdf4llm` is imported in exactly one place in `src/`:
+   `core/engine.py`. Enforceable by grep.
+6. The full test suite passes under a plain `uv sync` and under
    `uv sync --extra layout`.
