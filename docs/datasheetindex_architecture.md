@@ -152,7 +152,14 @@ The agent IS the LLM — let it reason about the preamble text directly.
 }
 ```
 
-Note: `has_tables` and `table_count` are heuristic hints from PyMuPDF (false positives on block diagrams are expected). `source` is always the filename, not the full path. In this example, node "0001" has `table_count: 2` which are false positives from block diagram boxes.
+Note: `has_tables` and `table_count` are heuristic hints from PyMuPDF's classic
+geometric table detector (false positives on block diagrams and on plot
+gridlines are expected). They are identical whether or not the optional
+`[layout]` extra is installed, and whichever internal scan path runs, so the
+count is a stable property of the document. The ML layout engine is used only by
+`extract_table_markdown`. `source` is always the filename, not the full path. In
+this example, node "0001" has `table_count: 2` which are false positives from
+block diagram boxes.
 
 **`breadcrumb` semantics:** Pre-computed full ancestry path joined by `" > "`, including the node's own title. Lets downstream agents and RAG indexers see structural context without re-traversing parents. Computed once in `assign_breadcrumbs()` during `build_tree()`, so the LLM ToC fallback path gets it too. Omitted from JSON only when empty -- which happens for a bare `TocNode` constructed in isolation (e.g. legacy code) or a node with an empty title and no ancestry.
 

@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.17.3] - 2026-07-10
+
+### Fixed
+- **`table_count` no longer depends on the indexing process's import history.** `enrich_with_table_counts` has two scan paths, and they disagreed. The parallel path runs `find_tables()` in fresh worker processes that never import `pymupdf4llm`, so it always used PyMuPDF's classic geometric detector. The sequential fallback runs in the caller's process, where importing `pymupdf4llm` -- as `mcp_server._preload_layout_model()` does at startup, and as any earlier `extract_table_markdown` call does -- installs an ONNX-backed hook at `pymupdf._get_layout` that `find_tables()` consults on every call. Which path ran depended on page count, on whether `pdf_path` was available, and on whether the worker pool happened to fail. The same PDF therefore reported different `table_count` and `has_tables` values in different processes. Both paths now scan inside a `classic_tables()` guard, so counts come from the classic detector always. They are a stable property of the document; the ML engine remains available to `extract_table_markdown`, which is what it was for. Fixes #12.
+- **A concurrent `extract_table_markdown` can no longer be broken by an index build.** The `pymupdf4llm` import is what installs the layout hook, and `build_datasheet` and `extract_table_markdown` both run under `asyncio.to_thread`. An import racing the new guard would let it restore a stale `None` over the freshly installed hook; because `pymupdf4llm._use_layout` stays `True`, `to_markdown()` would then route into `_layout_to_markdown`, iterate a `None` `page.layout_information`, and raise `TypeError` -- permanently, since the module is cached. A new `core/engine.py` owns both the hook and the import, serializing them on one re-entrant lock. It is now the only module under `src/` that imports `pymupdf4llm`.
+
+### Changed
+- **The 0.17.2 note below overstates the mechanism.** Importing `pymupdf4llm` does not replace `find_tables()`; the function is never rebound. It sets the module-global `pymupdf._get_layout`, which `find_tables()` consults per call. The distinction is what makes the fix above possible: the engine is selectable per call, and saving and restoring that global costs ~20us. The "one to two orders of magnitude" slowdown holds for ruled-grid and unruled synthetic fixtures; on a real 68-page datasheet the layout engine is ~4.4x slower, and finds *fewer* tables (39 vs 75), because the classic detector false-positives on plot gridlines.
+
 ## [0.17.2] - 2026-07-09
 
 ### Fixed

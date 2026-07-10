@@ -1,6 +1,6 @@
 [project]
 name = "datasheetindex"
-version = "0.17.2"
+version = "0.17.3"
 description = "Agent-first parameter extraction from technical datasheets"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -74,7 +74,11 @@ dev = [
     # directly, and ty cannot resolve it otherwise. uv has no way to enable an
     # extra by default, so declare it here -- a plain `uv sync`, which both the
     # post-checkout hook and CI run, then yields a checkable environment.
-    # The layout extra is deliberately excluded: importing pymupdf4llm swaps
-    # PyMuPDF's find_tables() for the ML layout engine, ~50x slower.
+    # The layout extra is deliberately excluded. Importing pymupdf4llm installs
+    # a process-wide hook at pymupdf._get_layout which find_tables() consults on
+    # every call, switching it to the ML layout engine: ~35-100x slower on the
+    # synthetic table fixtures, ~4.4x on a real 68-page datasheet. Table counts
+    # are pinned to the classic detector (see core/engine.py), so the extra
+    # changes only extract_table_markdown -- and the suite's wall time.
     "datasheetindex[mcp]",
 ]
