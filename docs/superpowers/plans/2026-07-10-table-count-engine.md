@@ -55,6 +55,8 @@ Creates the module that owns PyMuPDF's layout global. Nothing else changes yet, 
   - `layout_engine() -> ContextManager[Any]` — yields the imported `pymupdf4llm` module with its hook installed; raises `ImportError` if absent.
   - `_LAYOUT_LOCK: threading.RLock` — the shared lock, imported by tests only.
 
+**Typing note.** `pymupdf` ships `py.typed` and declares `_get_layout` as `((...) -> Unknown) | None`. So `pymupdf._get_layout = None` type-checks, but assigning a bare `object()` sentinel back to it does not — `ty` reports `invalid-assignment`. Both sentinels below are therefore *callables* (never invoked; only their identity is used), and the fake `pymupdf4llm` module is bound to an `Any`-annotated name because `types.ModuleType` has no `_use_layout`/`use_layout` attributes. Do not "simplify" these back to `object()`; `uv run ty check` will fail, and the pre-commit hook runs it.
+
 - [ ] **Step 1: Write the failing tests**
 
 Create `tests/test_engine.py`:
@@ -65,6 +67,7 @@ Create `tests/test_engine.py`:
 import contextlib
 import threading
 import types
+from typing import Any
 
 import pymupdf
 import pytest
@@ -72,8 +75,24 @@ import pytest
 from datasheetindex.core import engine
 from datasheetindex.core.engine import _LAYOUT_LOCK, classic_tables, layout_engine
 
-_HOOK = object()
-_ABSENT = object()
+
+def _hook(*args: Any, **kwargs: Any) -> list[Any]:
+    """Stand-in for the ONNX layout analyzer. Only its identity matters here.
+
+    A callable, not an ``object()``: ``pymupdf._get_layout`` is declared
+    ``Callable[..., Any] | None``, so assigning a bare sentinel to it fails
+    type checking.
+    """
+    return []
+
+
+def _absent_hook(*args: Any, **kwargs: Any) -> Any:
+    """Sentinel meaning "the attribute did not exist". Never invoked."""
+    raise AssertionError("_ABSENT sentinel must never be called")
+
+
+_HOOK = _hook
+_ABSENT = _absent_hook
 
 
 @pytest.fixture(autouse=True)
@@ -148,8 +167,10 @@ def test_classic_tables_holds_the_lock():
         assert _lock_is_held_by_another_thread()
 
 
-def _fake_module(*, use_layout: bool, on_use_layout=None) -> types.ModuleType:
-    module = types.ModuleType("pymupdf4llm")
+def _fake_module(*, use_layout: bool, on_use_layout=None) -> Any:
+    # Annotated Any: a bare ModuleType has no _use_layout/use_layout attributes,
+    # so ty rejects setting them on a types.ModuleType-typed name.
+    module: Any = types.ModuleType("pymupdf4llm")
     module._use_layout = use_layout
     module.use_layout = on_use_layout or (lambda yes: None)
     return module
@@ -283,8 +304,19 @@ import pymupdf
 
 _LAYOUT_LOCK = threading.RLock()
 
-# Distinguishes "attribute absent" from "attribute is None".
-_MISSING = object()
+
+def _missing_hook(*args: Any, **kwargs: Any) -> Any:
+    """Sentinel distinguishing "attribute absent" from "attribute is None".
+
+    Callable, not a bare ``object()``: ``pymupdf._get_layout`` is declared
+    ``Callable[..., Any] | None``, so restoring an ``object()`` sentinel back
+    onto it does not type-check. Only this sentinel's *identity* is ever used;
+    it must never be invoked.
+    """
+    raise AssertionError("_MISSING sentinel must never be called")
+
+
+_MISSING = _missing_hook
 
 
 @contextmanager
