@@ -704,7 +704,19 @@ def _preload_layout_model() -> None:
 
 - [ ] **Step 5: Verify the sole-ownership criterion**
 
-The guarantee is not merely "`pymupdf4llm` is imported once". It is that `engine.py` is the only module that can **install or mutate** the hook. There are four ways to do that: import `pymupdf4llm`, import `pymupdf.layout` (whose module body calls `activate()`), call `pymupdf.layout.activate()` or `use_layout()`, or assign `pymupdf._get_layout` directly. Check all of them.
+The guarantee is not merely "`pymupdf4llm` is imported once". It is that `engine.py` is the only module that can **install or mutate** the hook. Every route must be checked:
+
+| route | why it installs the hook |
+|---|---|
+| `import pymupdf4llm` | its module body calls `use_layout(True)` |
+| `import pymupdf.layout` | the submodule's body calls `activate()` |
+| `from pymupdf import layout` | same submodule body; a *different* statement form |
+| `importlib.import_module(...)` of either | same, dynamically |
+| `pymupdf.layout.activate()` / `use_layout(...)` | direct activation |
+| `pymupdf._get_layout = ...` | direct assignment |
+| `setattr(pymupdf, "_get_layout", ...)` | direct assignment, dynamically |
+
+Both `from pymupdf import layout` and the `setattr` form were verified to install a live hook, so neither may be omitted.
 
 Run this exact command:
 
@@ -712,16 +724,20 @@ Run this exact command:
 grep -rnE \
   -e '^[[:space:]]*(import|from)[[:space:]]+pymupdf4llm' \
   -e '^[[:space:]]*(import|from)[[:space:]]+pymupdf\.layout' \
+  -e '^[[:space:]]*from[[:space:]]+pymupdf[[:space:]]+import[[:space:]].*\blayout\b' \
   -e 'import_module\("(pymupdf4llm|pymupdf\.layout)"\)' \
   -e 'pymupdf\.layout\.activate' \
   -e '_get_layout[[:space:]]*=' \
+  -e 'setattr\([^,]*pymupdf[^,]*,[[:space:]]*["'"'"']_get_layout["'"'"']' \
   -e '\buse_layout\(' \
   src/ | grep -v '^src/datasheetindex/core/engine\.py:'
 ```
 
 Expected: **no output**, and `echo $?` prints `1` (the outer `grep -v` matched nothing).
 
-The patterns are anchored to import *statements* so that prose like the "workers never import pymupdf4llm" docstring added in Task 2 does not trip them. Verified: run against the tree before Task 3 and this command prints the two real violations, `mcp_server.py:46` and `bound.py:118`. If it prints nothing before you have made the Task 3 edits, the command is wrong, not the code.
+The import patterns are anchored to statement position so that prose like the "workers never import pymupdf4llm" docstring added in Task 2 does not trip them, and `_get_layout[[:space:]]*=` does not match an unrelated name such as `_get_layout_cache = 1`. Both properties were verified.
+
+Verified against the tree *before* Task 3: this command prints exactly the two real violations, `bound.py:118` and `mcp_server.py:46`. If it prints nothing before you have made the Task 3 edits, your command is wrong, not the code.
 
 - [ ] **Step 6: Run the full suite**
 

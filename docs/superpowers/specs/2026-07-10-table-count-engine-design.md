@@ -489,10 +489,12 @@ Two constraints from `CLAUDE.md`'s repository topology:
    the wiring rather than only the engine primitives. (The permanent-`TypeError`
    corruption itself is a thread interleaving and is covered by criterion 7.)
 5. `core/engine.py` is the sole owner of the hook: no other module under `src/`
-   imports `pymupdf4llm` or `pymupdf.layout`, calls `activate()`/`use_layout()`,
-   or assigns `pymupdf._get_layout`. All four routes are enforceable by one
-   anchored grep -- checking only the `pymupdf4llm` import would miss the other
-   three.
+   imports `pymupdf4llm` or `pymupdf.layout` (in either `import x.y` or
+   `from x import y` form, statically or via `import_module`), calls
+   `activate()`/`use_layout()`, or assigns `pymupdf._get_layout` (by `=` or by
+   `setattr`). Enforceable by one anchored grep -- checking only the
+   `pymupdf4llm` import would miss every other route, and each of these was
+   verified to install a live hook.
 6. The full test suite passes under a plain `uv sync` (where the `layout`-marked
    tests skip) and under `uv sync --extra layout` (where they run). Criteria 3
    and 4 are only actually *enforced* by the second lane, which does not exist
