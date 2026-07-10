@@ -342,24 +342,48 @@ and the existing handler tests assert only `isinstance(result["is_error"], bool)
 Nothing in the suite would notice if `extract_table_markdown` started raising
 `TypeError`.
 
+Note also that `defs.py:244` catches `Exception` and returns an error envelope,
+so those three tests would pass on a `TypeError` even in a layout-enabled
+environment. Breadth of coverage is not the missing ingredient; assertion power
+is.
+
 Add `tests/test_layout_integration.py`, guarded by
 `pytest.importorskip("pymupdf.layout")` and marked `layout` (a new marker
 alongside the existing `real_pdf` and `integration`). Against an **unruled**
-fixture, in a process that has not yet imported `pymupdf4llm`:
+fixture, it makes two kinds of assertion.
+
+**In-process, order-independent:**
 
 1. A `classic_tables()` scan returns the **classic** counts even though the ML
    engine is installed -- the pin verified against the real engine, not a stub.
-2. `extract_table_markdown` then returns pipe-delimited markdown. This is
-   acceptance criterion 4: the round-trip happened before any `pymupdf4llm`
-   import, which is precisely the ordering that produced the permanent
-   `TypeError` under the previous design.
-3. A second `classic_tables()` scan still returns classic counts, and a second
-   `extract_table_markdown` still returns pipe-delimited markdown -- the hook
-   survives the round-trip.
+2. `extract_table_markdown` returns pipe-delimited markdown, and still does
+   after a `classic_tables()` round-trip: the hook survives suppression.
+3. The `extract_table_markdown` **handler** returns `is_error is False` with
+   pipe-delimited markdown in its envelope. Without this, `defs.py:244`'s
+   `except Exception` would keep swallowing exactly the failure being tested.
 
-All three assertions were validated by hand against `pymupdf-layout` 1.28.0
-before writing this spec; they pass under the corrected design and the second
-would fail under the previous one.
+**In a subprocess, because the assertion is about process history:**
+
+4. Acceptance criterion 4 -- a `classic_tables()` round-trip *before any
+   `pymupdf4llm` import*, then `extract_table_markdown`, must yield
+   pipe-delimited markdown rather than `TypeError`. This precondition cannot be
+   established in-process: pytest collects files alphabetically, and
+   `tests/test_defs.py` calls `extract_table_markdown` (importing `pymupdf4llm`)
+   before `tests/test_layout_integration.py` is ever reached. Relying on the
+   lane staying single-purpose would make the test silently vacuous the moment
+   another test touched the module first -- and the CI section below has the
+   layout lane running the whole suite, so it *is* already imported.
+
+   Run it as `subprocess.run([sys.executable, helper, str(pdf)], check=True)`
+   against a small `tests/_fresh_layout_process.py`, which performs the
+   round-trip, asserts the markdown, and exits non-zero on failure. A fresh
+   interpreter is the only thing that actually guarantees the precondition, and
+   it makes the test immune to collection order, `-p no:randomly`, `-k`
+   selection, and future test files.
+
+Assertions 1, 2 and 4 were validated by hand against `pymupdf-layout` 1.28.0
+before writing this spec; they pass under the corrected design, and 4 fails
+under the previous one.
 
 ### CI
 
@@ -370,8 +394,25 @@ self-skip everywhere and acceptance criteria 3 and 4 would be enforced by
 nothing.
 
 So the work includes a second `eval`-stage job that runs
-`uv sync --extra layout` and `uv run pytest -m layout`. Two constraints from
-`CLAUDE.md`'s repository topology:
+`uv sync --extra layout` and then the **full** suite, `uv run pytest tests/ -q`
+-- not `pytest -m layout`. Restricting it to the marked tests would leave the
+unmarked handler tests that call `extract_table_markdown`
+(`tests/test_defs.py:127`, `tests/test_mcp_server.py:121`,
+`tests/test_registry.py:371`) never executed against a live layout engine, and
+acceptance criterion 6 says the suite passes in that environment.
+
+Neither lane selects on the marker. The `importorskip` alone decides: these
+tests run wherever `pymupdf.layout` is importable and skip everywhere else, so
+both lanes can invoke the same plain `pytest tests/ -q`. The `layout` marker
+earns its place only as a hand-selection and reporting aid (`-m "not layout"`
+when a contributor with the extra installed wants the fast suite), matching how
+`real_pdf` and `integration` are already used.
+
+This is what forces assertion 4 above into a subprocess: with the whole suite
+running, `pymupdf4llm` is certainly imported before
+`test_layout_integration.py`.
+
+Two constraints from `CLAUDE.md`'s repository topology:
 
 - `.gitlab-ci.yml` is tracked **only on `gitlab-main`**, never on GitHub `main`.
   The test file and the `layout` marker land on `main`; the CI job is a separate
