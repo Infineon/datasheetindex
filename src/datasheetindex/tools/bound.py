@@ -14,10 +14,10 @@ top-level :mod:`datasheetindex` package.
 
 from __future__ import annotations
 
-import importlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from datasheetindex.core.engine import layout_engine
 from datasheetindex.core.locate import TextLocation
 from datasheetindex.core.locate import locate_text as locate_text_core
 from datasheetindex.core.structure import find_breadcrumb_for_page
@@ -108,20 +108,19 @@ class DatasheetTools:
 
         Requires the ``[layout]`` extra (``pymupdf4llm``). Returns markdown
         with proper table formatting using ``|`` delimiters.
+
+        The import and the call both happen inside ``layout_engine()``. Doing
+        the import outside it would let a concurrent ``classic_tables()``
+        restore a stale ``None`` over the freshly installed hook, after which
+        every call here raises ``TypeError``.
         """
         total = len(self.doc)
         if page < 1 or page > total:
             raise ValueError(f"page must be between 1 and {total}")
-        # Imported by name, like the other optional dependencies, so a checker
-        # does not require the [layout] extra to be installed.
-        try:
-            pymupdf4llm = importlib.import_module("pymupdf4llm")
-        except ImportError:
-            raise ImportError(
-                "pymupdf4llm is required for table markdown extraction. "
-                "Install it with: uv sync --extra layout"
-            ) from None
-        return pymupdf4llm.to_markdown(self.doc, pages=[page - 1], show_progress=False)
+        with layout_engine() as pymupdf4llm:
+            return pymupdf4llm.to_markdown(
+                self.doc, pages=[page - 1], show_progress=False
+            )
 
     def build_datasheet(
         self,

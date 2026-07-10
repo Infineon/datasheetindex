@@ -16,6 +16,7 @@ import importlib
 import sys
 from typing import Any
 
+from datasheetindex.core.engine import layout_engine
 from datasheetindex.tools.defs import (
     DatasheetToolSession,
     create_datasheet_tool_session,
@@ -41,11 +42,13 @@ def _preload_layout_model() -> None:
     The layout model takes ~2s to load. Doing this eagerly at server start
     avoids a long GIL-holding pause on the first extract_table_markdown call,
     which can cause MCP client timeouts.
+
+    Routed through layout_engine() so that engine.py stays the only place in
+    the package that imports pymupdf4llm, and the hook is only ever installed
+    under the lock. This runs before serving begins, so it cannot race today.
     """
-    try:
-        importlib.import_module("pymupdf4llm")
-    except ImportError:
-        pass  # optional dependency; extract_table_markdown will report the error
+    with contextlib.suppress(ImportError), layout_engine():
+        pass  # optional dependency; extract_table_markdown reports the error
 
 
 def _envelope_to_content(envelope: dict[str, Any], types_module: Any) -> list[Any]:
