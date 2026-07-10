@@ -364,26 +364,40 @@ fixture, it makes two kinds of assertion.
 
 **In a subprocess, because the assertion is about process history:**
 
-4. Acceptance criterion 4 -- a `classic_tables()` round-trip *before any
-   `pymupdf4llm` import*, then `extract_table_markdown`, must yield
-   pipe-delimited markdown rather than `TypeError`. This precondition cannot be
-   established in-process: pytest collects files alphabetically, and
-   `tests/test_defs.py` calls `extract_table_markdown` (importing `pymupdf4llm`)
-   before `tests/test_layout_integration.py` is ever reached. Relying on the
-   lane staying single-purpose would make the test silently vacuous the moment
-   another test touched the module first -- and the CI section below has the
-   layout lane running the whole suite, so it *is* already imported.
+4. Acceptance criterion 4 -- in an interpreter that has never imported
+   `pymupdf4llm`, `build_datasheet` reports the classic counts without importing
+   the module or activating the hook, and the subsequent
+   `extract_table_markdown` still returns pipe-delimited markdown. It drives
+   `DatasheetTools`, not the engine primitives, so a regression in that wiring
+   fails here even when `engine.py` is correct.
 
-   Run it as `subprocess.run([sys.executable, helper, str(pdf)], check=True)`
-   against a small `tests/_fresh_layout_process.py`, which performs the
-   round-trip, asserts the markdown, and exits non-zero on failure. A fresh
-   interpreter is the only thing that actually guarantees the precondition, and
-   it makes the test immune to collection order, `-p no:randomly`, `-k`
-   selection, and future test files.
+   This precondition cannot be established in-process: pytest collects files
+   alphabetically, and `tests/test_defs.py` calls `extract_table_markdown`
+   (importing `pymupdf4llm`) before `tests/test_layout_integration.py` is ever
+   reached. Relying on the lane staying single-purpose would make the test
+   silently vacuous the moment another test touched the module first -- and the
+   CI section below has the layout lane running the whole suite, so it *is*
+   already imported.
+
+   Run it as
+   `subprocess.run([sys.executable, helper, str(pdf), str(out)], check=False)`
+   against a small `tests/_fresh_layout_process.py` that asserts and exits
+   non-zero on failure. A fresh interpreter is the only thing that actually
+   guarantees the precondition, and it makes the test immune to collection
+   order, `-p no:randomly`, `-k` selection, and future test files.
+
+**What assertion 4 does not cover.** It is a wiring check, not the
+permanent-`TypeError` regression test. That corruption requires the
+`pymupdf4llm` import to land *between* `classic_tables()`'s save and its
+restore, which cannot happen on one thread: a build's round-trip completes
+before `extract_table_markdown` imports anything. Verified -- the sequential
+sequence passes under the *old* design too. The interleaving is guarded
+deterministically instead by `test_layout_engine_installs_the_hook_under_the_lock`
+in `tests/test_engine.py`, which asserts the lock is held across the import. A
+thread-race reproduction would be flaky; the lock-ordering assertion is not.
 
 Assertions 1, 2 and 4 were validated by hand against `pymupdf-layout` 1.28.0
-before writing this spec; they pass under the corrected design, and 4 fails
-under the previous one.
+before writing this spec.
 
 ### CI
 
@@ -469,12 +483,18 @@ Two constraints from `CLAUDE.md`'s repository topology:
 3. `extract_table_markdown` still returns layout-aware markdown (pipe-delimited
    tables) when `[layout]` is installed.
 4. In a process that has **never** imported `pymupdf4llm`, an index build
-   (which enters and exits `classic_tables()`) followed by an
-   `extract_table_markdown()` call returns layout-aware markdown rather than
-   raising `TypeError`. This is the corruption the original design admitted.
+   (which enters and exits `classic_tables()`) reports the classic counts
+   without importing `pymupdf4llm`, and a subsequent `extract_table_markdown()`
+   returns layout-aware markdown. Driven through `DatasheetTools`, so it covers
+   the wiring rather than only the engine primitives. (The permanent-`TypeError`
+   corruption itself is a thread interleaving and is covered by criterion 7.)
 5. `pymupdf4llm` is imported in exactly one place in `src/`:
    `core/engine.py`. Enforceable by grep.
 6. The full test suite passes under a plain `uv sync` (where the `layout`-marked
    tests skip) and under `uv sync --extra layout` (where they run). Criteria 3
    and 4 are only actually *enforced* by the second lane, which does not exist
    today and is part of this work -- see "CI" above.
+7. `_LAYOUT_LOCK` is held across the `pymupdf4llm` import, so no
+   `classic_tables()` block can interleave with the hook's installation. This is
+   the assertion that covers the permanent-`TypeError` corruption; it is
+   deterministic and needs no `[layout]` extra.

@@ -21,6 +21,7 @@
 - Do not use f-strings that interpolate no variables.
 - `pymupdf4llm` must be imported in exactly **one** place under `src/`: `src/datasheetindex/core/engine.py`. This is an acceptance criterion, checked by grep in Task 3.
 - The only runtime dependency is `pymupdf`. `pymupdf4llm` is optional (`[layout]` extra) and must always be imported by name, never as a literal top-level `import pymupdf4llm` statement in package code.
+- **Never pipe a verification command into `tail`, `head`, or `tee` without `set -o pipefail`.** A pipeline's exit status is the *last* command's, so `uv run pytest ... | tail -5` reports success even when pytest fails — or, as measured, even when `pytest` cannot be spawned at all. Every "Run:" step below is therefore an unpiped command. If you need to capture a long run for later grepping, use `set -o pipefail; <cmd> 2>&1 | tee /tmp/<name>.log` and check `$?`.
 
 ## Measured Reference Values
 
@@ -324,7 +325,7 @@ Expected: `10 passed`.
 
 - [ ] **Step 5: Verify the rest of the suite is untouched**
 
-Run: `uv run pytest tests/ -q 2>&1 | tail -5`
+Run: `uv run pytest tests/ -q`
 Expected: same pass/skip counts as before this task; no new failures.
 
 - [ ] **Step 6: Commit**
@@ -408,6 +409,10 @@ def _write_mixed_table_pdf(path: Path, pages: int) -> None:
                     f"u{p}{row}{col}",
                     fontsize=7,
                 )
+    # One bookmark per page. Without a ToC, build_datasheet produces zero nodes
+    # and no node ever carries a table_count, so tests/_fresh_layout_process.py
+    # would have nothing to assert against.
+    doc.set_toc([[1, f"Section {i + 1}", i + 1] for i in range(pages)])
     doc.save(str(path))
     doc.close()
 
@@ -469,7 +474,7 @@ def test_parallel_and_sequential_agree_under_a_layout_hook(tmp_path, monkeypatch
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `uv run pytest tests/test_structure.py -q -k "layout_hook" 2>&1 | tail -15`
+Run: `uv run pytest tests/test_structure.py -q -k "layout_hook"`
 Expected: both FAIL. `test_sequential_ignores_an_active_layout_hook` reports
 `assert {0: 2, 1: 3, 2: 2, 3: 3, 4: 2, 5: 3} == {0: 1, 1: 2, 2: 1, 3: 2, 4: 1, 5: 2}`.
 This is the bug: the parent's scan obeys the hook.
@@ -553,7 +558,7 @@ Replace its docstring (lines 380-388) with:
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
-Run: `uv run pytest tests/test_structure.py -q 2>&1 | tail -5`
+Run: `uv run pytest tests/test_structure.py -q`
 Expected: all pass, including the two new tests.
 
 - [ ] **Step 7: Correct the two stale docstrings**
@@ -578,7 +583,7 @@ And replace the second paragraph of `test_sequential_counts_tables` (the one beg
 
 - [ ] **Step 8: Run the full suite**
 
-Run: `uv run pytest tests/ -q 2>&1 | tail -5`
+Run: `uv run pytest tests/ -q`
 Expected: all pass.
 
 - [ ] **Step 9: Commit**
@@ -696,7 +701,7 @@ Expected: exactly one line, in `src/datasheetindex/core/engine.py`.
 
 - [ ] **Step 6: Run the full suite**
 
-Run: `uv run pytest tests/ -q 2>&1 | tail -5`
+Run: `uv run pytest tests/ -q`
 Expected: all pass. `tests/test_defs.py`, `tests/test_mcp_server.py` and `tests/test_registry.py` all exercise `extract_table_markdown`; without the `[layout]` extra installed they assert only that a clean error envelope comes back, which still holds.
 
 - [ ] **Step 7: Commit**
@@ -756,49 +761,70 @@ markers = [
 Create `tests/_fresh_layout_process.py`. This is not collected by pytest (no `test_` prefix); it is executed as a script.
 
 ```python
-"""Assert the round-trip in an interpreter that has not imported pymupdf4llm.
+"""Drive the real public path in an interpreter that has not imported pymupdf4llm.
 
 Run as a script by tests/test_layout_integration.py, never collected. A fresh
 interpreter is the only way to establish the precondition: pytest collects
 alphabetically, and tests/test_defs.py imports pymupdf4llm (via
 extract_table_markdown) long before tests/test_layout_integration.py runs.
 
+What this proves, precisely:
+
+* a build in a pristine process reports the *classic* counts, and does not
+  import pymupdf4llm or activate the layout hook as a side effect;
+* after that build's classic_tables() round-trip, the first layout use in the
+  process still installs the hook and returns layout-aware markdown -- i.e. the
+  guard does not leave pymupdf._get_layout permanently nulled;
+* the whole thing runs through DatasheetTools.build_datasheet and
+  DatasheetTools.extract_table_markdown, so a regression in that wiring fails
+  here even if engine.py itself is fine.
+
+What this does NOT prove: the permanent-TypeError corruption needs the
+pymupdf4llm import to land *between* classic_tables()'s save and restore, which
+cannot happen on one thread -- a build's round-trip completes before
+extract_table_markdown imports anything. That interleaving is guarded
+deterministically by test_layout_engine_installs_the_hook_under_the_lock in
+tests/test_engine.py, which asserts the lock is held across the import.
+
 Exits non-zero with a message on any failure. Usage:
 
-    python tests/_fresh_layout_process.py <pdf-path>
+    python tests/_fresh_layout_process.py <pdf-path> <output-dir>
 """
 
 import sys
 
-import pymupdf
+from datasheetindex.tools.bound import DatasheetTools
 
-from datasheetindex.core.engine import classic_tables, layout_engine
+EXPECTED_TOTAL_TABLES = 9  # sum([1, 2, 1, 2, 1, 2]), the classic detector
 
 
-def main(pdf_path: str) -> None:
+def _sum_table_counts(nodes: list[dict]) -> int:
+    total = 0
+    for node in nodes:
+        total += node.get("table_count", 0)
+        total += _sum_table_counts(node.get("nodes", []))
+    return total
+
+
+def main(pdf_path: str, output_dir: str) -> None:
     if "pymupdf4llm" in sys.modules:
         raise AssertionError("precondition failed: pymupdf4llm already imported")
 
-    # A build enters and exits classic_tables() before anything imports
-    # pymupdf4llm. The old design saved None here and restored it over the
-    # hook the import installed moments later.
-    doc = pymupdf.open(pdf_path)
-    try:
-        with classic_tables():
-            counts = [len(doc[i].find_tables().tables) for i in range(len(doc))]
-    finally:
-        doc.close()
-    if counts != [1, 2, 1, 2, 1, 2]:
-        raise AssertionError(f"classic counts wrong: {counts}")
+    with DatasheetTools(pdf_path) as tools:
+        artifacts = tools.build_datasheet(output_dir=output_dir)
 
-    # Now the first layout use in this process. Under the old design this
-    # raised TypeError: 'NoneType' object is not iterable -- permanently.
-    doc = pymupdf.open(pdf_path)
-    try:
-        with layout_engine() as pymupdf4llm:
-            markdown = pymupdf4llm.to_markdown(doc, pages=[0], show_progress=False)
-    finally:
-        doc.close()
+        if "pymupdf4llm" in sys.modules:
+            raise AssertionError("build_datasheet must not import pymupdf4llm")
+
+        total = _sum_table_counts(artifacts.json_data.get("toc", []))
+        if total != EXPECTED_TOTAL_TABLES:
+            raise AssertionError(
+                f"classic table_count wrong: {total} != {EXPECTED_TOTAL_TABLES}"
+            )
+
+        # First layout use in this process, after the build's guard round-trip.
+        markdown = tools.extract_table_markdown(1)
+
     if "|" not in markdown:
         raise AssertionError(f"markdown is not layout-aware: {markdown!r}")
 
@@ -806,7 +832,7 @@ def main(pdf_path: str) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(sys.argv[1], sys.argv[2])
 ```
 
 - [ ] **Step 4: Write the integration test**
@@ -901,14 +927,22 @@ def test_markdown_survives_a_classic_tables_round_trip(mixed_pdf, tmp_path):
     assert "|" in result["content"][0]["text"]
 
 
-def test_fresh_process_round_trip_then_markdown(mixed_pdf):
-    """Acceptance criterion 4, in an interpreter with no pymupdf4llm import.
+def test_fresh_process_build_then_extract_table_markdown(mixed_pdf, tmp_path):
+    """Acceptance criterion 4: the real public path, in a pristine interpreter.
+
+    Drives DatasheetTools.build_datasheet and .extract_table_markdown, not the
+    engine primitives, so a regression in that wiring fails here.
 
     Cannot be asserted in-process: tests/test_defs.py imports pymupdf4llm and
-    sorts before this file. A subprocess is the only durable guarantee.
+    sorts before this file, so the precondition is already gone by the time
+    pytest reaches us. A subprocess is the only durable guarantee.
+
+    See the helper's docstring for what this does and does not prove -- notably,
+    the permanent-TypeError corruption is a thread interleaving and is guarded
+    by test_layout_engine_installs_the_hook_under_the_lock, not here.
     """
     proc = subprocess.run(
-        [sys.executable, str(HELPER), str(mixed_pdf)],
+        [sys.executable, str(HELPER), str(mixed_pdf), str(tmp_path / "fresh-out")],
         capture_output=True,
         text=True,
         check=False,
@@ -919,25 +953,26 @@ def test_fresh_process_round_trip_then_markdown(mixed_pdf):
 
 - [ ] **Step 5: Run the new tests**
 
-Run: `uv run pytest tests/test_layout_integration.py -q 2>&1 | tail -10`
+Run: `uv run pytest tests/test_layout_integration.py -q`
 Expected: `3 passed`. The last one takes ~10-20s (a fresh interpreter loads the ONNX model).
 
 `session.defs` is a **list** of frozen `DatasheetToolDef` dataclasses, each with `.name` and `.handler`; the test builds its own name-keyed dict, mirroring `_defs_by_name()` in `tests/test_defs.py:45`. `handler(args)` returns a coroutine, which is why `asyncio.run` takes it directly.
 
 - [ ] **Step 6: Run the full suite with the extra installed**
 
-Run: `uv run pytest tests/ -q 2>&1 | tee /tmp/layout-suite.log | tail -8`
+Run: `set -o pipefail; uv run pytest tests/ -q 2>&1 | tee /tmp/layout-suite.log`
+Then check the status: `echo $?` must print `0`. Without `pipefail` the `tee` would hide a failing run.
 Expected: all pass. This is the lane Task 6 automates. It is slower than the default lane; that is expected and is why the extra stays out of the default sync.
 
 - [ ] **Step 7: Verify the tests skip cleanly without the extra**
 
-Run: `uv sync && uv run pytest tests/test_layout_integration.py -q 2>&1 | tail -4`
-Expected: `3 skipped` (the `importorskip` fires). This is the default-lane behavior.
+Run: `uv sync && uv run pytest tests/test_layout_integration.py -q`
+Expected: `1 skipped`. The `importorskip` is at module level, so pytest skips the whole *module* and reports one skip, not one per test. This is the default-lane behavior.
 
 - [ ] **Step 8: Run the full default suite**
 
-Run: `uv run pytest tests/ -q 2>&1 | tail -5`
-Expected: all pass, with the 3 layout tests skipped.
+Run: `uv run pytest tests/ -q`
+Expected: all pass, with **1** additional skip (the whole `test_layout_integration.py` module), not 3.
 
 - [ ] **Step 9: Commit**
 
@@ -1024,7 +1059,7 @@ In `CHANGELOG.md`, insert this immediately **above** the `## [0.17.2] - 2026-07-
 
 - [ ] **Step 5: Verify the docs build and hooks pass**
 
-Run: `uv run pre-commit run --all-files 2>&1 | tail -12`
+Run: `uv run pre-commit run --all-files`
 Expected: all hooks pass.
 
 - [ ] **Step 6: Commit**
@@ -1124,7 +1159,7 @@ After all tasks, confirm each acceptance criterion from the spec:
 1. Parallel and sequential agree on a horizontal-rules-only table in a process that imported `pymupdf4llm` — `test_parallel_and_sequential_agree_under_a_layout_hook`.
 2. `table_count` is unchanged by installing `[layout]` — `test_classic_tables_pins_the_real_engine`.
 3. `extract_table_markdown` still returns pipe-delimited markdown with `[layout]` — `test_markdown_survives_a_classic_tables_round_trip`.
-4. A build followed by `extract_table_markdown` in a process that never imported `pymupdf4llm` returns markdown, not `TypeError` — `test_fresh_process_round_trip_then_markdown`.
+4. A build followed by `extract_table_markdown` in a process that never imported `pymupdf4llm` reports classic counts and returns layout-aware markdown — `test_fresh_process_build_then_extract_table_markdown`. Note this is a wiring check, not the `TypeError` regression: that corruption requires the import to land between the guard's save and restore, which is a thread interleaving, guarded deterministically by `test_layout_engine_installs_the_hook_under_the_lock`.
 5. `pymupdf4llm` imported in exactly one place under `src/` — Task 3 Step 5.
 6. Suite passes under plain `uv sync` (layout tests skip) and under `uv sync --extra layout` (they run) — Task 4 Steps 6 and 8, automated by Task 6.
 
