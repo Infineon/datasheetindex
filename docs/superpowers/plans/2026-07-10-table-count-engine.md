@@ -979,7 +979,11 @@ def test_classic_tables_pins_the_real_engine(mixed_pdf):
     The layout engine finds [2,3,2,3,2,3] on this fixture; the classic detector
     finds [1,2,1,2,1,2]. Inside classic_tables() we must see the latter.
     """
-    import pymupdf4llm  # noqa: F401  # activates the hook for this process
+    # A real import, not layout_engine(): this test's whole point is to prove
+    # classic_tables() pins the engine even with the hook genuinely active.
+    # The ty pragma matches src/datasheetindex/tools/registry.py:32 -- ty runs
+    # in the default lane, where the [layout] extra is deliberately absent.
+    import pymupdf4llm  # noqa: F401  # ty: ignore[unresolved-import]
 
     assert pymupdf._get_layout is not None, "layout hook should be active"
     assert _classic_counts(mixed_pdf) == _expected_classic_counts(PAGES)
