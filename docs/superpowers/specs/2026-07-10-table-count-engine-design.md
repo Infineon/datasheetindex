@@ -488,8 +488,11 @@ Two constraints from `CLAUDE.md`'s repository topology:
    returns layout-aware markdown. Driven through `DatasheetTools`, so it covers
    the wiring rather than only the engine primitives. (The permanent-`TypeError`
    corruption itself is a thread interleaving and is covered by criterion 7.)
-5. `pymupdf4llm` is imported in exactly one place in `src/`:
-   `core/engine.py`. Enforceable by grep.
+5. `core/engine.py` is the sole owner of the hook: no other module under `src/`
+   imports `pymupdf4llm` or `pymupdf.layout`, calls `activate()`/`use_layout()`,
+   or assigns `pymupdf._get_layout`. All four routes are enforceable by one
+   anchored grep -- checking only the `pymupdf4llm` import would miss the other
+   three.
 6. The full test suite passes under a plain `uv sync` (where the `layout`-marked
    tests skip) and under `uv sync --extra layout` (where they run). Criteria 3
    and 4 are only actually *enforced* by the second lane, which does not exist

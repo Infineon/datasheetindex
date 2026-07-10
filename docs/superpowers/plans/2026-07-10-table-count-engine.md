@@ -73,14 +73,25 @@ from datasheetindex.core import engine
 from datasheetindex.core.engine import _LAYOUT_LOCK, classic_tables, layout_engine
 
 _HOOK = object()
+_ABSENT = object()
 
 
 @pytest.fixture(autouse=True)
 def _restore_hook():
-    """Every test here mutates a process-wide global. Put it back."""
-    saved = getattr(pymupdf, "_get_layout", None)
+    """Every test here mutates a process-wide global. Put it back exactly.
+
+    Uses a sentinel rather than a None default for the same reason
+    classic_tables() does: a PyMuPDF with no _get_layout attribute must not
+    acquire one on teardown, or this fixture would quietly defeat
+    test_classic_tables_is_a_true_noop_without_the_attribute.
+    """
+    saved = getattr(pymupdf, "_get_layout", _ABSENT)
     yield
-    pymupdf._get_layout = saved
+    if saved is _ABSENT:
+        if hasattr(pymupdf, "_get_layout"):
+            delattr(pymupdf, "_get_layout")
+    else:
+        pymupdf._get_layout = saved
 
 
 def _lock_is_held_by_another_thread() -> bool:
@@ -691,13 +702,26 @@ def _preload_layout_model() -> None:
 
 `contextlib` is already imported at line 14. Leave `importlib` alone — `_load_mcp_modules` still uses it.
 
-- [ ] **Step 5: Verify the single-import-site criterion**
+- [ ] **Step 5: Verify the sole-ownership criterion**
 
-Run: `grep -rn "pymupdf4llm" src/ | grep -v "^src/datasheetindex/core/engine.py"`
-Expected: only comment/docstring mentions, and **no** `import_module("pymupdf4llm")` or `import pymupdf4llm` line.
+The guarantee is not merely "`pymupdf4llm` is imported once". It is that `engine.py` is the only module that can **install or mutate** the hook. There are four ways to do that: import `pymupdf4llm`, import `pymupdf.layout` (whose module body calls `activate()`), call `pymupdf.layout.activate()` or `use_layout()`, or assign `pymupdf._get_layout` directly. Check all of them.
 
-Then run: `grep -rn "import_module(\"pymupdf4llm\")\|^import pymupdf4llm\|^ *import pymupdf4llm" src/`
-Expected: exactly one line, in `src/datasheetindex/core/engine.py`.
+Run this exact command:
+
+```bash
+grep -rnE \
+  -e '^[[:space:]]*(import|from)[[:space:]]+pymupdf4llm' \
+  -e '^[[:space:]]*(import|from)[[:space:]]+pymupdf\.layout' \
+  -e 'import_module\("(pymupdf4llm|pymupdf\.layout)"\)' \
+  -e 'pymupdf\.layout\.activate' \
+  -e '_get_layout[[:space:]]*=' \
+  -e '\buse_layout\(' \
+  src/ | grep -v '^src/datasheetindex/core/engine\.py:'
+```
+
+Expected: **no output**, and `echo $?` prints `1` (the outer `grep -v` matched nothing).
+
+The patterns are anchored to import *statements* so that prose like the "workers never import pymupdf4llm" docstring added in Task 2 does not trip them. Verified: run against the tree before Task 3 and this command prints the two real violations, `mcp_server.py:46` and `bound.py:118`. If it prints nothing before you have made the Task 3 edits, the command is wrong, not the code.
 
 - [ ] **Step 6: Run the full suite**
 
@@ -770,8 +794,10 @@ extract_table_markdown) long before tests/test_layout_integration.py runs.
 
 What this proves, precisely:
 
-* a build in a pristine process reports the *classic* counts, and does not
-  import pymupdf4llm or activate the layout hook as a side effect;
+* a build in a pristine process reports the *classic* counts, and afterwards
+  neither pymupdf4llm nor pymupdf.layout is in sys.modules and
+  pymupdf._get_layout is still None -- so the build activated no engine by any
+  route, not merely by the import we happen to grep for;
 * after that build's classic_tables() round-trip, the first layout use in the
   process still installs the hook and returns layout-aware markdown -- i.e. the
   guard does not leave pymupdf._get_layout permanently nulled;
@@ -793,6 +819,8 @@ Exits non-zero with a message on any failure. Usage:
 
 import sys
 
+import pymupdf
+
 from datasheetindex.tools.bound import DatasheetTools
 
 EXPECTED_TOTAL_TABLES = 9  # sum([1, 2, 1, 2, 1, 2]), the classic detector
@@ -813,8 +841,15 @@ def main(pdf_path: str, output_dir: str) -> None:
     with DatasheetTools(pdf_path) as tools:
         artifacts = tools.build_datasheet(output_dir=output_dir)
 
+        # Assert the hook's *state*, not just the module's absence. A regression
+        # that reached the engine via `import pymupdf.layout` or by assigning
+        # pymupdf._get_layout directly would leave sys.modules clean.
         if "pymupdf4llm" in sys.modules:
             raise AssertionError("build_datasheet must not import pymupdf4llm")
+        if "pymupdf.layout" in sys.modules:
+            raise AssertionError("build_datasheet must not import pymupdf.layout")
+        if getattr(pymupdf, "_get_layout", None) is not None:
+            raise AssertionError("build_datasheet must not activate the layout hook")
 
         total = _sum_table_counts(artifacts.json_data.get("toc", []))
         if total != EXPECTED_TOTAL_TABLES:
