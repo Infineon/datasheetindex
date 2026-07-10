@@ -636,9 +636,9 @@ def test_real_pool_counts_tables(tmp_path):
     this test a permanently broken pool would pass CI.
 
     Counts are asserted against the fixture rather than against an in-process
-    sequential scan: if any earlier test has imported pymupdf4llm, the parent's
-    find_tables() is backed by the ML layout engine while the workers' is not,
-    so the two sides would be comparing different engines.
+    sequential scan. Both paths are pinned to the classic detector now, so a
+    direct comparison is also valid -- see
+    test_parallel_and_sequential_agree_under_a_layout_hook, which makes it.
     """
     pages = 13
     pdf = tmp_path / "tables.pdf"
@@ -652,10 +652,10 @@ def test_real_pool_counts_tables(tmp_path):
 def test_sequential_counts_tables(tmp_path):
     """The fallback path must count real tables, not just avoid raising.
 
-    Asserted against the same fixture as the parallel test, which pins the two
-    paths to the same answer without comparing them directly -- a direct
-    comparison would pit the parent's find_tables() against the workers', and
-    those are different engines once pymupdf4llm is imported.
+    Asserted against the same fixture as the parallel test. Both paths report
+    the classic detector's answer regardless of process state, so this pins the
+    sequential scan to a known number rather than to whatever engine happens to
+    be active.
     """
     pages = 7
     pdf = tmp_path / "tables.pdf"
@@ -668,6 +668,114 @@ def test_sequential_counts_tables(tmp_path):
         doc.close()
 
     assert sequential == _expected_counts(pages)
+
+
+def _classic_tables_on(page_index: int) -> int:
+    """Ruled grids `_write_mixed_table_pdf` draws on a page, which is also the
+    count the classic detector reports. Alternates 1 and 2 so a worker that
+    returns a constant without reading the page cannot pass."""
+    return 1 + (page_index % 2)
+
+
+def _write_mixed_table_pdf(path: Path, pages: int) -> None:
+    """Each page gets N fully-ruled grids plus exactly one table drawn with
+    horizontal rules only.
+
+    The classic detector finds only the ruled grids; the ML layout engine finds
+    those plus the unruled one. So the two engines return provably different
+    numbers on this fixture, which is what makes it able to catch the bug. The
+    existing `_write_table_pdf` fixture is a pure ruled grid -- the one style
+    both engines agree on -- and can never catch it.
+    """
+    doc = pymupdf.open()
+    for p in range(pages):
+        page = doc.new_page()
+        for grid in range(_classic_tables_on(p)):
+            top = 60 + grid * 330
+            for row in range(4):
+                for col in range(3):
+                    rect = pymupdf.Rect(
+                        50 + col * 90,
+                        top + row * 25,
+                        50 + (col + 1) * 90,
+                        top + (row + 1) * 25,
+                    )
+                    page.draw_rect(rect, color=(0, 0, 0), width=0.7)
+                    page.insert_text(
+                        (rect.x0 + 3, rect.y0 + 15), f"{p}{grid}{row}{col}", fontsize=7
+                    )
+        unruled_top = 560
+        for row in range(4):
+            y = unruled_top + row * 24
+            page.draw_line((50, y), (320, y), width=0.7)
+        for row in range(3):
+            for col in range(3):
+                page.insert_text(
+                    (55 + col * 90, unruled_top + row * 24 + 16),
+                    f"u{p}{row}{col}",
+                    fontsize=7,
+                )
+    # One bookmark per page. Without a ToC, build_datasheet produces zero nodes
+    # and no node ever carries a table_count, so tests/_fresh_layout_process.py
+    # would have nothing to assert against.
+    doc.set_toc([[1, f"Section {i + 1}", i + 1] for i in range(pages)])
+    doc.save(str(path))
+    doc.close()
+
+
+def _expected_classic_counts(pages: int) -> dict[int, int]:
+    return {i: _classic_tables_on(i) for i in range(pages)}
+
+
+def _fake_layout_hook(page, **kwargs):
+    """Stand in for the ONNX layout analyzer without installing it.
+
+    Returns one more "table" box than the classic detector finds, mimicking the
+    real engine on `_write_mixed_table_pdf` (measured: classic [1,2,1,2,1,2],
+    ML [2,3,2,3,2,3]). find_tables() reports exactly one table per box.
+    """
+    boxes = _classic_tables_on(page.number) + 1
+    return [(50.0, 60.0 + i * 40, 320.0, 90.0 + i * 40, "table") for i in range(boxes)]
+
+
+def test_sequential_ignores_an_active_layout_hook(tmp_path, monkeypatch):
+    """The sequential path must report classic counts even in a process that
+    has imported pymupdf4llm. Without the guard it reports the hook's answer."""
+    pages = 6
+    pdf = tmp_path / "mixed.pdf"
+    _write_mixed_table_pdf(pdf, pages=pages)
+    monkeypatch.setattr(pymupdf, "_get_layout", _fake_layout_hook)
+
+    doc = pymupdf.open(str(pdf))
+    try:
+        sequential = structure._build_table_count_cache_sequential(doc)
+    finally:
+        doc.close()
+
+    assert sequential == _expected_classic_counts(pages)
+
+
+def test_parallel_and_sequential_agree_under_a_layout_hook(tmp_path, monkeypatch):
+    """The two paths must return the same numbers for the same document.
+
+    The hook is installed in the parent only; workers are fresh processes that
+    never import pymupdf4llm. Before the guard, this fixture returned
+    {0: 2, 1: 3, ...} sequentially and {0: 1, 1: 2, ...} in parallel.
+    """
+    pages = 6
+    pdf = tmp_path / "mixed.pdf"
+    _write_mixed_table_pdf(pdf, pages=pages)
+
+    parallel = structure._build_table_count_cache_parallel(str(pdf), pages)
+
+    monkeypatch.setattr(pymupdf, "_get_layout", _fake_layout_hook)
+    doc = pymupdf.open(str(pdf))
+    try:
+        sequential = structure._build_table_count_cache_sequential(doc)
+    finally:
+        doc.close()
+
+    assert parallel == sequential == _expected_classic_counts(pages)
 
 
 # --- enrich_with_table_counts dispatch and degradation ---

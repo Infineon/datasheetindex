@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from datasheetindex.core.boilerplate import flag_boilerplate
+from datasheetindex.core.engine import classic_tables
 from datasheetindex.core.textfile import extract_section_text
 from datasheetindex.models import TocNode
 
@@ -178,13 +179,20 @@ def _count_tables_on_page(args: tuple[str, int]) -> tuple[int, int]:
 
     Each worker opens the PDF independently because PyMuPDF document
     objects cannot be pickled across process boundaries.
+
+    The classic_tables() guard is a no-op today -- workers start under
+    forkserver/spawn and never import pymupdf4llm. It is here so that "classic"
+    is a property of this function rather than an accident of the worker's
+    import graph: a future set_forkserver_preload, or a PyMuPDF that activates
+    layout on import, must not silently reintroduce the divergence.
     """
     import pymupdf as _pymupdf
 
     pdf_path, page_idx = args
     doc = _pymupdf.open(pdf_path)
     try:
-        tables = doc[page_idx].find_tables()  # type: ignore[attr-defined]
+        with classic_tables():
+            tables = doc[page_idx].find_tables()  # type: ignore[attr-defined]
         return page_idx, len(tables.tables)
     finally:
         doc.close()
@@ -364,11 +372,16 @@ def _build_table_count_cache_parallel(
 def _build_table_count_cache_sequential(
     doc: pymupdf.Document,
 ) -> dict[int, int]:
-    """Scan all pages for tables sequentially (fallback)."""
+    """Scan all pages for tables sequentially (fallback).
+
+    Pinned to the classic detector: this runs in the caller's process, which may
+    have imported pymupdf4llm and installed the layout hook.
+    """
     cache: dict[int, int] = {}
-    for page_idx in range(len(doc)):
-        tables = doc[page_idx].find_tables()  # type: ignore[attr-defined]
-        cache[page_idx] = len(tables.tables)
+    with classic_tables():
+        for page_idx in range(len(doc)):
+            tables = doc[page_idx].find_tables()  # type: ignore[attr-defined]
+            cache[page_idx] = len(tables.tables)
     return cache
 
 
@@ -378,6 +391,11 @@ def enrich_with_table_counts(
     pdf_path: str | None = None,
 ) -> list[TocNode]:
     """Count tables on each node's page range using PyMuPDF find_tables().
+
+    Counts always come from PyMuPDF's classic geometric detector, whether or not
+    this process has imported pymupdf4llm, and whichever path below runs. They
+    are therefore a stable property of the document. Expect false positives on
+    plots and block diagrams; this is a navigational hint, not a precise count.
 
     When *pdf_path* is provided, pages are scanned in parallel across
     multiple processes for a significant speedup on large documents.
