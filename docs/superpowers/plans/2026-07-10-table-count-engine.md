@@ -495,17 +495,23 @@ def test_sequential_ignores_an_active_layout_hook(tmp_path, monkeypatch):
 def test_parallel_and_sequential_agree_under_a_layout_hook(tmp_path, monkeypatch):
     """The two paths must return the same numbers for the same document.
 
-    The hook is installed in the parent only; workers are fresh processes that
-    never import pymupdf4llm. Before the guard, this fixture returned
-    {0: 2, 1: 3, ...} sequentially and {0: 1, 1: 2, ...} in parallel.
+    The hook is installed in the parent *before* the pool starts, so this also
+    pins worker hook non-inheritance: workers spawn under forkserver/spawn and
+    never import pymupdf4llm, and a monkeypatched parent global cannot cross
+    that boundary. Installing it afterwards would spawn the workers into a
+    pristine parent and assert nothing about inheritance.
+
+    Before the guard, this fixture returned {0: 2, 1: 3, ...} sequentially and
+    {0: 1, 1: 2, ...} in parallel.
     """
     pages = 6
     pdf = tmp_path / "mixed.pdf"
     _write_mixed_table_pdf(pdf, pages=pages)
 
+    monkeypatch.setattr(pymupdf, "_get_layout", _fake_layout_hook)
+
     parallel = structure._build_table_count_cache_parallel(str(pdf), pages)
 
-    monkeypatch.setattr(pymupdf, "_get_layout", _fake_layout_hook)
     doc = pymupdf.open(str(pdf))
     try:
         sequential = structure._build_table_count_cache_sequential(doc)
