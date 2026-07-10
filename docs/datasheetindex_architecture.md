@@ -45,6 +45,17 @@ This convention matches PyMuPDF's `get_toc()`, which returns 1-indexed page numb
 
 **Text file size.** A 73-page datasheet produces ~50KB of text; a 300-page datasheet may produce 300KB+. The agent is expected to read slices of the text file (by page range), not load the entire file into context. The Claude Agent SDK's built-in file reading tools support this natively.
 
+**The table engine is process-global; `core/engine.py` owns it.** PyMuPDF's `find_tables()` consults a module global, `pymupdf._get_layout`, on *every* call. Importing `pymupdf4llm` (the optional `[layout]` extra) installs an ONNX-backed callable there, for the whole process. So which table engine runs is a property of the process, not of the document.
+
+`core/engine.py` is therefore the only module under `src/` allowed to import `pymupdf4llm` or to read or write that hook. It exposes two context managers, serialized on one re-entrant lock:
+
+- `classic_tables()` — suppresses the hook, pinning `find_tables()` to PyMuPDF's classic geometric detector. Both table-counting paths (parallel workers and the sequential fallback) scan inside it, which is why `table_count` is a stable property of the document rather than of the indexing process.
+- `layout_engine()` — imports `pymupdf4llm` **inside** the lock and yields it with its hook installed. Only `extract_table_markdown` uses it.
+
+The import must happen inside the lock, because the import *is* the hook installation. An import racing `classic_tables()` lets the guard save `None`, the import install the hook, and the guard restore its stale `None`. Since `pymupdf4llm._use_layout` stays `True`, `to_markdown()` then iterates a `None` `page.layout_information` and raises `TypeError` — permanently, because the module is cached in `sys.modules`. `build_datasheet` and `extract_table_markdown` both run under `asyncio.to_thread`, so this race is reachable.
+
+The two engines are different heuristics, not better and worse. On a real 68-page datasheet the classic detector finds 75 tables to the ML engine's 39 and is ~4.4x faster; the ML engine's extra misses are the "Typical Characteristics" plot pages, where the classic detector false-positives on chart gridlines. Counts are defined as the classic detector's answer so they do not depend on which optional extras happen to be installed.
+
 ---
 
 ## The Two Deliverables
