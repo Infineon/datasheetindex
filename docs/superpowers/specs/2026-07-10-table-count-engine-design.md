@@ -330,7 +330,57 @@ In `tests/test_structure.py`:
   explain that the two paths cannot be compared because they may use different
   engines. That caveat is exactly what this change removes.
 
-Nothing here needs the `[layout]` extra, so CI coverage is real.
+Nothing above needs the `[layout]` extra, so default CI coverage is real.
+
+### Real `[layout]` coverage
+
+Everything above is fake-hook or stub based. But the design now leans on two
+pieces of `pymupdf4llm` private state -- `_use_layout` and `use_layout(True)` --
+and the existing handler tests assert only `isinstance(result["is_error"], bool)`
+(`tests/test_defs.py:127`, `tests/test_mcp_server.py:122`,
+`tests/test_registry.py:373`), which passes whether or not layout works at all.
+Nothing in the suite would notice if `extract_table_markdown` started raising
+`TypeError`.
+
+Add `tests/test_layout_integration.py`, guarded by
+`pytest.importorskip("pymupdf.layout")` and marked `layout` (a new marker
+alongside the existing `real_pdf` and `integration`). Against an **unruled**
+fixture, in a process that has not yet imported `pymupdf4llm`:
+
+1. A `classic_tables()` scan returns the **classic** counts even though the ML
+   engine is installed -- the pin verified against the real engine, not a stub.
+2. `extract_table_markdown` then returns pipe-delimited markdown. This is
+   acceptance criterion 4: the round-trip happened before any `pymupdf4llm`
+   import, which is precisely the ordering that produced the permanent
+   `TypeError` under the previous design.
+3. A second `classic_tables()` scan still returns classic counts, and a second
+   `extract_table_markdown` still returns pipe-delimited markdown -- the hook
+   survives the round-trip.
+
+All three assertions were validated by hand against `pymupdf-layout` 1.28.0
+before writing this spec; they pass under the corrected design and the second
+would fail under the previous one.
+
+### CI
+
+**This lane does not exist yet.** GitLab CI (`.gitlab-ci.yml`, `stage: eval`)
+runs a plain `uv sync` followed by `uv run pytest tests/ -q`, and there are no
+GitHub workflows at all. Without a new job, `test_layout_integration.py` would
+self-skip everywhere and acceptance criteria 3 and 4 would be enforced by
+nothing.
+
+So the work includes a second `eval`-stage job that runs
+`uv sync --extra layout` and `uv run pytest -m layout`. Two constraints from
+`CLAUDE.md`'s repository topology:
+
+- `.gitlab-ci.yml` is tracked **only on `gitlab-main`**, never on GitHub `main`.
+  The test file and the `layout` marker land on `main`; the CI job is a separate
+  commit on `gitlab-main`. They ship in that order, so the marker exists before
+  a job selects it.
+- The extra costs ~49 MB on disk (`pymupdf-layout`'s wheel, which bundles the
+  ONNX models). Nothing is downloaded at run time, so the job needs no network
+  beyond the index. Keeping it a separate job, rather than widening the default
+  `uv sync`, preserves the fast default lane that `0.17.2` deliberately created.
 
 ## Documentation
 
@@ -338,6 +388,15 @@ Nothing here needs the `[layout]` extra, so CI coverage is real.
   that `has_tables` and `table_count` come from PyMuPDF's classic geometric
   detector, are identical whether or not the `[layout]` extra is installed, and
   that plots and block diagrams produce expected false positives.
+- `pyproject.toml:76-77`: the `dev` group comment currently reads "importing
+  pymupdf4llm swaps PyMuPDF's `find_tables()` for the ML layout engine, ~50x
+  slower." The *conclusion* (keep `[layout]` out of the default sync) survives,
+  but the stated mechanism is the one this spec corrects, and it is
+  maintainer-facing guidance sitting in the file a contributor reads first.
+  Rewrite it to say that importing `pymupdf4llm` installs a process-wide
+  `pymupdf._get_layout` hook that `find_tables()` consults per call. Keep a
+  slowdown figure but scope it honestly: ~35-100x on the ruled-grid and unruled
+  synthetic fixtures, ~4.4x on a real 68-page datasheet.
 - `CHANGELOG.md`: a `Fixed` entry under a new `0.17.3`. It should also correct
   the 0.17.2 entry's claim that importing `pymupdf4llm` "replaces PyMuPDF's
   `find_tables()`" -- it sets a global hook that `find_tables()` consults.
@@ -374,5 +433,7 @@ Nothing here needs the `[layout]` extra, so CI coverage is real.
    raising `TypeError`. This is the corruption the original design admitted.
 5. `pymupdf4llm` is imported in exactly one place in `src/`:
    `core/engine.py`. Enforceable by grep.
-6. The full test suite passes under a plain `uv sync` and under
-   `uv sync --extra layout`.
+6. The full test suite passes under a plain `uv sync` (where the `layout`-marked
+   tests skip) and under `uv sync --extra layout` (where they run). Criteria 3
+   and 4 are only actually *enforced* by the second lane, which does not exist
+   today and is part of this work -- see "CI" above.
