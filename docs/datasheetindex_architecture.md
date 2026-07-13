@@ -718,11 +718,20 @@ top of the page. Measured across the Infineon and TI datasheets, genuine
 continuations sit at nonblank line 3, while the mid-page `NOTES: (continued)`
 blocks on TI's mechanical-drawing pages sit at lines 19-48.
 
-**Silence is not a completeness claim.** Content can spill across a page break
-with no marker at all, and such a spill is invisible to this signal. The note
-therefore states only that the publisher marked the next page as continuing; it
-asserts nothing about rows or column headers (a continuation page often repeats
-its headers), and never claims a range is complete.
+**Silence is not a completeness claim.** Two distinct cases are accepted as
+invisible to this signal, and both are known limitations rather than bugs:
+
+- Content can spill across a page break with no marker at all.
+- A marker can exist but share its line with trailing text -- e.g. PyMuPDF
+  merging a heading with the column-header row into one block-line, `"6.4
+  Recommended Operating Conditions (continued) MIN NOM MAX UNIT"` -- which
+  `_CONTINUATION_RE`'s trailing `$` anchor does not match. The anchor is kept
+  deliberately: relaxing it to tolerate trailing text would let ordinary prose
+  ending in "(continued) ..." false-positive.
+
+The note therefore states only that the publisher marked the next page as
+continuing; it asserts nothing about rows or column headers (a continuation
+page often repeats its headers), and never claims a range is complete.
 
 This is a different concept from `TocNode.continued_tables`, which keeps its own
 narrower contract: tables captioned `Table N ... (Continued)`.

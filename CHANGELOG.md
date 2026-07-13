@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.18.0] - 2026-07-13
+
+### Added
+- **`get_section_text` now warns when the requested range cuts content the publisher marked as continuing onto an adjacent page.** An agent that reads a whole ToC section can still silently lose rows, because the section's page range does not always contain the whole of its content, and the evidence of the cut -- the publisher's `(continued)` marker -- sits at the top of the page the agent did not fetch. Measured on the TI TCAN1044A-Q1: section `6.4 Recommended Operating Conditions` has ToC range pages 4-4, but its table continues onto page 5, so `get_section_text(4, 4)` -- exactly what the tool description tells an agent to do for a whole-section read -- silently drops `TJ` (operating junction temperature) and the "without VIO" `IOH(RXD)`/`IOL(RXD)` current variants. Worse, page 4 *does* carry the "with VIO" values, so an agent asking for RXD output current finds a plausible number and never learns the other variant exists. `get_section_text` now probes both boundaries of the *requested range* (new `core.structure.continuation_at_boundary`, backed by a new positional matcher `_CONTINUATION_RE`/`_OPENING_BLOCK_LINES`) and inserts a `NOTE:` line under the position header when either edge cuts marked content. The check is deliberately range-relative, not section-relative: the TI case is a whole-section read, so a section-aware check would miss it entirely. This is a separate concept from `TocNode.continued_tables` (tables captioned `Table N ... (Continued)`), which is unchanged.
+- **Silence is not a completeness claim.** The note states only that the publisher marked the adjacent page as continuing -- never that rows or column headers are missing, and never that the range is complete (in the TI case the continuation page in fact repeats its `MIN NOM MAX UNIT` headers, so a stronger claim would be false for the very document that motivated this). The absence of a `NOTE:` line means no continuation was detected, not that the fetched context is whole: content can still spill across a page break with no marker at all, or share a line with trailing text that the marker's `$` anchor does not match -- both are accepted, documented limitations, not bugs.
+
+### Compatibility at a glance
+- **Output change, backward compatible.** `get_section_text`'s return value can now include one or more `NOTE:` lines between the position header and the section text. No method signature changed; existing callers that pattern-match only on the header and the `--- PAGE N ---` markers are unaffected.
+
 ## [0.17.3] - 2026-07-10
 
 ### Fixed
