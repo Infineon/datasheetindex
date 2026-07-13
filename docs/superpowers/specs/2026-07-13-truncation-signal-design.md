@@ -102,13 +102,23 @@ def continuation_at_boundary(text_content: str, page: int) -> list[str]:
     """Titles of content that continues from `page` onto `page + 1`.
 
     A title is returned when page+1 opens with a continuation marker inside its
-    opening block. Empty when `page` is the last page, or no such marker exists.
+    opening block. Returns empty for an out-of-range `page` -- `page < 1` (no
+    such boundary exists) or `page >= total_pages` (nothing follows) -- and when
+    page+1 carries no qualifying marker.
     """
 ```
 
-`DatasheetTools.get_section_text` calls it for `end_page` (the range's tail cut)
-and for `start_page - 1` (the range opens mid-continuation), and appends notes
-under the existing position header.
+The helper is total over any `int`, so callers need no bounds checks of their own.
+`page < 1` returning empty is what makes the head-cut call below well-defined at
+the start of the document.
+
+`DatasheetTools.get_section_text` calls it twice and appends notes under the
+existing position header:
+
+- `continuation_at_boundary(text, end_page)` -- the range's tail cut.
+- `continuation_at_boundary(text, start_page - 1)` -- the range opens
+  mid-continuation. For `start_page == 1` this probes boundary `0 -> 1`, which
+  the helper defines as empty; page 1 cannot continue from anything.
 
 ### Note copy states only what is proven
 
@@ -121,14 +131,19 @@ be false for the very document that motivated this design.)
 
 The copy stops there:
 
+The position header is emitted exactly as it is today -- singular `=== Page X of
+N ===` when `start_page == end_page`, plural `=== Pages X-Y of N ===` otherwise
+(`tools/bound.py`). The note is appended below it and changes nothing above it.
+Both TI cases below are single-page reads, so both show the singular form:
+
 ```
-=== Pages 4-4 of 42 ===
+=== Page 4 of 42 ===
 NOTE: "6.4 Recommended Operating Conditions" is continued on page 5, which is
 outside this range.
 ```
 
 ```
-=== Pages 5-5 of 42 ===
+=== Page 5 of 42 ===
 NOTE: this range opens inside "6.4 Recommended Operating Conditions", which is
 continued from page 4.
 ```
@@ -166,10 +181,13 @@ style in `tests/test_continued_tables.py`:
   `Table N ... (Continued)` forms
 - positional guard: a marker at nonblank line 3 fires; the same marker pushed to
   line 19 does not -- the `NOTES:` shape
-- `continuation_at_boundary`: fires at a cut, silent on the last page, silent
-  when no marker is present
-- `get_section_text`: tail-cut note, head-cut note, both, neither; the position
-  header stays intact and no completeness claim is emitted
+- `continuation_at_boundary`: fires at a cut; silent on the last page; silent
+  when no marker is present; silent for out-of-range `page` (`0` and negative,
+  the head-cut probe at `start_page == 1`)
+- `get_section_text`: tail-cut note, head-cut note, both, neither; a read
+  starting at page 1 emits no head-cut note; the position header keeps its
+  existing form -- singular `=== Page X of N ===` for a single-page read,
+  plural otherwise -- and no completeness claim is emitted
 - `continued_tables` is unchanged by this work: existing tests must pass untouched
 
 Regression fixture: a section whose ToC range ends one page before its table does
