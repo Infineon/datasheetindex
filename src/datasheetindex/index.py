@@ -31,7 +31,7 @@ from datasheetindex.core.structure import (
 )
 from datasheetindex.core.textfile import generate_text
 from datasheetindex.llm.client import close_llm_client
-from datasheetindex.models import DatasheetArtifacts
+from datasheetindex.models import DatasheetArtifacts, TocQuality
 
 if TYPE_CHECKING:
     from datasheetindex.llm.client import LlmCallable
@@ -45,6 +45,60 @@ DOWNLOAD_MAX_SIZE = 100 * 1024 * 1024  # 100 MB
 PDF_HEADER_SCAN_BYTES = 1024
 
 _OUTPUT_DIR_ENV_VAR = "DATASHEETINDEX_OUTPUT_DIR"
+
+
+def _minimum_fallback_candidate_entries(total_pages: int) -> int:
+    """Minimum entry count before an LLM-generated ToC is trusted."""
+
+    if total_pages <= 3:
+        return 1
+    if total_pages <= 8:
+        return 2
+    return 3
+
+
+def _accept_llm_toc_candidate(
+    baseline: TocQuality,
+    candidate: TocQuality,
+    *,
+    total_pages: int,
+) -> tuple[bool, str]:
+    """Decide whether an LLM-generated ToC is safe to replace the baseline."""
+
+    if candidate.entry_count == 0:
+        return False, "candidate has no entries"
+
+    if candidate.score <= baseline.score:
+        return (
+            False,
+            "candidate score did not improve "
+            f"({candidate.score:.2f} <= {baseline.score:.2f})",
+        )
+
+    # The entry-count floor exists to stop a degenerate candidate (a lone node
+    # whose end_page build_tree() extended to the last page, scoring well on
+    # coverage) from displacing a real ToC. It only applies when there is a real
+    # ToC to protect: the fallback's most common trigger is a PDF with no
+    # bookmarks at all, and there a thin ToC still beats no ToC.
+    if baseline.entry_count > 0:
+        min_entries = _minimum_fallback_candidate_entries(total_pages)
+        if candidate.entry_count < min_entries:
+            return (
+                False,
+                "candidate has too few entries "
+                f"({candidate.entry_count} < {min_entries})",
+            )
+
+    if (
+        baseline.page_coverage > 0
+        and candidate.page_coverage + 0.05 < baseline.page_coverage
+    ):
+        return (
+            False,
+            "candidate page coverage dropped materially versus baseline",
+        )
+
+    return True, "candidate improved quality without material regressions"
 
 
 def resolve_default_output_dir() -> str:
@@ -316,17 +370,36 @@ class DatasheetIndex:
                 try:
                     from datasheetindex.llm.toc_fallback import generate_toc_from_text
 
-                    nodes = generate_toc_from_text(
+                    candidate_nodes = generate_toc_from_text(
                         text_content, total_pages, active_llm_callable
                     )
-                    enrich_with_table_counts(nodes, doc, pdf_path=resolved_path)
-                    enrich_with_continued_tables(nodes, text_content)
-                    enrich_with_footnote_markers(nodes, text_content)
-                    enrich_with_cross_references(nodes, text_content)
-                    toc_quality = assess_toc_quality(nodes, total_pages)
-                    logger.info(
-                        "LLM ToC fallback done in %.1fs", time.monotonic() - t_llm
+                    enrich_with_table_counts(
+                        candidate_nodes,
+                        doc,
+                        pdf_path=resolved_path,
                     )
+                    enrich_with_continued_tables(candidate_nodes, text_content)
+                    enrich_with_footnote_markers(candidate_nodes, text_content)
+                    enrich_with_cross_references(candidate_nodes, text_content)
+                    candidate_quality = assess_toc_quality(candidate_nodes, total_pages)
+                    accept_candidate, candidate_reason = _accept_llm_toc_candidate(
+                        toc_quality,
+                        candidate_quality,
+                        total_pages=total_pages,
+                    )
+                    if accept_candidate:
+                        nodes = candidate_nodes
+                        toc_quality = candidate_quality
+                        logger.info(
+                            "LLM ToC fallback accepted in %.1fs (%s)",
+                            time.monotonic() - t_llm,
+                            candidate_reason,
+                        )
+                    else:
+                        logger.warning(
+                            "LLM ToC fallback rejected; using original ToC (%s)",
+                            candidate_reason,
+                        )
                 except Exception:
                     logger.warning(
                         "LLM ToC fallback failed; using original ToC",

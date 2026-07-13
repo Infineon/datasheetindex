@@ -206,6 +206,80 @@ def test_close_llm_client_closes_httpx_client(monkeypatch):
     assert httpx_clients[0].closed is True
 
 
+def test_get_structured_output_client_returns_none_for_plain_callable():
+    from datasheetindex.llm.client import get_structured_output_client
+
+    assert get_structured_output_client(lambda _system, _user: "ok") is None
+
+
+def test_get_structured_output_client_exposes_schema_calls(monkeypatch):
+    monkeypatch.setenv("LITELLM_BASE_URL", "https://example.com")
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "secret")
+    _install_fake_dotenv(monkeypatch)
+
+    seen_request: dict[str, object] = {}
+
+    class _FakeOpenAI:
+        def __init__(self, **_kwargs):
+            self.responses = types.SimpleNamespace(
+                create=lambda **kwargs: (
+                    seen_request.update(kwargs)
+                    or types.SimpleNamespace(
+                        output_text='{"entries":[]}',
+                        status="completed",
+                        incomplete_details=None,
+                    )
+                )
+            )
+
+    def _fake_httpx_client(**_kwargs):
+        return _TrackedHttpxClient()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "httpx",
+        types.SimpleNamespace(Client=_fake_httpx_client),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "openai",
+        types.SimpleNamespace(OpenAI=_FakeOpenAI),
+    )
+
+    from datasheetindex.llm.client import (
+        create_llm_client,
+        get_structured_output_client,
+    )
+
+    llm = create_llm_client()
+    structured = get_structured_output_client(llm)
+    assert structured is not None
+
+    result = structured.structured_json(
+        "sys",
+        "user",
+        name="probe-schema",
+        schema={"type": "object", "properties": {}, "additionalProperties": False},
+        max_output_tokens=123,
+    )
+
+    assert seen_request["text"] == {
+        "format": {
+            "type": "json_schema",
+            "name": "probe-schema",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        }
+    }
+    assert seen_request["max_output_tokens"] == 123
+    assert result.output_text == '{"entries":[]}'
+    assert result.status == "completed"
+
+
 def test_call_with_retry_retries_on_429(monkeypatch):
     """Should retry on rate limit errors and succeed."""
     from datasheetindex.llm.client import _call_with_retry
@@ -227,6 +301,42 @@ def test_call_with_retry_retries_on_429(monkeypatch):
     api = types.SimpleNamespace(create=fake_create)
     result = _call_with_retry(api, "model", "sys", "user")  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
     assert result == "success"
+    assert call_count == 3
+
+
+def test_call_structured_with_retry_retries_on_429(monkeypatch):
+    """Structured calls should retry on rate limit errors and succeed."""
+    from datasheetindex.llm.client import _call_structured_with_retry
+
+    monkeypatch.setattr("datasheetindex.llm.client._RETRY_BASE_DELAY", 0.01)
+
+    call_count = 0
+
+    class _RateLimitError(Exception):
+        status_code = 429
+
+    def fake_create(**_kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count < 3:
+            raise _RateLimitError("Too Many Requests")
+        return types.SimpleNamespace(
+            output_text='{"entries":[]}',
+            status="completed",
+            incomplete_details=None,
+        )
+
+    api = types.SimpleNamespace(create=fake_create)
+    result = _call_structured_with_retry(
+        api,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+        "model",
+        "sys",
+        "user",
+        name="probe-schema",
+        schema={"type": "object", "properties": {}, "additionalProperties": False},
+    )
+    assert result.output_text == '{"entries":[]}'
+    assert result.status == "completed"
     assert call_count == 3
 
 

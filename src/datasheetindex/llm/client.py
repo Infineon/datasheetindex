@@ -7,7 +7,8 @@ import logging
 import os
 import time
 import weakref
-from typing import Protocol
+from dataclasses import dataclass
+from typing import Protocol, cast
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,30 @@ class LlmCallable(Protocol):
         """Run a prompt pair and return text output."""
 
 
+@dataclass(frozen=True)
+class StructuredLlmResult:
+    """Structured Responses payload plus completion metadata."""
+
+    output_text: str
+    status: str | None = None
+    incomplete_details: object | None = None
+
+
+class StructuredLlmCallable(Protocol):
+    """Optional structured-output interface for schema-constrained calls."""
+
+    def structured_json(
+        self,
+        system: str,
+        user: str,
+        *,
+        name: str,
+        schema: dict[str, object],
+        max_output_tokens: int | None = None,
+    ) -> StructuredLlmResult:
+        """Run a JSON-schema constrained response request."""
+
+
 class _ResponsesOutput(Protocol):
     @property
     def output_text(self) -> str:
@@ -26,7 +51,9 @@ class _ResponsesOutput(Protocol):
 
 
 class _ResponsesApi(Protocol):
-    def create(self, *, model: str, instructions: str, input: str) -> _ResponsesOutput:
+    def create(
+        self, *, model: str, instructions: str, input: str, **kwargs: object
+    ) -> _ResponsesOutput:
         """Create an LLM response."""
 
 
@@ -83,6 +110,71 @@ def _call_with_retry(
     raise last_exc
 
 
+def _normalize_incomplete_details(details: object | None) -> object | None:
+    if details is None:
+        return None
+    model_dump = getattr(details, "model_dump", None)
+    if callable(model_dump):
+        return model_dump()
+    return details
+
+
+def _call_structured_with_retry(
+    responses_api: _ResponsesApi,
+    model: str,
+    system: str,
+    user: str,
+    *,
+    name: str,
+    schema: dict[str, object],
+    max_output_tokens: int | None = None,
+) -> StructuredLlmResult:
+    """Call the Responses API with a strict JSON schema and retry if needed."""
+
+    last_exc: Exception | None = None
+    for attempt in range(_RETRY_MAX_ATTEMPTS):
+        try:
+            request: dict[str, object] = {
+                "model": model,
+                "instructions": system,
+                "input": user,
+                "text": {
+                    "format": {
+                        "type": "json_schema",
+                        "name": name,
+                        "strict": True,
+                        "schema": schema,
+                    }
+                },
+            }
+            if max_output_tokens is not None:
+                request["max_output_tokens"] = max_output_tokens
+
+            response = responses_api.create(**request)
+            return StructuredLlmResult(
+                output_text=response.output_text,
+                status=getattr(response, "status", None),
+                incomplete_details=_normalize_incomplete_details(
+                    getattr(response, "incomplete_details", None)
+                ),
+            )
+        except Exception as exc:
+            last_exc = exc
+            if not _is_retryable(exc) or attempt == _RETRY_MAX_ATTEMPTS - 1:
+                raise
+            delay = min(_RETRY_BASE_DELAY * (2**attempt), _RETRY_MAX_DELAY)
+            logger.warning(
+                "Structured LLM call failed (attempt %d/%d): %s. Retrying in %.1fs",
+                attempt + 1,
+                _RETRY_MAX_ATTEMPTS,
+                exc,
+                delay,
+            )
+            time.sleep(delay)
+    assert last_exc is not None
+    raise last_exc
+
+
 class _ManagedLlmClient:
     """Callable wrapper that owns and closes its underlying HTTP client."""
 
@@ -95,6 +187,25 @@ class _ManagedLlmClient:
 
     def __call__(self, system: str, user: str) -> str:
         return _call_with_retry(self._responses_api, self._model, system, user)
+
+    def structured_json(
+        self,
+        system: str,
+        user: str,
+        *,
+        name: str,
+        schema: dict[str, object],
+        max_output_tokens: int | None = None,
+    ) -> StructuredLlmResult:
+        return _call_structured_with_retry(
+            self._responses_api,
+            self._model,
+            system,
+            user,
+            name=name,
+            schema=schema,
+            max_output_tokens=max_output_tokens,
+        )
 
     def close(self) -> None:
         """Release the underlying HTTP client once the callable is no longer needed."""
@@ -181,7 +292,11 @@ def create_llm_client(model: str = "gpt-4.1") -> LlmCallable:
         max_retries=max_retries,
     )
     return _ManagedLlmClient(
-        responses_api=client.responses,
+        # The SDK's Responses.create spells out every request field as a named
+        # parameter, so it cannot structurally satisfy a protocol that forwards
+        # **kwargs -- even though it accepts every field we pass. Cast at the
+        # SDK boundary rather than weaken _ResponsesApi for our own callers.
+        responses_api=cast("_ResponsesApi", client.responses),
         http_client=http_client,
         model=model,
     )
@@ -190,3 +305,14 @@ def create_llm_client(model: str = "gpt-4.1") -> LlmCallable:
 def close_llm_client(llm_callable: object | None) -> None:
     """Close a managed LLM callable if it exposes a ``close()`` method."""
     _close_resource(llm_callable)
+
+
+def get_structured_output_client(
+    llm_callable: object | None,
+) -> StructuredLlmCallable | None:
+    """Return the structured-output interface when the callable exposes one."""
+
+    structured_json = getattr(llm_callable, "structured_json", None)
+    if callable(structured_json):
+        return cast(StructuredLlmCallable, llm_callable)
+    return None

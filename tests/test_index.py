@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from datasheetindex.index import DatasheetIndex
+from datasheetindex.index import DatasheetIndex, _accept_llm_toc_candidate
 from datasheetindex.models import TocNode, TocQuality
 
 DATA2PAGE_DIR = Path(__file__).resolve().parent.parent.parent / "data2page"
@@ -301,6 +301,169 @@ def test_build_auto_llm_fallback_when_quality_low(monkeypatch, tmp_path):
     assert len(fallback_calls) == 1
     assert artifacts.json_data["toc"][0]["title"] == "Auto"
     assert fake_llm.closed is True
+
+
+def test_build_auto_llm_fallback_keeps_original_when_candidate_too_thin(
+    monkeypatch, tmp_path
+):
+    quality_calls = [0]
+    fallback_calls: list[object] = []
+    llm_models: list[str] = []
+
+    def fake_open(_path: str):
+        return _FakeBuildDoc(pages=20)
+
+    def fake_quality(_nodes, _total_pages):
+        quality_calls[0] += 1
+        if quality_calls[0] == 1:
+            return TocQuality(
+                score=0.2,
+                entry_count=6,
+                max_depth=1,
+                page_coverage=1.0,
+            )
+        return TocQuality(
+            score=0.8,
+            entry_count=1,
+            max_depth=1,
+            page_coverage=1.0,
+        )
+
+    class _FakeAutoLlm:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def __call__(self, _system: str, _user: str) -> str:
+            return "ok"
+
+        def close(self) -> None:
+            self.closed = True
+
+    fake_llm = _FakeAutoLlm()
+
+    def fake_client(model: str):
+        llm_models.append(model)
+        return fake_llm
+
+    def fake_toc_from_text(_text: str, _total_pages: int, llm_callable):
+        fallback_calls.append(llm_callable)
+        return [
+            TocNode(
+                title="Auto",
+                level=1,
+                start_page=1,
+                end_page=20,
+                node_id="0001",
+            )
+        ]
+
+    monkeypatch.setattr("datasheetindex.index.pymupdf.open", fake_open)
+    monkeypatch.setattr(
+        "datasheetindex.index.generate_text", lambda _doc: "--- PAGE 1 ---\n"
+    )
+    monkeypatch.setattr("datasheetindex.index.generate_preamble", lambda _doc: "pre")
+    monkeypatch.setattr(
+        "datasheetindex.index.extract_toc", lambda _doc: [[1, "Original", 1]]
+    )
+    monkeypatch.setattr(
+        "datasheetindex.index.build_tree",
+        lambda _raw, _pages: [
+            TocNode(
+                title="Original",
+                level=1,
+                start_page=1,
+                end_page=20,
+                node_id="0001",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        "datasheetindex.index.enrich_with_table_counts",
+        lambda _nodes, _doc, **_kw: _nodes,
+    )
+    monkeypatch.setattr(
+        "datasheetindex.index.enrich_with_continued_tables",
+        lambda _nodes, _text: _nodes,
+    )
+    monkeypatch.setattr(
+        "datasheetindex.index.enrich_with_footnote_markers",
+        lambda _nodes, _text: _nodes,
+    )
+    monkeypatch.setattr(
+        "datasheetindex.index.enrich_with_cross_references",
+        lambda _nodes, _text: _nodes,
+    )
+    monkeypatch.setattr("datasheetindex.index.assess_toc_quality", fake_quality)
+    monkeypatch.setattr("datasheetindex.llm.client.create_llm_client", fake_client)
+    monkeypatch.setattr(
+        "datasheetindex.llm.toc_fallback.generate_toc_from_text",
+        fake_toc_from_text,
+    )
+
+    idx = DatasheetIndex("dummy.pdf")
+    artifacts = idx.build(output_dir=str(tmp_path))
+    idx.close()
+
+    assert artifacts.toc_quality is not None
+    assert artifacts.toc_quality.score == 0.2
+    assert llm_models == ["gpt-4.1"]
+    assert len(fallback_calls) == 1
+    assert artifacts.json_data["toc"][0]["title"] == "Original"
+    assert fake_llm.closed is True
+
+
+def _quality(score: float, entry_count: int, page_coverage: float) -> TocQuality:
+    return TocQuality(
+        score=score,
+        entry_count=entry_count,
+        max_depth=1,
+        page_coverage=page_coverage,
+    )
+
+
+def test_accept_llm_toc_candidate_accepts_thin_candidate_without_baseline():
+    """With no bookmarks to protect, a thin-but-real ToC beats no ToC at all."""
+    accepted, reason = _accept_llm_toc_candidate(
+        _quality(score=0.0, entry_count=0, page_coverage=0.0),
+        _quality(score=0.4, entry_count=2, page_coverage=1.0),
+        total_pages=12,
+    )
+
+    assert accepted is True, reason
+
+
+def test_accept_llm_toc_candidate_rejects_thin_candidate_against_real_baseline():
+    """The entry-count floor still guards an existing ToC."""
+    accepted, reason = _accept_llm_toc_candidate(
+        _quality(score=0.2, entry_count=6, page_coverage=1.0),
+        _quality(score=0.8, entry_count=1, page_coverage=1.0),
+        total_pages=20,
+    )
+
+    assert accepted is False
+    assert "too few entries" in reason
+
+
+def test_accept_llm_toc_candidate_accepts_fewer_entries_when_score_improves():
+    """A cleaner, higher-scoring ToC is not vetoed for having fewer entries."""
+    accepted, reason = _accept_llm_toc_candidate(
+        _quality(score=0.25, entry_count=60, page_coverage=0.5),
+        _quality(score=0.75, entry_count=20, page_coverage=0.9),
+        total_pages=100,
+    )
+
+    assert accepted is True, reason
+
+
+def test_accept_llm_toc_candidate_rejects_coverage_regression():
+    accepted, reason = _accept_llm_toc_candidate(
+        _quality(score=0.2, entry_count=10, page_coverage=0.9),
+        _quality(score=0.6, entry_count=10, page_coverage=0.4),
+        total_pages=100,
+    )
+
+    assert accepted is False
+    assert "page coverage" in reason
 
 
 def test_build_auto_llm_fallback_graceful_without_credentials(monkeypatch, tmp_path):
