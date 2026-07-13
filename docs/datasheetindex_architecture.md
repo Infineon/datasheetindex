@@ -708,8 +708,11 @@ The evidence of the cut, the publisher's `(continued)` marker, sits at the top
 of the page the agent did not fetch.
 
 `get_section_text` therefore probes both boundaries of the requested range and
-inserts a `NOTE:` line under the position header when the range cuts content
-marked as continuing. The check is **range-relative**, not section-relative: the
+inserts a `=== NOTE: ... ===` line under the position header when the range
+cuts content marked as continuing. The `===` wrapper matters: real datasheets
+(e.g. TI TCAN1044A-Q1 page 26) contain their own literal `NOTE:` lines in body
+text, and a bare `NOTE:` prefix would collide with them, producing a false
+truncation signal. The check is **range-relative**, not section-relative: the
 TI case is a whole-section read, so a section-aware check would miss it.
 
 A marker is honoured only if it appears within the first `_OPENING_BLOCK_LINES`

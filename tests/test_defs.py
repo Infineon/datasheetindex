@@ -350,7 +350,7 @@ def test_get_section_text_description_mentions_the_continuation_note():
 
     defs = {d.name: d for d in create_datasheet_tool_defs()}
     description = defs["get_section_text"].description
-    assert "NOTE:" in description
+    assert "=== NOTE:" in description
     assert "continued" in description
     # Both header forms, not just the plural one.
     assert "=== Page X of N ===" in description

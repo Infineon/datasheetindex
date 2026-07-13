@@ -162,9 +162,10 @@ with DatasheetTools("datasheet.pdf") as tools:
     matches = tools.search_text(["V_DS max", "junction temperature"])
 
     # Read a page range; the text opens with a "=== Page X of N ===" header
-    # (singular for one page, "=== Pages X-Y of N ===" for a range). A "NOTE:"
-    # line follows if the range cuts content marked continuing onto an
-    # adjacent page -- its absence is not a completeness guarantee.
+    # (singular for one page, "=== Pages X-Y of N ===" for a range). A
+    # "=== NOTE: ... ===" line follows if the range cuts content marked
+    # continuing onto an adjacent page -- its absence is not a completeness
+    # guarantee.
     section_text = tools.get_section_text(12, 13)
 
     image = tools.inspect_page(
@@ -192,9 +193,10 @@ tools for the bound PDF source:
   the manifest: source info, total pages, ToC quality, and the full enriched ToC
 - `get_section_text` - return extracted text for a page range from the latest
   build, opening with a position header (`=== Page X of N ===` for one page,
-  `=== Pages X-Y of N ===` for a range) followed by zero or more `NOTE:` lines
-  when the range cuts content the publisher marked as continuing onto an
-  adjacent page; absence of a NOTE is not a completeness guarantee
+  `=== Pages X-Y of N ===` for a range) followed by zero or more
+  `=== NOTE: ... ===` lines when the range cuts content the publisher marked
+  as continuing onto an adjacent page; absence of a note is not a
+  completeness guarantee
 - `search_text` - find page-aware text snippets in the latest build (pass a
   single pattern or a list of patterns), even when labels wrap across lines or
   table values interrupt the phrase; each hit carries the section breadcrumb

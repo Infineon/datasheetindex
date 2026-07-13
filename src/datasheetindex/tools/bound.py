@@ -53,13 +53,13 @@ def _continuation_notes(text_content: str, start_page: int, end_page: int) -> li
     notes: list[str] = []
     for title in continuation_at_boundary(text_content, start_page - 1):
         notes.append(
-            f'NOTE: this range opens inside "{title}", which is continued '
-            f"from page {start_page - 1}."
+            f'=== NOTE: this range opens inside "{title}", which is '
+            f"continued from page {start_page - 1}. ==="
         )
     for title in continuation_at_boundary(text_content, end_page):
         notes.append(
-            f'NOTE: "{title}" is continued on page {end_page + 1}, which is '
-            f"outside this range."
+            f'=== NOTE: "{title}" is continued on page {end_page + 1}, '
+            f"which is outside this range. ==="
         )
     return notes
 
@@ -229,10 +229,13 @@ class DatasheetTools:
 
         1. A position header: ``=== Page X of N ===`` for a single-page read,
            ``=== Pages X-Y of N ===`` for a multi-page range.
-        2. Zero or more ``NOTE:`` lines -- present when the requested range cuts
-           content the publisher marked as continuing onto an adjacent page, at
-           the head of the range, the tail, or both; either boundary can carry
-           more than one marker (e.g. a page opening with two continued tables).
+        2. Zero or more ``=== NOTE: ... ===`` lines -- present when the
+           requested range cuts content the publisher marked as continuing
+           onto an adjacent page, at the head of the range, the tail, or both;
+           either boundary can carry more than one marker (e.g. a page opening
+           with two continued tables). The ``===`` wrapper is what marks the
+           line as tool framing rather than document content: real datasheets
+           sometimes contain their own literal ``NOTE:`` lines in body text.
         3. The section text, WITH ``--- PAGE N ---`` markers so the agent can
            orient within the range.
 

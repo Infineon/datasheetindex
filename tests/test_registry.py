@@ -576,8 +576,8 @@ def test_get_section_text_warns_when_range_cuts_a_continuation(tmp_path):
     # Header form is unchanged.
     assert section_text.startswith("=== Page 1 of 2 ===")
     expected = (
-        'NOTE: "6.4 Recommended Operating Conditions" is continued on page 2, '
-        "which is outside this range."
+        '=== NOTE: "6.4 Recommended Operating Conditions" is continued on '
+        "page 2, which is outside this range. ==="
     )
     assert expected in section_text
     # A page-1 read has no head cut.
@@ -595,8 +595,8 @@ def test_get_section_text_warns_when_range_opens_mid_continuation(tmp_path):
 
     assert section_text.startswith("=== Page 2 of 2 ===")
     expected = (
-        'NOTE: this range opens inside "6.4 Recommended Operating Conditions", '
-        "which is continued from page 1."
+        '=== NOTE: this range opens inside "6.4 Recommended Operating '
+        'Conditions", which is continued from page 1. ==='
     )
     assert expected in section_text
     # Page 2 is the last page, so there is no tail cut.
@@ -611,7 +611,7 @@ def test_get_section_text_is_silent_when_the_range_covers_the_whole_table(tmp_pa
     tools.close()
 
     assert section_text.startswith("=== Pages 1-2 of 2 ===")
-    assert "NOTE:" not in section_text
+    assert "=== NOTE:" not in section_text
 
 
 def _spanning_table_pdf(tmp_path):
@@ -645,18 +645,53 @@ def test_get_section_text_warns_at_both_boundaries(tmp_path):
     tools.close()
 
     lines = section_text.splitlines()
-    notes = [line for line in lines if line.startswith("NOTE:")]
+    notes = [line for line in lines if line.startswith("=== NOTE:")]
     assert len(notes) == 2, notes
 
     # The head note comes first -- it describes where the range began.
     assert notes[0] == (
-        'NOTE: this range opens inside "6.8 Electrical Characteristics", '
-        "which is continued from page 1."
+        '=== NOTE: this range opens inside "6.8 Electrical Characteristics", '
+        "which is continued from page 1. ==="
     )
     assert notes[1] == (
-        'NOTE: "6.8 Electrical Characteristics" is continued on page 3, '
-        "which is outside this range."
+        '=== NOTE: "6.8 Electrical Characteristics" is continued on page 3, '
+        "which is outside this range. ==="
     )
     # Notes sit directly under the header, above the page text.
     assert lines[0] == "=== Page 2 of 3 ==="
-    assert lines[1].startswith("NOTE:")
+    assert lines[1].startswith("=== NOTE:")
+
+
+def test_document_note_lines_are_not_mistaken_for_the_signal(tmp_path):
+    """A datasheet's own body text can contain a literal "NOTE:" line that has
+    nothing to do with our truncation signal -- found live on page 26 of the
+    TI TCAN1044A-Q1 revision-history section. Our warning must be framed as
+    "=== NOTE: ... ===" specifically so it cannot be confused with, or
+    falsely triggered by, that kind of document content."""
+    pdf_path = tmp_path / "document_note.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page()
+    writer = pymupdf.TextWriter(page.rect)
+    writer.append((72, 72), "8 Revision History")
+    writer.append(
+        (72, 96),
+        "NOTE: Page numbers for previous revisions may differ from page "
+        "numbers in the current version.",
+    )
+    writer.write_text(page)
+    doc.save(str(pdf_path))
+    doc.close()
+
+    tools = DatasheetTools(str(pdf_path))
+    tools.build_datasheet(output_dir=str(tmp_path / "out"))
+    section_text = tools.get_section_text(1, 1)
+    tools.close()
+
+    # The library stays silent -- no continuation marker exists anywhere.
+    assert not any(line.startswith("=== NOTE:") for line in section_text.splitlines())
+    # The document's own NOTE: line is still there, verbatim -- we frame our
+    # signal, we do not filter the document's content.
+    assert (
+        "NOTE: Page numbers for previous revisions may differ from page "
+        "numbers in the current version." in section_text
+    )
