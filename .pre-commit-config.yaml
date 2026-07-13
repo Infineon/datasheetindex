@@ -17,22 +17,20 @@ repos:
 
   # Ruff - linting and formatting
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.20
+    rev: v0.15.21
     hooks:
-      - id: ruff
+      - id: ruff-check
         args: [--fix]
       - id: ruff-format
 
   # ty - type checking
-  - repo: local
+  - repo: https://github.com/astral-sh/ty-pre-commit
+    rev: v0.0.59
     hooks:
       - id: ty
-        name: ty type checker
-        entry: uv run --no-sync ty check
-        language: system
-        types: [python]
-        pass_filenames: false
 
+  - repo: local
+    hooks:
       - id: pytest
         name: unit tests
         entry: uv run --no-sync pytest -q -m "not integration and not real_pdf"
