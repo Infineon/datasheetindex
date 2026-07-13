@@ -718,6 +718,22 @@ top of the page. Measured across the Infineon and TI datasheets, genuine
 continuations sit at nonblank line 3, while the mid-page `NOTES: (continued)`
 blocks on TI's mechanical-drawing pages sit at lines 19-48.
 
+**The positional guard is the whole correctness property. Do not replace it with
+a content check.** The obvious-looking alternative -- accept the marker only if
+its title also appears on the *preceding* page, "proving" it is a continuation --
+was measured and rejected: all ten markers in the corpus pass it, including all
+six `NOTES:` false positives, so it discriminates nothing. It looks like a guard
+and is not one. Both edges of `_OPENING_BLOCK_LINES` are pinned by tests in
+`tests/test_continuation_boundary.py`; a drift in either direction fails them.
+
+The title-length bound in `_CONTINUATION_RE` is **not** a second guard. It exists
+only to say "this is a title, not a paragraph that happens to end in
+(continued)". It must stay generous: vendors repeat the full parameterised
+caption on the continuation page (`Table 12. Electrical characteristics (VDD =
+3.3 V, TA = 25 degC, unless otherwise specified) (continued)` is ~100
+characters), and a tight bound silently drops them -- a false negative in exactly
+the failure class this signal exists to eliminate.
+
 **Silence is not a completeness claim.** Two distinct cases are accepted as
 invisible to this signal, and both are known limitations rather than bugs:
 
