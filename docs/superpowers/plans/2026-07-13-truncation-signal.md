@@ -344,12 +344,62 @@ def test_get_section_text_is_silent_when_the_range_covers_the_whole_table(tmp_pa
 
     assert section_text.startswith("=== Pages 1-2 of 2 ===")
     assert "NOTE:" not in section_text
+
+
+def _spanning_table_pdf(tmp_path):
+    """Three pages; the table runs across both breaks, so page 2 is cut at BOTH
+    boundaries -- it opens mid-continuation and continues onward."""
+    pdf_path = tmp_path / "spanning.pdf"
+    doc = pymupdf.open()
+    rows = [
+        "6.8 Electrical Characteristics",
+        "6.8 Electrical Characteristics (continued)",
+        "6.8 Electrical Characteristics (continued)",
+    ]
+    for heading in rows:
+        page = doc.new_page()
+        writer = pymupdf.TextWriter(page.rect)
+        writer.append((72, 72), heading)
+        writer.append((72, 96), "VOH output high voltage 2.4 V")
+        writer.write_text(page)
+    doc.save(str(pdf_path))
+    doc.close()
+    return pdf_path
+
+
+def test_get_section_text_warns_at_both_boundaries(tmp_path):
+    """A range cut at the head AND the tail gets exactly one note for each,
+    head first, with no duplication."""
+    pdf_path = _spanning_table_pdf(tmp_path)
+    tools = DatasheetTools(str(pdf_path))
+    tools.build_datasheet(output_dir=str(tmp_path / "out"))
+    section_text = tools.get_section_text(2, 2)
+    tools.close()
+
+    lines = section_text.splitlines()
+    notes = [line for line in lines if line.startswith("NOTE:")]
+    assert len(notes) == 2, notes
+
+    # The head note comes first -- it describes where the range began.
+    assert notes[0] == (
+        'NOTE: this range opens inside "6.8 Electrical Characteristics", '
+        "which is continued from page 1."
+    )
+    assert notes[1] == (
+        'NOTE: "6.8 Electrical Characteristics" is continued on page 3, '
+        "which is outside this range."
+    )
+    # Notes sit directly under the header, above the page text.
+    assert lines[0] == "=== Page 2 of 3 ==="
+    assert lines[1].startswith("NOTE:")
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `uv run pytest tests/test_registry.py -k continuation -v`
-Expected: FAIL -- the `NOTE:` assertions fail; the header assertions already pass.
+Run: `uv run pytest tests/test_registry.py -k "warns or silent" -v`
+Expected: FAIL on all four new tests -- the `NOTE:` assertions fail (the header
+assertions already pass, since the header is unchanged). The four are: tail cut,
+head cut, both boundaries, neither.
 
 - [ ] **Step 3: Implement**
 
@@ -473,6 +523,13 @@ def test_get_section_text_description_mentions_the_continuation_note():
     description = defs["get_section_text"].description
     assert "NOTE:" in description
     assert "continued" in description
+    # Both header forms, not just the plural one.
+    assert "=== Page X of N ===" in description
+    assert "=== Pages X-Y of N ===" in description
+    # Content-level: this signal does not prove the content is a table.
+    assert "cuts a table" not in description
+    # The absence of a note guarantees nothing.
+    assert "not a guarantee of completeness" in description
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -485,19 +542,31 @@ Expected: FAIL -- `assert "NOTE:" in description`
 In `src/datasheetindex/tools/defs.py`, replace the `get_section_text`
 description string with:
 
+Two things this wording must get right, both of which the spec settled:
+
+- The header has **two** forms -- singular `=== Page X of N ===` for a
+  single-page read, plural `=== Pages X-Y of N ===` otherwise. (The description
+  in the repo today claims only the plural form. That is a pre-existing
+  inaccuracy; fix it while we are here.)
+- The note is **content-level**. This signal proves only that the publisher
+  marked the next page as continuing. It does not prove the content is a table,
+  so the description must not say "cuts a table".
+
 ```python
             description=(
                 "Read the extracted text for a page range (inclusive, 1-indexed). "
                 "Use when you know WHERE to read -- pass start_page/end_page from "
                 "ToC nodes to read specific sections. For a single page use the "
                 "same value for both. Prefer reading whole sections rather than "
-                "page-by-page. The text opens with a '=== Pages X-Y of N ===' "
-                "header so you know your position in the document. If a 'NOTE:' "
-                "line follows the header, the range you asked for cuts a table "
-                "that is continued on an adjacent page -- re-read with that page "
-                "included before trusting the values, since a section's ToC page "
-                "range does not always contain the whole table. No NOTE only "
-                "means none was detected; it is not a guarantee of completeness."
+                "page-by-page. The text opens with a position header -- "
+                "'=== Page X of N ===' for a single page, '=== Pages X-Y of N ===' "
+                "for a range -- so you know where you are in the document. If a "
+                "'NOTE:' line follows the header, the range you asked for cuts "
+                "content the publisher marked as continued on an adjacent page: "
+                "re-read with that page included before trusting values from it, "
+                "since a section's ToC page range does not always contain all of "
+                "its content. The absence of a NOTE only means none was detected; "
+                "it is not a guarantee of completeness."
             ),
 ```
 
