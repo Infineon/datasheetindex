@@ -68,8 +68,8 @@ possibly-unresolved-reference = "warn"
 dev = [
     "pre-commit>=4.5.1",
     "pytest>=9.0.2",
-    "ruff>=0.14.11",
-    "ty>=0.0.12",
+    "ruff>=0.15.21",
+    "ty>=0.0.59",
     # The checks need the mcp extra: tests/test_mcp_server.py imports `mcp`
     # directly, and ty cannot resolve it otherwise. uv has no way to enable an
     # extra by default, so declare it here -- a plain `uv sync`, which both the
