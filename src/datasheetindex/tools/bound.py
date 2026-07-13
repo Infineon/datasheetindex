@@ -20,7 +20,10 @@ from typing import TYPE_CHECKING
 from datasheetindex.core.engine import layout_engine
 from datasheetindex.core.locate import TextLocation
 from datasheetindex.core.locate import locate_text as locate_text_core
-from datasheetindex.core.structure import find_breadcrumb_for_page
+from datasheetindex.core.structure import (
+    continuation_at_boundary,
+    find_breadcrumb_for_page,
+)
 from datasheetindex.core.textfile import TextSearchMatch, extract_section_text
 from datasheetindex.core.textfile import search_text as search_text_content
 from datasheetindex.index import DatasheetIndex
@@ -38,6 +41,27 @@ class _BuildOptions:
     output_stem: str | None
     include_summaries: bool
     model: str | None
+
+
+def _continuation_notes(text_content: str, start_page: int, end_page: int) -> list[str]:
+    """Notes for content the requested range cuts at either boundary.
+
+    States only that the publisher marked the adjacent page as continuing. It
+    claims nothing about rows or column headers -- a continuation page often
+    repeats its headers -- and never asserts that the range is complete.
+    """
+    notes: list[str] = []
+    for title in continuation_at_boundary(text_content, start_page - 1):
+        notes.append(
+            f'NOTE: this range opens inside "{title}", which is continued '
+            f"from page {start_page - 1}."
+        )
+    for title in continuation_at_boundary(text_content, end_page):
+        notes.append(
+            f'NOTE: "{title}" is continued on page {end_page + 1}, which is '
+            f"outside this range."
+        )
+    return notes
 
 
 class DatasheetTools:
@@ -201,9 +225,18 @@ class DatasheetTools:
     def get_section_text(self, start_page: int, end_page: int) -> str:
         """Return extracted text for a page range from the latest build.
 
-        The text opens with a ``=== Pages X-Y of N ===`` position header for
-        orientation, followed by the section text WITH ``--- PAGE N ---``
-        markers so the agent can orient within the range.
+        The result has three parts, in order:
+
+        1. A position header: ``=== Page X of N ===`` for a single-page read,
+           ``=== Pages X-Y of N ===`` for a multi-page range.
+        2. Zero, one, or two ``NOTE:`` lines -- present when the requested range
+           cuts content the publisher marked as continuing onto an adjacent page,
+           at the head of the range, the tail, or both.
+        3. The section text, WITH ``--- PAGE N ---`` markers so the agent can
+           orient within the range.
+
+        The absence of a NOTE means none was detected. It is not a completeness
+        claim: content can spill across a page break with no marker at all.
         """
         artifacts = self._require_artifacts()
         total_pages = self._total_pages(artifacts)
@@ -216,8 +249,9 @@ class DatasheetTools:
             header = f"=== Page {start_page} of {total_pages} ==="
         else:
             header = f"=== Pages {start_page}-{end_page} of {total_pages} ==="
+        notes = _continuation_notes(artifacts.text_content, start_page, end_page)
         section = extract_section_text(artifacts.text_content, start_page, end_page)
-        return f"{header}\n{section}"
+        return "\n".join([header, *notes, section])
 
     def search_text(
         self,
