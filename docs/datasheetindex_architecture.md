@@ -698,6 +698,35 @@ So the SDK server, the local MCP server, and non-SDK hosts all present identical
 tool names, descriptions, and JSON schemas -- a change to a tool def propagates to
 every surface from one place.
 
+### Page-cut truncation signal
+
+A section's ToC page range does not always contain the whole of its table. In
+the TI TCAN1044A-Q1, `6.4 Recommended Operating Conditions` has ToC range pages
+4-4, but its table continues onto page 5 -- so an agent reading the whole
+section still loses rows (including `TJ`, the operating junction temperature).
+The evidence of the cut, the publisher's `(continued)` marker, sits at the top
+of the page the agent did not fetch.
+
+`get_section_text` therefore probes both boundaries of the requested range and
+inserts a `NOTE:` line under the position header when the range cuts content
+marked as continuing. The check is **range-relative**, not section-relative: the
+TI case is a whole-section read, so a section-aware check would miss it.
+
+A marker is honoured only if it appears within the first `_OPENING_BLOCK_LINES`
+(5) nonblank lines of the following page -- a table that resumes does so at the
+top of the page. Measured across the Infineon and TI datasheets, genuine
+continuations sit at nonblank line 3, while the mid-page `NOTES: (continued)`
+blocks on TI's mechanical-drawing pages sit at lines 19-48.
+
+**Silence is not a completeness claim.** Content can spill across a page break
+with no marker at all, and such a spill is invisible to this signal. The note
+therefore states only that the publisher marked the next page as continuing; it
+asserts nothing about rows or column headers (a continuation page often repeats
+its headers), and never claims a range is complete.
+
+This is a different concept from `TocNode.continued_tables`, which keeps its own
+narrower contract: tables captioned `Table N ... (Continued)`.
+
 ### Agent System Prompt Guidance
 
 The system prompt below is **reference guidance for the consuming agent**, not part of this library. It is included here to document the intended usage pattern and inform tool design decisions:
