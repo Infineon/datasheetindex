@@ -87,6 +87,52 @@ def test_out_of_range_page_is_silent():
     assert continuation_at_boundary(text, -3) == []
 
 
+def test_marker_at_last_accepted_line_fires():
+    """The positional guard's upper edge, pinned by construction rather than
+    read off _OPENING_BLOCK_LINES: a marker as the 5th nonblank line (index 4,
+    the last one included by nonblank[:5]) must fire. If _OPENING_BLOCK_LINES
+    is ever changed, this literal line count no longer matches the guard's
+    edge and this test starts failing -- which is the point.
+    """
+    filler = "\n".join(f"header line {i}" for i in range(4))
+    text = _make_text("page one", f"{filler}\nTable 1 Specs (Continued)\nmore")
+    assert continuation_at_boundary(text, 1) == ["Table 1 Specs"]
+
+
+def test_marker_one_line_past_the_last_accepted_line_is_silent():
+    """The same marker, pushed one nonblank line lower (the 6th, index 5) --
+    just outside nonblank[:5] -- must be silent. Paired with the test above,
+    this pins both edges of the positional guard.
+    """
+    filler = "\n".join(f"header line {i}" for i in range(5))
+    text = _make_text("page one", f"{filler}\nTable 1 Specs (Continued)\nmore")
+    assert continuation_at_boundary(text, 1) == []
+
+
+def test_realistic_long_caption_is_detected():
+    """Vendors commonly repeat the full parameterised caption on the
+    continuation page. A 92-char title must not be silently dropped by the
+    regex's upper length bound.
+    """
+    caption = (
+        "Table 12. Electrical characteristics (VDD = 3.3 V, TA = 25 degC, "
+        "unless otherwise specified)"
+    )
+    assert len(caption) == 92
+    text = _make_text("page one", f"{caption} (continued)\nmore")
+    assert continuation_at_boundary(text, 1) == [caption]
+
+
+def test_paragraph_length_line_is_not_treated_as_a_title():
+    """The length bound still exists to reject prose, not titles: a line far
+    longer than any real caption, ending in "(continued)", must not match.
+    """
+    prose = "This is a long sentence of ordinary prose, not a table caption, " * 4
+    assert len(prose) > 200
+    text = _make_text("page one", f"{prose} (continued)\nmore")
+    assert continuation_at_boundary(text, 1) == []
+
+
 def test_multiple_markers_deduplicated_in_order():
     second = (
         "Table 1 Specs (Continued)\n"

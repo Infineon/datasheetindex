@@ -229,9 +229,10 @@ class DatasheetTools:
 
         1. A position header: ``=== Page X of N ===`` for a single-page read,
            ``=== Pages X-Y of N ===`` for a multi-page range.
-        2. Zero, one, or two ``NOTE:`` lines -- present when the requested range
-           cuts content the publisher marked as continuing onto an adjacent page,
-           at the head of the range, the tail, or both.
+        2. Zero or more ``NOTE:`` lines -- present when the requested range cuts
+           content the publisher marked as continuing onto an adjacent page, at
+           the head of the range, the tail, or both; either boundary can carry
+           more than one marker (e.g. a page opening with two continued tables).
         3. The section text, WITH ``--- PAGE N ---`` markers so the agent can
            orient within the range.
 

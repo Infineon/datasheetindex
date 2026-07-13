@@ -497,8 +497,17 @@ def _continued_tables_recursive(nodes: list[TocNode], text_content: str) -> None
 # _CONTINUED_TABLE_RE above: that one defines TocNode.continued_tables (tables
 # captioned "Table N ... (Continued)"); this one answers the different question
 # "does content continue across this page break", for any publisher's wording.
+#
+# The upper bound on the title's length distinguishes "a title" from "a
+# paragraph of prose that happens to end in (continued)" -- it is not a claim
+# that titles are short, and it does no discriminating work against the known
+# false positives (those are rejected by the positional guard below, and are
+# short lines anyway). 200 is chosen to comfortably admit a vendor's full
+# parameterised caption repeated on the continuation page, e.g. the 92-char
+# "Table 12. Electrical characteristics (VDD = 3.3 V, TA = 25 degC, unless
+# otherwise specified)", which a tighter bound would silently drop.
 _CONTINUATION_RE = re.compile(
-    r"[ \t]*(\S.{2,90}?)[ \t]*\((?:continued|cont\.)\)[ \t]*$",
+    r"[ \t]*(\S.{2,200}?)[ \t]*\((?:continued|cont\.)\)[ \t]*$",
     re.IGNORECASE,
 )
 
