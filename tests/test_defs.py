@@ -343,3 +343,19 @@ def test_session_close_is_safe_when_unbound_and_idempotent():
     # No document ever bound -> must not raise; and calling twice is safe.
     session.close()
     session.close()
+
+
+def test_get_section_text_description_mentions_the_continuation_note():
+    from datasheetindex.tools.defs import create_datasheet_tool_defs
+
+    defs = {d.name: d for d in create_datasheet_tool_defs()}
+    description = defs["get_section_text"].description
+    assert "=== NOTE:" in description
+    assert "continued" in description
+    # Both header forms, not just the plural one.
+    assert "=== Page X of N ===" in description
+    assert "=== Pages X-Y of N ===" in description
+    # Content-level: this signal does not prove the content is a table.
+    assert "cuts a table" not in description
+    # The absence of a note guarantees nothing.
+    assert "not a guarantee of completeness" in description

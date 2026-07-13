@@ -298,8 +298,18 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                 "Use when you know WHERE to read -- pass start_page/end_page from "
                 "ToC nodes to read specific sections. For a single page use the "
                 "same value for both. Prefer reading whole sections rather than "
-                "page-by-page. The text opens with a '=== Pages X-Y of N ===' "
-                "header so you know your position in the document."
+                "page-by-page. The text opens with a position header -- "
+                "'=== Page X of N ===' for a single page, '=== Pages X-Y of N ===' "
+                "for a range -- so you know where you are in the document. If a "
+                "'=== NOTE: ... ===' line follows the header, the range you "
+                "asked for cuts content the publisher marked as continued on "
+                "an adjacent page: re-read with that page included before "
+                "trusting values from it, since a section's ToC page range "
+                "does not always contain all of its content. The '===' "
+                "wrapping marks this as the tool's own signal, distinct from "
+                "a literal 'NOTE:' line that some datasheets carry in their "
+                "own body text. The absence of a note only means none was "
+                "detected; it is not a guarantee of completeness."
             ),
             input_schema={
                 "type": "object",

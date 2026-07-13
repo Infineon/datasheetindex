@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from datasheetindex.core.boilerplate import flag_boilerplate
 from datasheetindex.core.engine import classic_tables
-from datasheetindex.core.textfile import extract_section_text
+from datasheetindex.core.textfile import extract_page_text, extract_section_text
 from datasheetindex.models import TocNode
 
 if TYPE_CHECKING:
@@ -491,3 +491,61 @@ def _continued_tables_recursive(nodes: list[TocNode], text_content: str) -> None
 
         if node.nodes:
             _continued_tables_recursive(node.nodes, text_content)
+
+
+# The page-boundary continuation signal. Deliberately separate from
+# _CONTINUED_TABLE_RE above: that one defines TocNode.continued_tables (tables
+# captioned "Table N ... (Continued)"); this one answers the different question
+# "does content continue across this page break", for any publisher's wording.
+#
+# The upper bound on the title's length distinguishes "a title" from "a
+# paragraph of prose that happens to end in (continued)" -- it is not a claim
+# that titles are short, and it does no discriminating work against the known
+# false positives (those are rejected by the positional guard below, and are
+# short lines anyway). 200 is chosen to comfortably admit a vendor's full
+# parameterised caption repeated on the continuation page, e.g. the 92-char
+# "Table 12. Electrical characteristics (VDD = 3.3 V, TA = 25 degC, unless
+# otherwise specified)", which a tighter bound would silently drop.
+_CONTINUATION_RE = re.compile(
+    r"[ \t]*(\S.{2,200}?)[ \t]*\((?:continued|cont\.)\)[ \t]*$",
+    re.IGNORECASE,
+)
+
+# A table that resumes does so at the top of the page, below the running header.
+# Measured across the Infineon and TI datasheets: genuine continuations sit at
+# nonblank line 3, while the mid-page "NOTES: (continued)" blocks on TI's
+# mechanical-drawing pages sit at lines 19-48. This positional guard is the
+# whole correctness property -- see the design spec.
+_OPENING_BLOCK_LINES = 5
+
+
+def continuation_at_boundary(text_content: str, page: int) -> list[str]:
+    """Titles of content that continues from ``page`` onto ``page + 1``.
+
+    A title is returned when page+1 opens with a continuation marker inside its
+    opening block. Returns empty for an out-of-range ``page`` -- ``page < 1``
+    (no such boundary exists) or a ``page`` at/after the last one (nothing
+    follows) -- and when page+1 carries no qualifying marker.
+
+    Silence is not a completeness claim: content can spill across a page break
+    with no marker at all.
+    """
+    if page < 1:
+        return []
+
+    next_text = extract_page_text(text_content, page + 1)
+    if not next_text:
+        return []
+
+    titles: list[str] = []
+    seen: set[str] = set()
+    nonblank = [line for line in next_text.splitlines() if line.strip()]
+    for line in nonblank[:_OPENING_BLOCK_LINES]:
+        match = _CONTINUATION_RE.match(line)
+        if match is None:
+            continue
+        title = " ".join(match.group(1).split())
+        if title not in seen:
+            seen.add(title)
+            titles.append(title)
+    return titles
