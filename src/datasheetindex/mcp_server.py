@@ -16,6 +16,7 @@ import importlib
 import sys
 from typing import Any
 
+from datasheetindex._version import package_version
 from datasheetindex.core.engine import layout_engine
 from datasheetindex.tools.defs import (
     DatasheetToolSession,
@@ -75,7 +76,7 @@ def _build_mcp_server(
     by_name = {d.name: d for d in session.defs}
     server = server_cls(
         name="datasheetindex",
-        version="1.0.0",
+        version=package_version(),
         instructions=(
             "Extract technical parameters from PDF datasheets. Call "
             "build_datasheet FIRST with a pdf_source (local path or URL) to load "

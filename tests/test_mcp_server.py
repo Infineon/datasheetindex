@@ -398,3 +398,20 @@ def test_streamable_http_roundtrip_with_real_client(tmp_path):
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
+
+
+def test_local_server_reports_installed_version():
+    """initialize must advertise the installed version, never a literal.
+
+    A registry entry pinning 0.20.0 while the runtime reports 1.0.0 is a
+    mismatch no version-sync guard over server.json can detect.
+    """
+    pytest.importorskip("mcp")
+
+    from datasheetindex import mcp_server
+    from datasheetindex._version import package_version
+
+    server = mcp_server.create_local_mcp_server()
+
+    assert server.mcp_server.version == package_version()
+    assert server.mcp_server.version != "1.0.0"

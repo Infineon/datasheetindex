@@ -8,6 +8,7 @@ the thin Claude Agent SDK adapter over the framework-neutral tool defs.
 
 from __future__ import annotations
 
+from datasheetindex._version import package_version
 from datasheetindex.tools.bound import DatasheetTools
 from datasheetindex.tools.defs import create_datasheet_tool_defs
 
@@ -41,7 +42,7 @@ def create_datasheet_tools_server():
 
     return create_sdk_mcp_server(
         name="datasheetindex",
-        version="1.0.0",
+        version=package_version(),
         tools=[
             tool(d.name, d.description, d.input_schema)(d.handler)
             for d in create_datasheet_tool_defs()

@@ -695,3 +695,34 @@ def test_document_note_lines_are_not_mistaken_for_the_signal(tmp_path):
         "NOTE: Page numbers for previous revisions may differ from page "
         "numbers in the current version." in section_text
     )
+
+
+def test_sdk_server_reports_installed_version(monkeypatch):
+    """The SDK surface must report the same real version as the local server.
+
+    Both surfaces exist so there is a single source of truth for the tool
+    definitions; one of them reporting a stale literal breaks that property.
+    """
+    from datasheetindex._version import package_version
+
+    def fake_tool(name, description, params):
+        def decorator(func):
+            return func
+
+        return decorator
+
+    def fake_create_sdk_mcp_server(name, version, tools):
+        return types.SimpleNamespace(name=name, version=version, tools=tools)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "claude_agent_sdk",
+        types.SimpleNamespace(
+            tool=fake_tool, create_sdk_mcp_server=fake_create_sdk_mcp_server
+        ),
+    )
+
+    server = create_datasheet_tools_server()
+
+    assert server.version == package_version()
+    assert server.version != "1.0.0"
