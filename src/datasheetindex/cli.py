@@ -40,6 +40,32 @@ def _build_parser() -> argparse.ArgumentParser:
             "when LLM credentials are available"
         ),
     )
+    mcp_parser = subparsers.add_parser(
+        "mcp",
+        help="Run the local MCP server over the datasheet tools",
+    )
+    mcp_parser.add_argument(
+        "--transport",
+        choices=["stdio", "sse", "streamable-http"],
+        default="stdio",
+        help="MCP transport to expose (default: stdio)",
+    )
+    mcp_parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host to bind for HTTP-based transports",
+    )
+    mcp_parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port to bind for HTTP-based transports",
+    )
+    mcp_parser.add_argument(
+        "--streamable-http-path",
+        default="/mcp",
+        help="Path to expose when using streamable-http transport",
+    )
     return parser
 
 
@@ -72,12 +98,32 @@ def _run_build(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_mcp(args: argparse.Namespace) -> int:
+    # Imported lazily, matching the create_llm_client import in _run_build:
+    # the local convention for a feature backed by an optional extra.
+    from datasheetindex.mcp_server import run_mcp_server
+
+    try:
+        run_mcp_server(
+            transport=args.transport,
+            host=args.host,
+            port=args.port,
+            streamable_http_path=args.streamable_http_path,
+        )
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the CLI and return an exit code (for programmatic use / tests)."""
     parser = _build_parser()
     args = parser.parse_args(argv)
     if args.command == "build":
         return _run_build(args)
+    if args.command == "mcp":
+        return _run_mcp(args)
     parser.print_help()
     return 2
 

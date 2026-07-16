@@ -120,3 +120,68 @@ def test_cli_build_with_model_uses_llm_client(monkeypatch):
     assert exit_code == 0
     assert calls == ["gpt-4.1"]
     assert closed["value"] is True
+
+
+def test_cli_mcp_defaults_to_stdio(monkeypatch):
+    """`datasheetindex mcp` with no arguments must serve stdio.
+
+    The registry entry invokes exactly this, with no arguments.
+    """
+    from datasheetindex import cli, mcp_server
+
+    calls: list[tuple[str, str, int, str]] = []
+
+    def _fake_run(transport, host, port, streamable_http_path):
+        calls.append((transport, host, port, streamable_http_path))
+
+    monkeypatch.setattr(mcp_server, "run_mcp_server", _fake_run)
+
+    exit_code = cli.main(["mcp"])
+
+    assert exit_code == 0
+    assert calls == [("stdio", "127.0.0.1", 8000, "/mcp")]
+
+
+def test_cli_mcp_passes_through_options(monkeypatch):
+    from datasheetindex import cli, mcp_server
+
+    calls: list[tuple[str, str, int, str]] = []
+
+    def _fake_run(transport, host, port, streamable_http_path):
+        calls.append((transport, host, port, streamable_http_path))
+
+    monkeypatch.setattr(mcp_server, "run_mcp_server", _fake_run)
+
+    exit_code = cli.main(
+        [
+            "mcp",
+            "--transport",
+            "streamable-http",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "9000",
+            "--streamable-http-path",
+            "/inspect",
+        ]
+    )
+
+    assert exit_code == 0
+    assert calls == [("streamable-http", "0.0.0.0", 9000, "/inspect")]
+
+
+def test_cli_mcp_reports_error_without_extra(monkeypatch, capsys):
+    """A missing [mcp] extra must be a clean message, not a traceback."""
+    from datasheetindex import cli, mcp_server
+
+    def _raise(**kwargs):
+        _ = kwargs
+        raise ImportError("mcp is required for local MCP server support.")
+
+    monkeypatch.setattr(mcp_server, "run_mcp_server", _raise)
+
+    exit_code = cli.main(["mcp"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "mcp is required" in captured.err
