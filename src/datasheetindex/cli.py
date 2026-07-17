@@ -7,6 +7,7 @@ import sys
 
 from datasheetindex.index import DatasheetIndex
 from datasheetindex.llm.client import close_llm_client
+from datasheetindex.mcp_server import _add_mcp_arguments
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -44,28 +45,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "mcp",
         help="Run the local MCP server over the datasheet tools",
     )
-    mcp_parser.add_argument(
-        "--transport",
-        choices=["stdio", "sse", "streamable-http"],
-        default="stdio",
-        help="MCP transport to expose (default: stdio)",
-    )
-    mcp_parser.add_argument(
-        "--host",
-        default="127.0.0.1",
-        help="Host to bind for HTTP-based transports",
-    )
-    mcp_parser.add_argument(
-        "--port",
-        type=int,
-        default=8000,
-        help="Port to bind for HTTP-based transports",
-    )
-    mcp_parser.add_argument(
-        "--streamable-http-path",
-        default="/mcp",
-        help="Path to expose when using streamable-http transport",
-    )
+    _add_mcp_arguments(mcp_parser)
     return parser
 
 

@@ -248,14 +248,13 @@ def run_mcp_server(
     server.run(transport=transport)
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="datasheetindex-mcp-server",
-        description=(
-            "Run datasheetindex as a local MCP server. "
-            "Use build_datasheet to load a PDF source."
-        ),
-    )
+def _add_mcp_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add the MCP transport options shared by both entry points.
+
+    `datasheetindex mcp` and the `datasheetindex-mcp-server` console script are
+    two doors to the same server, so their options must not drift apart. The
+    registry entry depends on the defaults here.
+    """
     parser.add_argument(
         "--transport",
         choices=["stdio", "sse", "streamable-http"],
@@ -278,6 +277,17 @@ def _build_parser() -> argparse.ArgumentParser:
         default="/mcp",
         help="Path to expose when using streamable-http transport",
     )
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="datasheetindex-mcp-server",
+        description=(
+            "Run datasheetindex as a local MCP server. "
+            "Use build_datasheet to load a PDF source."
+        ),
+    )
+    _add_mcp_arguments(parser)
     return parser
 
 
