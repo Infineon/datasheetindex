@@ -296,7 +296,8 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
             description=(
                 "Read the extracted text for a page range (inclusive, 1-indexed). "
                 "Use when you know WHERE to read -- pass start_page/end_page from "
-                "ToC nodes to read specific sections. For a single page use the "
+                "ToC nodes, or from search_text hits when the ToC is empty, to "
+                "read specific sections. For a single page use the "
                 "same value for both. Prefer reading whole sections rather than "
                 "page-by-page. The text opens with a position header -- "
                 "'=== Page X of N ===' for a single page, '=== Pages X-Y of N ===' "

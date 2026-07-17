@@ -359,3 +359,46 @@ def test_get_section_text_description_mentions_the_continuation_note():
     assert "cuts a table" not in description
     # The absence of a note guarantees nothing.
     assert "not a guarantee of completeness" in description
+
+
+def test_manifest_hints_at_search_when_toc_is_empty(tmp_path):
+    """A bookmark-less PDF must tell the agent how to navigate without a ToC.
+
+    Roughly a third of real datasheets have no bookmarks, and without the [llm]
+    extra there is no fallback. The other tools all still work -- but the tool
+    descriptions assume a ToC exists, so the agent must be told to grep instead.
+    """
+    pdf = tmp_path / "no_toc.pdf"
+    _make_pdf(pdf)
+    defs = _defs_by_name()
+
+    manifest = json.loads(
+        _run(defs["build_datasheet"].handler, {"pdf_source": str(pdf)})["content"][0][
+            "text"
+        ]
+    )
+
+    assert manifest["toc"] == []
+    hint = manifest["hint"]
+    assert "search_text" in hint
+    assert "get_section_text" in hint
+
+
+def test_manifest_has_no_hint_when_toc_is_present(tmp_path):
+    """The good-ToC path must stay byte-identical -- the hint is degraded-only."""
+    pdf = tmp_path / "with_toc.pdf"
+    _make_pdf(pdf)
+    doc = pymupdf.open(str(pdf))
+    doc.set_toc([[1, "Absolute maximum ratings", 1]])
+    doc.saveIncr()
+    doc.close()
+    defs = _defs_by_name()
+
+    manifest = json.loads(
+        _run(defs["build_datasheet"].handler, {"pdf_source": str(pdf)})["content"][0][
+            "text"
+        ]
+    )
+
+    assert manifest["toc"] != []
+    assert "hint" not in manifest

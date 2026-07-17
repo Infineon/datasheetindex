@@ -43,6 +43,14 @@ class _BuildOptions:
     model: str | None
 
 
+_NO_TOC_HINT = (
+    "This PDF has no usable table of contents, so there is no section map to "
+    "plan from. Orient by reading pages 1-2 with get_section_text, then locate "
+    "content with search_text and read around each hit with get_section_text. "
+    "inspect_page renders a page as an image when the extracted text is unclear."
+)
+
+
 def _continuation_notes(text_content: str, start_page: int, end_page: int) -> list[str]:
     """Notes for content the requested range cuts at either boundary.
 
@@ -207,9 +215,17 @@ class DatasheetTools:
         return artifacts
 
     def get_artifact_manifest(self) -> dict[str, object]:
-        """Return a compact summary of the currently built artifacts."""
+        """Return a compact summary of the currently built artifacts.
+
+        When the PDF has no usable ToC the agent has no section map to plan
+        from, and the tool descriptions' "pass start_page/end_page from ToC
+        nodes" advice is dead. Carry a hint that redirects it to search_text.
+        Keyed off the returned ToC being empty -- the outcome the agent faces --
+        not off LLM availability: a rejected fallback candidate leaves the ToC
+        empty with credentials present.
+        """
         artifacts = self._require_artifacts()
-        return {
+        manifest: dict[str, object] = {
             "source": artifacts.json_data.get("source"),
             "total_pages": self._total_pages(artifacts),
             "json_path": (
@@ -221,6 +237,9 @@ class DatasheetTools:
             "toc_quality": artifacts.json_data.get("toc_quality"),
             "toc": artifacts.json_data.get("toc"),
         }
+        if not manifest["toc"]:
+            manifest["hint"] = _NO_TOC_HINT
+        return manifest
 
     def get_section_text(self, start_page: int, end_page: int) -> str:
         """Return extracted text for a page range from the latest build.
