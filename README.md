@@ -190,7 +190,9 @@ You can run the local MCP server directly from the repository. It exposes these
 tools for the bound PDF source:
 
 - `build_datasheet` - build and save the `.json` / `.txt` artifacts, and return
-  the manifest: source info, total pages, ToC quality, and the full enriched ToC
+  the manifest: source info, total pages, ToC quality, and the full enriched ToC.
+  For a PDF with no usable ToC the manifest also carries a `hint` telling the
+  agent to navigate by `search_text` instead (see "Datasheets without a ToC")
 - `get_section_text` - return extracted text for a page range from the latest
   build, opening with a position header (`=== Page X of N ===` for one page,
   `=== Pages X-Y of N ===` for a range) followed by zero or more
@@ -215,17 +217,22 @@ document at runtime by calling `build_datasheet` with a `pdf_source`.
 
 ```bash
 # stdio transport (for Claude Code or another MCP client)
-uv run --extra mcp datasheetindex-mcp-server
+uv run --extra mcp datasheetindex mcp
 
 # then call build_datasheet(pdf_source="datasheet.pdf", output_dir="output")
 # from the MCP client
 ```
 
+`datasheetindex mcp` and the `datasheetindex-mcp-server` console script are two
+doors to the same server and take the same options; use whichever suits you.
+The subcommand exists so a package-based MCP registry entry can name a real
+distribution and a real command with the same string.
+
 You can also expose it over HTTP:
 
 ```bash
 # streamable HTTP transport (useful with MCP Inspector)
-uv run --extra mcp datasheetindex-mcp-server \
+uv run --extra mcp datasheetindex mcp \
   --transport streamable-http --port 8000
 ```
 
@@ -240,6 +247,37 @@ This local server is for direct MCP testing. If you need an in-process SDK
 server object inside another Python runtime, use
 `create_datasheet_tools_server()` instead; it exposes the same tool surface, with
 the document loaded at runtime via the `build_datasheet` tool.
+
+### Datasheets without a ToC
+
+The enriched ToC comes from the PDF's own bookmarks, and plenty of real
+datasheets ship without any -- two of the seven in our eval corpus have none,
+and no printed contents page either. For those, `build_datasheet` returns
+`"toc": []` with `"score": 0.0` unless the optional `[llm]` extra is installed
+*and* gateway credentials are configured, which lets it reconstruct a ToC from
+the page text.
+
+Without that fallback the server still works. Only `build_datasheet`'s ToC
+output degrades: `get_section_text`, `search_text`, `locate_text`,
+`inspect_page`, and `extract_table_markdown` address the document by page and
+raw text, and never consult the ToC. The agent loses the section map, not the
+document -- it navigates by searching instead of by planning a route, which is
+how a person reads a datasheet with no bookmarks.
+
+To make that explicit rather than leaving the agent to infer it, the manifest
+carries a `hint` field whenever the returned ToC is empty:
+
+```json
+{
+  "source": "current_sensor.pdf",
+  "total_pages": 26,
+  "toc_quality": { "score": 0.0, "entry_count": 0, ... },
+  "toc": [],
+  "hint": "This PDF has no usable table of contents, so there is no section map to plan from. Orient by reading pages 1-2 with get_section_text, then locate content with search_text and read around each hit with get_section_text. inspect_page renders a page as an image when the extracted text is unclear."
+}
+```
+
+A document with a usable ToC has no `hint` key.
 
 ## Python API
 
@@ -268,12 +306,18 @@ datasheetindex build https://example.com/datasheet.pdf --output-dir output
 
 # With explicit LLM model for ToC fallback and summaries
 datasheetindex build datasheet.pdf --model gpt-4.1 --include-summaries
+
+# Run the local MCP server (stdio by default; needs the [mcp] extra)
+datasheetindex mcp
 ```
 
 By default, `datasheetindex` first uses native PDF ToC extraction. If ToC
 quality is low, it automatically attempts LLM fallback with the default model
 (`gpt-4.1`) when LLM credentials are available. Pass `--model` to choose the
 LLM model explicitly; `--include-summaries` requires `--model`.
+
+`datasheetindex build` needs no optional extras. `datasheetindex mcp` needs the
+`[mcp]` extra and reports a single-line install hint if it is missing.
 
 ## Project structure
 
