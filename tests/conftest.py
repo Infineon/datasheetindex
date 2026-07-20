@@ -56,6 +56,43 @@ class FakeResponse:
         return False
 
 
+_LLM_ENV_VARS = (
+    "LITELLM_BASE_URL",
+    "LITELLM_MASTER_KEY",
+    "LITELLM_TLS_VERIFY",
+    "LITELLM_TIMEOUT_SECONDS",
+    "LITELLM_MAX_RETRIES",
+)
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_llm_env(request, monkeypatch):
+    """Keep the LLM gateway out of every test that did not explicitly opt in.
+
+    build_datasheet regenerates a low-quality ToC through the LLM whenever
+    ambient LITELLM credentials exist: index.build -> _try_create_default_llm_client
+    -> create_llm_client, which loads .env via python-dotenv. A developer with
+    real credentials in .env therefore gets a fabricated ToC (and the search
+    breadcrumbs that follow) where CI, running credential-free, gets none -- so
+    test_datasheet_tools_build_and_query_artifacts passes in CI and fails
+    locally. That is a non-hermetic test, not a product bug.
+
+    Reproduce CI's credential-free environment for every test, EXCEPT the ones
+    that request the credentials through the `_has_env` fixture (the integration
+    tests). Both steps are needed: create_llm_client re-reads .env on each call,
+    so without neutralising load_dotenv the delenv would be silently undone.
+    """
+    if "_has_env" in request.fixturenames:
+        return
+    for name in _LLM_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    try:
+        dotenv = importlib.import_module("dotenv")
+    except ImportError:
+        return
+    monkeypatch.setattr(dotenv, "load_dotenv", lambda *args, **kwargs: False)
+
+
 @pytest.fixture()
 def _has_env():
     """Skip if .env credentials are not available."""
