@@ -2,8 +2,10 @@
 
 import json
 import re
+import subprocess
 import urllib.error
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -889,8 +891,13 @@ def test_wsl_query_is_bounded_and_windowless(monkeypatch):
     )
 
 
-def _install_fake_wsl(monkeypatch, *, stdout=b"", returncode=0, popen_raises=None):
+def _install_fake_wsl(
+    monkeypatch, *, stdout=b"", returncode=0, popen_raises=None, wait_raises=None
+):
     """Stub wsl.exe at the Popen seam the real query uses."""
+    # Annotated: heterogeneous values, and an inferred union makes every use
+    # of them a type error.
+    state: dict[str, Any] = {"kills": 0, "waits": []}
 
     class _Proc:
         def __init__(self, cmd, **kwargs):
@@ -900,12 +907,16 @@ def _install_fake_wsl(monkeypatch, *, stdout=b"", returncode=0, popen_raises=Non
             kwargs["stdout"].flush()
 
         def wait(self, timeout=None):
+            state["waits"].append(timeout)
+            if wait_raises is not None and len(state["waits"]) == 1:
+                raise wait_raises
             return returncode
 
-        def kill(self):  # pragma: no cover - not reached in these tests
-            pass
+        def kill(self):
+            state["kills"] += 1
 
     monkeypatch.setattr(index_module.subprocess, "Popen", _Proc)
+    return state
 
 
 def test_wsl_distros_decodes_utf16(monkeypatch):
@@ -1004,3 +1015,82 @@ def test_resolve_local_path_never_rewrites_a_posix_path_that_exists(
     pdf.write_bytes(b"%PDF-1.4")
 
     assert index_module._resolve_local_path(str(pdf)) == str(pdf)
+
+
+def test_wsl_query_kills_a_wedged_child(monkeypatch):
+    """A timeout that leaves wsl.exe running is the orphan this rewrite exists
+    to prevent, and every wait after the kill must still be bounded."""
+    state = _install_fake_wsl(
+        monkeypatch, wait_raises=subprocess.TimeoutExpired("wsl.exe", 5)
+    )
+
+    assert index_module._wsl_distros() == []
+    assert state["kills"] == 1
+    assert len(state["waits"]) == 2
+    assert all(timeout is not None for timeout in state["waits"])
+
+
+def test_wsl_query_kills_the_child_on_a_non_timeout_interruption(monkeypatch):
+    """KeyboardInterrupt is not an OSError/SubprocessError, so it propagates --
+    but the child must still be killed on the way out. This is the pair that
+    pins `except BaseException` rather than `except TimeoutExpired`."""
+    state = _install_fake_wsl(monkeypatch, wait_raises=KeyboardInterrupt())
+
+    with pytest.raises(KeyboardInterrupt):
+        index_module._wsl_distros()
+
+    assert state["kills"] == 1
+
+
+def test_posix_paths_refuses_another_distros_unc_path(monkeypatch):
+    """The share is distro-scoped. Stripping the prefix blindly turns Debian's
+    file into our /home/y/ds.pdf, which on a machine with the same user in two
+    distros silently resolves to a different document that exists."""
+    monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu")
+
+    assert (
+        list(
+            index_module._posix_paths_for_windows(
+                "\\\\wsl.localhost\\Debian\\home\\y\\ds.pdf"
+            )
+        )
+        == []
+    )
+
+
+def test_posix_paths_unwraps_our_own_distro_case_insensitively(monkeypatch):
+    """Windows paths are case-insensitive, so \\\\WSL.localhost and a differently
+    cased distro name are the same share."""
+    monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu")
+
+    for value in (
+        "\\\\wsl.localhost\\Ubuntu\\home\\y\\ds.pdf",
+        "\\\\WSL.localhost\\ubuntu\\home\\y\\ds.pdf",
+        "\\\\wsl$\\Ubuntu\\home\\y\\ds.pdf",
+    ):
+        assert list(index_module._posix_paths_for_windows(value)) == ["/home/y/ds.pdf"]
+
+
+def test_posix_paths_yields_nothing_without_a_known_distro(monkeypatch):
+    """Off WSL there is no way to tell whose filesystem the path names."""
+    monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
+
+    assert (
+        list(
+            index_module._posix_paths_for_windows(
+                "\\\\wsl.localhost\\Ubuntu\\home\\y\\ds.pdf"
+            )
+        )
+        == []
+    )
+
+
+def test_posix_paths_rejects_bare_roots(monkeypatch):
+    """A bare root maps to a directory that exists, so _resolve_local_path would
+    "resolve" to it and the not-found error would name a path nobody passed."""
+    monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu")
+
+    assert list(index_module._posix_paths_for_windows("C:\\")) == []
+    assert (
+        list(index_module._posix_paths_for_windows("\\\\wsl.localhost\\Ubuntu\\")) == []
+    )

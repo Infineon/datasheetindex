@@ -268,8 +268,11 @@ def _windows_paths_for_posix(posix_path: str) -> Iterator[str]:
 _WINDOWS_DRIVE_RE = re.compile(r"^([A-Za-z]):[\\/](.*)$", re.S)
 
 # The UNC share Windows uses to reach a distro's filesystem, under both the
-# current "wsl.localhost" host and the older "wsl$" spelling.
-_WSL_UNC_RE = re.compile(r"^\\\\wsl(?:\.localhost|\$)\\[^\\]+\\(.*)$", re.S)
+# current "wsl.localhost" host and the older "wsl$" spelling. Case-insensitive
+# because Windows paths are: "\\WSL.localhost\..." is the same share, and an
+# anchored case-sensitive pattern would simply fail to match it.
+# The distro is captured, not skipped -- see _posix_paths_for_windows.
+_WSL_UNC_RE = re.compile(r"^\\\\wsl(?:\.localhost|\$)\\([^\\]+)\\(.*)$", re.I | re.S)
 
 
 def _posix_paths_for_windows(windows_path: str) -> Iterator[str]:
@@ -288,14 +291,30 @@ def _posix_paths_for_windows(windows_path: str) -> Iterator[str]:
     """
     unc = _WSL_UNC_RE.match(windows_path)
     if unc is not None:
-        # Already a distro-local path, just addressed from the Windows side.
-        yield "/" + unc.group(1).replace("\\", "/")
+        # Only unwrap a path that names THIS distro. The share is distro-scoped,
+        # so \\wsl.localhost\Debian\home\y\ds.pdf is not our file -- but strip
+        # the prefix blindly and it becomes /home/y/ds.pdf, which on a machine
+        # with the same user in two distros silently resolves to a *different*
+        # document that exists. A wrong answer that looks valid is the one
+        # outcome this module refuses elsewhere (see the short-result check in
+        # core/structure.py), so it must not be introduced here.
+        #
+        # Unlike the Windows-side direction, we are not guessing: the path names
+        # the distro and WSL exports our own name into the environment.
+        distro, tail = unc.group(1), unc.group(2)
+        current = os.environ.get("WSL_DISTRO_NAME", "")
+        if tail and current and distro.lower() == current.lower():
+            yield "/" + tail.replace("\\", "/")
         return
 
     drive = _WINDOWS_DRIVE_RE.match(windows_path)
     if drive is not None:
         tail = drive.group(2).replace("\\", "/")
-        yield f"/mnt/{drive.group(1).lower()}/{tail}"
+        # A bare "C:\" would yield "/mnt/c/", a real directory that exists, so
+        # _resolve_local_path would "resolve" to it and the caller's not-found
+        # error would name a path the user never passed.
+        if tail:
+            yield f"/mnt/{drive.group(1).lower()}/{tail}"
 
 
 def _resolve_local_path(path: str) -> str:

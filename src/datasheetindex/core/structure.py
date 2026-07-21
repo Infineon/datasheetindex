@@ -47,6 +47,11 @@ _KILL_WAIT_SECONDS = 10.0
 # and only delays the sequential fallback that would have produced an answer.
 _SCAN_TIMEOUT_CEILING_SECONDS = 600.0
 
+# How much of the worker's stderr to keep for a failure message. Its own
+# pool workers inherit fd 2, so the file can be far larger than the tail
+# anyone will read.
+_STDERR_TAIL_BYTES = 8192
+
 _CGROUP_ROOT = Path("/sys/fs/cgroup")
 _PROC_SELF_CGROUP = Path("/proc/self/cgroup")
 
@@ -418,9 +423,18 @@ def _abandon_pool(pool: Any) -> None:
 
 
 def _read_worker_stderr(err_path: str) -> str:
-    """Tail of the scan worker's stderr, for a failure message."""
+    """Tail of the scan worker's stderr, for a failure message.
+
+    Seeks rather than reading the whole file: every one of the child's pool
+    workers inherits fd 2 and MuPDF is voluble about malformed documents, so
+    this can reach megabytes. Pulling all of it into memory on the failure path
+    risks a MemoryError that would escape the OSError guard and replace the
+    diagnostic we came here to produce.
+    """
     try:
         with open(err_path, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            handle.seek(max(0, handle.tell() - _STDERR_TAIL_BYTES))
             raw = handle.read()
     except OSError:
         return "(worker stderr unavailable)"
@@ -554,9 +568,14 @@ def _build_table_count_cache_helper(pdf_path: str, total_pages: int) -> dict[int
                     # of the grace margin: a bare TimeoutExpired says something
                     # stalled but never what, and the answer is already sitting
                     # in err_path.
+                    # Read in case the child got partway and reported. On a
+                    # true parent-side timeout the child had not yet failed, so
+                    # this is often empty -- say nothing rather than trail a
+                    # colon into the void.
+                    detail = _read_worker_stderr(err_path)
                     raise RuntimeError(
-                        f"scan worker timed out after {exc.timeout}s: "
-                        f"{_read_worker_stderr(err_path)}"
+                        f"scan worker timed out after {exc.timeout}s"
+                        + (f": {detail}" if detail else "")
                     ) from exc
                 raise
 

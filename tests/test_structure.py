@@ -772,6 +772,7 @@ def _install_fake_popen(
     pages_written=None,
     timeout_first_wait=False,
     wait_raises=None,
+    stderr_text=None,
 ):
     """Drive the helper's failure branches without a real worker.
 
@@ -789,6 +790,9 @@ def _install_fake_popen(
             state["cmd"] = cmd
             state["kwargs"] = kwargs
             self.returncode = returncode
+            if stderr_text is not None:
+                kwargs["stderr"].write(stderr_text.encode("utf-8"))
+                kwargs["stderr"].flush()
             if pages_written is not None:
                 with open(cmd[-1], "w", encoding="utf-8") as handle:
                     json.dump({str(i): 0 for i in range(pages_written)}, handle)
@@ -861,17 +865,70 @@ def test_helper_kills_the_child_on_a_non_timeout_interruption(monkeypatch):
     assert state["kills"] == 1
 
 
-def test_helper_deadline_exceeds_the_workers_own(monkeypatch):
+@pytest.mark.parametrize("pages", [20, 100_000])
+def test_helper_deadline_exceeds_the_workers_own(monkeypatch, pages):
     """The child must get to hit its own deadline first.
 
     The parent's clock starts earlier (it spawns the child, which then imports
     pymupdf), so without a margin the parent always wins the race and kills a
     worker that was about to report a real traceback.
     """
-    state = _install_fake_popen(monkeypatch, pages_written=20)
-    structure._build_table_count_cache_helper("doc.pdf", 20)
+    state = _install_fake_popen(monkeypatch, pages_written=pages)
+    structure._build_table_count_cache_helper("doc.pdf", pages)
 
-    assert state["waits"][0] > structure._scan_timeout(20)
+    # The 100_000 case is the point: it proves the ceiling is applied INSIDE
+    # _scan_timeout, so it bounds both sides equally and the margin survives.
+    # Hoisting the cap outside the addition collapses parent and child onto the
+    # same deadline and revives the race, while the 20-page case stays green.
+    assert state["waits"][0] > structure._scan_timeout(pages)
+
+
+def test_timeout_carries_the_workers_traceback(monkeypatch):
+    """The grace margin exists so the child fails first with a real traceback.
+    Discarding it is what made every stall look identical, so the message
+    carrying it is the claim worth pinning."""
+    _install_fake_popen(
+        monkeypatch, timeout_first_wait=True, stderr_text="MuPDF error: page 41"
+    )
+
+    with pytest.raises(RuntimeError, match="page 41"):
+        structure._build_table_count_cache_helper("doc.pdf", 20)
+
+
+def test_timeout_message_omits_an_empty_stderr(monkeypatch):
+    """On a true parent-side timeout the child had not yet failed, so there is
+    usually nothing to report -- say nothing rather than trail a colon."""
+    _install_fake_popen(monkeypatch, timeout_first_wait=True)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        structure._build_table_count_cache_helper("doc.pdf", 20)
+
+    assert not str(excinfo.value).rstrip().endswith(":")
+
+
+def test_worker_failure_carries_its_stderr(monkeypatch):
+    _install_fake_popen(monkeypatch, returncode=3, stderr_text="boom on page 7")
+
+    with pytest.raises(RuntimeError, match="boom on page 7"):
+        structure._build_table_count_cache_helper("doc.pdf", 20)
+
+
+def test_read_worker_stderr_survives_a_missing_file(tmp_path):
+    assert structure._read_worker_stderr(str(tmp_path / "nope.err")) == (
+        "(worker stderr unavailable)"
+    )
+
+
+def test_read_worker_stderr_keeps_only_the_tail(tmp_path):
+    """Its pool workers all inherit fd 2 and MuPDF is voluble, so this file can
+    reach megabytes; reading it whole risks a MemoryError on the failure path."""
+    err = tmp_path / "big.err"
+    err.write_bytes(b"x" * 100_000 + b"TAIL")
+
+    result = structure._read_worker_stderr(str(err))
+
+    assert result.endswith("TAIL")
+    assert len(result) <= 2000
 
 
 def test_helper_raises_when_the_worker_fails(monkeypatch):
