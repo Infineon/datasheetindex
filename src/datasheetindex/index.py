@@ -241,6 +241,8 @@ def _windows_paths_for_posix(posix_path: str) -> Iterator[str]:
     *stopped* distro starts it, which takes tens of seconds and is the one
     unbounded operation on this path.
     """
+    if not posix_path.startswith("/"):
+        return
     parts = [part for part in posix_path.split("/") if part]
     if not parts:
         return
@@ -261,29 +263,75 @@ def _windows_paths_for_posix(posix_path: str) -> Iterator[str]:
         yield f"\\\\wsl.localhost\\{distro}\\{tail}"
 
 
+# A drive-letter path, in either slash style: "C:\...", "c:/...", or a bare
+# "C:\". Anchored, so a POSIX path can never match.
+_WINDOWS_DRIVE_RE = re.compile(r"^([A-Za-z]):[\\/](.*)$", re.S)
+
+# The UNC share Windows uses to reach a distro's filesystem, under both the
+# current "wsl.localhost" host and the older "wsl$" spelling.
+_WSL_UNC_RE = re.compile(r"^\\\\wsl(?:\.localhost|\$)\\[^\\]+\\(.*)$", re.S)
+
+
+def _posix_paths_for_windows(windows_path: str) -> Iterator[str]:
+    """POSIX spellings of a Windows path, for a server running inside WSL.
+
+    The mirror of :func:`_windows_paths_for_posix`, and it earns its place in
+    the configuration we actually recommend: with the server in WSL, a user who
+    copies a path out of Windows Explorer -- or pastes one from a colleague --
+    hands the agent ``C:\\Users\\me\\ds.pdf``. That file is perfectly readable
+    from the distro at ``/mnt/c/Users/me/ds.pdf``; nothing was wrong except the
+    spelling.
+
+    ``/mnt`` is WSL's default automount root. A distro that has overridden
+    ``automount.root`` in ``/etc/wsl.conf`` simply finds no candidate here and
+    gets its original path back, which is the same outcome as before.
+    """
+    unc = _WSL_UNC_RE.match(windows_path)
+    if unc is not None:
+        # Already a distro-local path, just addressed from the Windows side.
+        yield "/" + unc.group(1).replace("\\", "/")
+        return
+
+    drive = _WINDOWS_DRIVE_RE.match(windows_path)
+    if drive is not None:
+        tail = drive.group(2).replace("\\", "/")
+        yield f"/mnt/{drive.group(1).lower()}/{tail}"
+
+
 def _resolve_local_path(path: str) -> str:
-    """Map a POSIX path onto this filesystem when they are different namespaces.
+    """Map a path onto this filesystem when the caller's namespace differs.
 
-    VS Code opening a WSL folder from Windows is the common case: the editor,
-    the agent and the files live in the distro, but a gallery-installed MCP
-    server runs on the Windows host, where ``/home/you/ds.pdf`` simply does not
-    exist. The agent has no way to know that and retries the same path, so the
-    tool has to bridge it.
+    VS Code opening a WSL folder from Windows is the case that motivates this:
+    the editor, the agent and the files live in the distro, but a
+    gallery-installed MCP server runs on the Windows host, where
+    ``/home/you/ds.pdf`` simply does not exist. The agent has no way to know
+    that and retries the same path, so the tool has to bridge it.
 
-    Only consulted when the literal path does not resolve, so a real Windows
-    path -- or any path on a POSIX host -- is never rewritten.
+    Translation runs in **both** directions, because the split is symmetric and
+    only the direction we happened to hit first would otherwise work. A server
+    in WSL -- the setup we recommend, since it also avoids the Windows pool
+    deadlock -- is just as likely to be handed ``C:\\Users\\you\\ds.pdf``,
+    copied out of Windows Explorer, for a file it can read at ``/mnt/c/...``.
+
+    Only consulted when the literal path does not resolve, so a path that is
+    already correct for this host is never rewritten.
 
     Scope: the *input* PDF only. ``output_dir`` is deliberately not translated;
     a directory that does not exist yet cannot be probed with ``exists()``, and
-    the artifact paths returned to the agent would still be Windows paths it
-    cannot open. Running the server inside WSL is the fix for that half.
+    the artifact paths returned to the agent would still be in the server's
+    namespace. Running the server inside WSL is the fix for that half.
     """
-    if not _is_windows() or not path.startswith("/") or os.path.exists(path):
+    if not path or os.path.exists(path):
         return path
 
-    for candidate in _windows_paths_for_posix(path):
+    candidates = (
+        _windows_paths_for_posix(path)
+        if _is_windows()
+        else _posix_paths_for_windows(path)
+    )
+    for candidate in candidates:
         if os.path.exists(candidate):
-            logger.info("Resolved POSIX path %s to %s", path, candidate)
+            logger.info("Resolved %s to %s", path, candidate)
             return candidate
 
     # Fall through unchanged: the caller's own "not found" error names the path

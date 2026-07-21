@@ -937,3 +937,70 @@ def test_wsl_distros_survives_missing_wsl(monkeypatch):
     """A Windows host with no WSL must degrade quietly, not raise."""
     _install_fake_wsl(monkeypatch, popen_raises=FileNotFoundError("wsl.exe"))
     assert index_module._wsl_distros() == []
+
+
+# --- The mirror direction: a Windows path handed to a WSL-hosted server ---
+
+
+def test_posix_paths_maps_a_drive_letter_to_the_mount():
+    """Runs natively on the Linux CI lane -- this is the POSIX branch, so unlike
+    the Windows direction it needs no platform monkeypatching to be meaningful."""
+    assert list(index_module._posix_paths_for_windows("C:\\Users\\y\\ds.pdf")) == [
+        "/mnt/c/Users/y/ds.pdf"
+    ]
+
+
+def test_posix_paths_accepts_forward_slashes_and_lowercase_drives():
+    assert list(index_module._posix_paths_for_windows("d:/Data/ds.pdf")) == [
+        "/mnt/d/Data/ds.pdf"
+    ]
+
+
+def test_posix_paths_unwraps_a_wsl_unc_path():
+    """\\\\wsl.localhost\\<distro>\\... is a distro-local file addressed from the
+    Windows side; inside the distro it is simply the POSIX path."""
+    assert list(
+        index_module._posix_paths_for_windows(
+            "\\\\wsl.localhost\\Ubuntu\\home\\y\\ds.pdf"
+        )
+    ) == ["/home/y/ds.pdf"]
+    assert list(
+        index_module._posix_paths_for_windows("\\\\wsl$\\Ubuntu\\home\\y\\ds.pdf")
+    ) == ["/home/y/ds.pdf"]
+
+
+def test_posix_paths_ignores_paths_that_are_not_windows_paths():
+    for value in ("/home/y/ds.pdf", "relative/ds.pdf", "", "ds.pdf"):
+        assert list(index_module._posix_paths_for_windows(value)) == []
+
+
+def test_resolve_local_path_translates_a_windows_path_on_a_posix_host(monkeypatch):
+    monkeypatch.setattr(index_module, "_is_windows", lambda: False)
+    monkeypatch.setattr(
+        index_module.os.path, "exists", lambda p: p == "/mnt/c/Users/y/ds.pdf"
+    )
+
+    assert (
+        index_module._resolve_local_path("C:\\Users\\y\\ds.pdf")
+        == "/mnt/c/Users/y/ds.pdf"
+    )
+
+
+def test_resolve_local_path_keeps_a_windows_path_when_nothing_matches(monkeypatch):
+    """The error must still name what the caller passed."""
+    monkeypatch.setattr(index_module, "_is_windows", lambda: False)
+    monkeypatch.setattr(index_module.os.path, "exists", lambda p: False)
+
+    original = "C:\\Users\\y\\ds.pdf"
+    assert index_module._resolve_local_path(original) == original
+
+
+def test_resolve_local_path_never_rewrites_a_posix_path_that_exists(
+    tmp_path, monkeypatch
+):
+    """The POSIX host must not start second-guessing paths that already work."""
+    monkeypatch.setattr(index_module, "_is_windows", lambda: False)
+    pdf = tmp_path / "ds.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+
+    assert index_module._resolve_local_path(str(pdf)) == str(pdf)
