@@ -7,6 +7,8 @@ import logging
 import os
 import re
 import ssl
+import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
@@ -150,6 +152,93 @@ def _is_http_url(value: str) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
+# wsl.exe answers a list query immediately; anything slower means the
+# subsystem is starting or wedged, and the caller should not wait on it.
+WSL_QUERY_TIMEOUT_SECONDS = 5
+
+
+def _wsl_distros() -> list[str]:
+    """Names of the installed WSL distributions, or empty if none/unavailable."""
+    try:
+        completed = subprocess.run(
+            ["wsl.exe", "--list", "--quiet"],
+            capture_output=True,
+            timeout=WSL_QUERY_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if completed.returncode != 0:
+        return []
+
+    # wsl.exe writes UTF-16LE. Decoding it as UTF-8 yields NUL-separated
+    # characters that still "look" fine in a log and silently match nothing.
+    raw = completed.stdout
+    try:
+        text = raw.decode("utf-16-le")
+    except UnicodeDecodeError:
+        text = raw.decode("utf-8", "replace")
+    return [
+        line.strip() for line in text.replace("\x00", "").splitlines() if line.strip()
+    ]
+
+
+def _windows_paths_for_posix(posix_path: str) -> list[str]:
+    """Windows spellings of a POSIX path, most authoritative first.
+
+    ``/mnt/<drive>/...`` is WSL's own mount of a Windows drive, so it maps back
+    deterministically and is tried first. Anything else is assumed to live in a
+    distro's filesystem, which Windows reaches over the ``wsl.localhost`` UNC
+    share -- PyMuPDF opens those directly, verified against a real datasheet.
+    """
+    parts = [part for part in posix_path.split("/") if part]
+    if not parts:
+        return []
+
+    # Joined with literal backslashes, never os.path.join: these are Windows
+    # paths by construction, and on a POSIX host (where the tests run) join
+    # would splice them with forward slashes into "C:\/Users/...".
+    candidates: list[str] = []
+    if (
+        parts[0] == "mnt"
+        and len(parts) >= 3
+        and len(parts[1]) == 1
+        and parts[1].isalpha()
+    ):
+        candidates.append(f"{parts[1].upper()}:\\" + "\\".join(parts[2:]))
+
+    tail = "\\".join(parts)
+    candidates.extend(
+        f"\\\\wsl.localhost\\{distro}\\{tail}" for distro in _wsl_distros()
+    )
+    return candidates
+
+
+def _resolve_local_path(path: str) -> str:
+    """Map a POSIX path onto this filesystem when they are different namespaces.
+
+    VS Code opening a WSL folder from Windows is the common case: the editor,
+    the agent and the files live in the distro, but a gallery-installed MCP
+    server runs on the Windows host, where ``/home/you/ds.pdf`` simply does not
+    exist. The agent has no way to know that and retries the same path, so the
+    tool has to bridge it.
+
+    Only consulted when the literal path does not resolve, so a real Windows
+    path -- or any path on a POSIX host -- is never rewritten.
+    """
+    if sys.platform != "win32" or not path.startswith("/") or os.path.exists(path):
+        return path
+
+    for candidate in _windows_paths_for_posix(path):
+        if os.path.exists(candidate):
+            logger.info("Resolved POSIX path %s to %s", path, candidate)
+            return candidate
+
+    # Fall through unchanged: the caller's own "not found" error names the path
+    # the user actually passed, which is the more useful thing to report.
+    return path
+
+
 def _sanitize_filename_part(value: str) -> str:
     sanitized = re.sub(r'[<>:"/\\|?*\x00-\x1F]', "_", value)
     return sanitized[:200]
@@ -199,7 +288,7 @@ class DatasheetIndex:
         if _is_http_url(self.pdf_path):
             self._resolved_pdf_path = self._download_pdf(self.pdf_path)
         else:
-            self._resolved_pdf_path = self.pdf_path
+            self._resolved_pdf_path = _resolve_local_path(self.pdf_path)
         return self._resolved_pdf_path
 
     def _download_pdf(self, url: str) -> str:

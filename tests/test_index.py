@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from datasheetindex import index as index_module
 from datasheetindex.index import DatasheetIndex, _accept_llm_toc_candidate
 from datasheetindex.models import TocNode, TocQuality
 
@@ -761,3 +762,84 @@ def test_build_with_blank_output_dir_falls_through_to_resolver(monkeypatch, tmp_
         idx.close()
         assert artifacts.json_path is not None
         assert artifacts.json_path.parent == pinned
+
+
+# --- POSIX path translation for a Windows-hosted server (see _resolve_local_path) ---
+
+
+def test_resolve_local_path_is_a_noop_off_windows(monkeypatch):
+    """A POSIX host must never rewrite a POSIX path."""
+    monkeypatch.setattr(index_module.sys, "platform", "linux")
+    assert index_module._resolve_local_path("/home/u/ds.pdf") == "/home/u/ds.pdf"
+
+
+def test_resolve_local_path_leaves_existing_paths_alone(tmp_path, monkeypatch):
+    """Translation is a fallback. A path that resolves is never second-guessed,
+    so a genuine Windows path can't be mangled into a UNC one."""
+    pdf = tmp_path / "ds.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    monkeypatch.setattr(index_module.sys, "platform", "win32")
+
+    def _explode():
+        raise AssertionError("distros queried for a path that already exists")
+
+    monkeypatch.setattr(index_module, "_wsl_distros", _explode)
+    assert index_module._resolve_local_path(str(pdf)) == str(pdf)
+
+
+def test_windows_paths_maps_mnt_to_a_drive(monkeypatch):
+    """/mnt/c is WSL's own mount of C:, so it maps back exactly -- no guessing,
+    and it must be preferred over the UNC form which would round-trip the file
+    back through the distro."""
+    monkeypatch.setattr(index_module, "_wsl_distros", lambda: ["Ubuntu"])
+    candidates = index_module._windows_paths_for_posix("/mnt/c/Users/y/ds.pdf")
+    assert candidates[0] == "C:\\Users\\y\\ds.pdf"
+
+
+def test_windows_paths_uses_unc_for_distro_paths(monkeypatch):
+    monkeypatch.setattr(index_module, "_wsl_distros", lambda: ["Ubuntu", "Debian"])
+    assert index_module._windows_paths_for_posix("/home/y/ds.pdf") == [
+        "\\\\wsl.localhost\\Ubuntu\\home\\y\\ds.pdf",
+        "\\\\wsl.localhost\\Debian\\home\\y\\ds.pdf",
+    ]
+
+
+def test_resolve_local_path_picks_the_candidate_that_exists(monkeypatch):
+    """With several distros installed, the one actually holding the file wins."""
+    monkeypatch.setattr(index_module.sys, "platform", "win32")
+    monkeypatch.setattr(index_module, "_wsl_distros", lambda: ["Ubuntu", "Debian"])
+    found = "\\\\wsl.localhost\\Debian\\home\\y\\ds.pdf"
+    monkeypatch.setattr(index_module.os.path, "exists", lambda p: p == found)
+
+    assert index_module._resolve_local_path("/home/y/ds.pdf") == found
+
+
+def test_resolve_local_path_returns_original_when_nothing_matches(monkeypatch):
+    """The error the user sees must name the path they passed, not a rewrite."""
+    monkeypatch.setattr(index_module.sys, "platform", "win32")
+    monkeypatch.setattr(index_module, "_wsl_distros", lambda: ["Ubuntu"])
+    monkeypatch.setattr(index_module.os.path, "exists", lambda p: False)
+
+    assert index_module._resolve_local_path("/home/y/ds.pdf") == "/home/y/ds.pdf"
+
+
+def test_wsl_distros_decodes_utf16(monkeypatch):
+    """wsl.exe emits UTF-16LE; decoding it as UTF-8 yields NUL-laced names that
+    match no path while still looking plausible in a log."""
+
+    class _Completed:
+        returncode = 0
+        stdout = "Ubuntu\nDebian\n".encode("utf-16-le")
+
+    monkeypatch.setattr(index_module.subprocess, "run", lambda *a, **k: _Completed())
+    assert index_module._wsl_distros() == ["Ubuntu", "Debian"]
+
+
+def test_wsl_distros_survives_missing_wsl(monkeypatch):
+    """A Windows host with no WSL must degrade quietly, not raise."""
+
+    def _raise(*args, **kwargs):
+        raise FileNotFoundError("wsl.exe")
+
+    monkeypatch.setattr(index_module.subprocess, "run", _raise)
+    assert index_module._wsl_distros() == []

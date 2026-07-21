@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import concurrent.futures
+import json
 import logging
 import multiprocessing
 import os
 import re
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -354,19 +358,114 @@ def _mp_context() -> BaseContext:
     )
 
 
-def _build_table_count_cache_parallel(
-    pdf_path: str, total_pages: int
-) -> dict[int, int]:
-    """Scan all pages for tables using multiprocessing."""
+def _scan_timeout(total_pages: int) -> float:
+    """Deadline for a whole-document scan, in seconds.
+
+    Bounds every parallel path so a wedged pool degrades to a slow sequential
+    scan instead of hanging forever. One second per page is roughly 5x the
+    sequential cost of a slow page and ~40x the parallel cost, so this only
+    fires on a genuine stall, never on a document that is merely large.
+    """
+    return max(120.0, float(total_pages))
+
+
+def _build_table_count_cache_pool(pdf_path: str, total_pages: int) -> dict[int, int]:
+    """Scan all pages for tables using a process pool in *this* process.
+
+    Not used on Windows -- see :func:`_build_table_count_cache_helper`.
+    """
     workers = min(_available_cpus(), total_pages, _MAX_PARALLEL_WORKERS)
     args = [(pdf_path, i) for i in range(total_pages)]
-    with concurrent.futures.ProcessPoolExecutor(
+    pool = concurrent.futures.ProcessPoolExecutor(
         max_workers=workers,
         initializer=_subprocess_init,
         mp_context=_mp_context(),
-    ) as pool:
-        results = pool.map(_count_tables_on_page, args)
-    return dict(results)
+    )
+    try:
+        # Materialised inside the try, and deliberately not under `with`.
+        # pool.map returns a LAZY iterator: consuming it after the block let
+        # __exit__ run shutdown(wait=True) before a single result had been
+        # read, so a stalled worker blocked in shutdown rather than raising.
+        cache = dict(
+            pool.map(_count_tables_on_page, args, timeout=_scan_timeout(total_pages))
+        )
+    except BaseException:
+        # Never wait on the way out. A wedged pool is precisely the case the
+        # timeout exists to escape, and shutdown(wait=True) would block on it
+        # forever -- turning a recoverable failure back into a hang.
+        pool.shutdown(wait=False, cancel_futures=True)
+        raise
+    pool.shutdown(wait=True)
+    return cache
+
+
+def _build_table_count_cache_helper(pdf_path: str, total_pages: int) -> dict[int, int]:
+    """Scan all pages by delegating to a stdio-detached child process.
+
+    The Windows path. A pool created inside an MCP stdio server deadlocks
+    there -- its workers freeze before their interpreter initialises and only
+    unblock when the server exits (modelcontextprotocol/python-sdk#817). A
+    plain process pools normally, so we make one: this child is spawned with
+    stdin and stdout on devnull, which severs it from the server's JSON-RPC
+    handles, and it builds the pool itself.
+
+    Measured on a 148-page datasheet under a real Windows MCP server: 31.4s,
+    against an unbounded hang for the in-process pool.
+    """
+    if not sys.executable:
+        raise RuntimeError("no interpreter to launch the scan worker with")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out_path = os.path.join(tmpdir, "table_counts.json")
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "datasheetindex.core._scan_worker",
+                pdf_path,
+                str(total_pages),
+                out_path,
+            ],
+            stdin=subprocess.DEVNULL,
+            # Severing these is the whole point; do not "improve" them into
+            # PIPEs. Results come back through out_path instead.
+            stdout=subprocess.DEVNULL,
+            # CREATE_NO_WINDOW: the server usually has no console, and without
+            # this each scan flashes one. Absent off Windows, hence getattr.
+            stderr=subprocess.PIPE,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        try:
+            _, stderr = process.communicate(timeout=_scan_timeout(total_pages))
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate()
+            raise
+
+        if process.returncode != 0:
+            detail = stderr.decode("utf-8", "replace").strip()
+            raise RuntimeError(
+                f"scan worker exited {process.returncode}: {detail[-2000:]}"
+            )
+
+        with open(out_path, encoding="utf-8") as handle:
+            counts = json.load(handle)
+
+    return {int(page): count for page, count in counts.items()}
+
+
+def _build_table_count_cache_parallel(
+    pdf_path: str, total_pages: int
+) -> dict[int, int]:
+    """Scan all pages for tables in parallel, however that is safe here.
+
+    Windows cannot pool from inside an MCP stdio server, so it delegates to a
+    detached child. Everywhere else the in-process pool is proven and one
+    process cheaper, so it stays.
+    """
+    if sys.platform == "win32":
+        return _build_table_count_cache_helper(pdf_path, total_pages)
+    return _build_table_count_cache_pool(pdf_path, total_pages)
 
 
 def _build_table_count_cache_sequential(
@@ -413,10 +512,15 @@ def enrich_with_table_counts(
     total_pages = len(doc)
     cache: dict[int, int] | None = None
 
-    # Worker subprocesses redirect stdin/stdout to devnull via
-    # _subprocess_init, so parallelism is safe even when the parent's
-    # stdout is an MCP JSON-RPC pipe.
-    _can_parallel = pdf_path is not None and total_pages >= _PARALLEL_PAGE_THRESHOLD
+    # Both parallel paths keep worker stdin/stdout off the parent's, so
+    # parallelism is safe even when that stdout is an MCP JSON-RPC pipe.
+    # DATASHEETINDEX_PARALLEL=0 is the escape hatch if a host still trips over
+    # process creation; the scan then runs sequentially, only slower.
+    _can_parallel = (
+        pdf_path is not None
+        and total_pages >= _PARALLEL_PAGE_THRESHOLD
+        and os.environ.get("DATASHEETINDEX_PARALLEL", "1") != "0"
+    )
 
     if _can_parallel and pdf_path is not None:
         try:

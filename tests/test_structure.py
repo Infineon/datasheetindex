@@ -10,6 +10,7 @@ from datasheetindex.core import structure
 from datasheetindex.core.structure import (
     _available_cpus,
     _build_table_count_cache_parallel,
+    _build_table_count_cache_pool,
     _mp_context,
     _read_cgroup_cpu_quota,
     assign_breadcrumbs,
@@ -520,26 +521,32 @@ def test_mp_context_never_forks():
 
 
 class _FakePool:
-    """Stand-in for ProcessPoolExecutor that records how it was constructed."""
+    """Stand-in for ProcessPoolExecutor that records how it was driven."""
 
     kwargs: dict = {}
+    map_timeout: float | None = None
+    shutdowns: list[dict] = []
+    map_raises: BaseException | None = None
 
     def __init__(self, **kwargs):
         _FakePool.kwargs = kwargs
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def map(self, fn, args):
+    def map(self, fn, args, timeout=None):
+        _FakePool.map_timeout = timeout
+        if _FakePool.map_raises is not None:
+            raise _FakePool.map_raises
         return [(page_idx, 0) for _, page_idx in args]
+
+    def shutdown(self, wait=True, cancel_futures=False):
+        _FakePool.shutdowns.append({"wait": wait, "cancel_futures": cancel_futures})
 
 
 @pytest.fixture
 def fake_pool(monkeypatch):
     _FakePool.kwargs = {}
+    _FakePool.map_timeout = None
+    _FakePool.shutdowns = []
+    _FakePool.map_raises = None
     monkeypatch.setattr(
         concurrent.futures, "ProcessPoolExecutor", _FakePool, raising=True
     )
@@ -557,13 +564,13 @@ def fake_pool(monkeypatch):
 )
 def test_parallel_pool_is_bounded(monkeypatch, fake_pool, cpus, total_pages, expected):
     monkeypatch.setattr(structure, "_available_cpus", lambda: cpus)
-    _build_table_count_cache_parallel("doc.pdf", total_pages)
+    _build_table_count_cache_pool("doc.pdf", total_pages)
     assert fake_pool.kwargs["max_workers"] == expected
 
 
 def test_parallel_pool_does_not_fork(monkeypatch, fake_pool):
     monkeypatch.setattr(structure, "_available_cpus", lambda: 4)
-    _build_table_count_cache_parallel("doc.pdf", 20)
+    _build_table_count_cache_pool("doc.pdf", 20)
     assert fake_pool.kwargs["mp_context"].get_start_method() != "fork"
 
 
@@ -571,7 +578,7 @@ def test_parallel_pool_redirects_worker_stdio(monkeypatch, fake_pool):
     """Workers still inherit fds 0-2 across exec; without _subprocess_init an
     MCP stdio parent's JSON-RPC channel collides with worker output."""
     monkeypatch.setattr(structure, "_available_cpus", lambda: 4)
-    _build_table_count_cache_parallel("doc.pdf", 20)
+    _build_table_count_cache_pool("doc.pdf", 20)
     assert fake_pool.kwargs["initializer"] is structure._subprocess_init
 
 
@@ -579,7 +586,7 @@ def test_parallel_cache_covers_every_page(monkeypatch, fake_pool):
     """Every page index is present. Values come from the fake, so they prove
     nothing -- real per-page counts are covered by the unmocked pool test."""
     monkeypatch.setattr(structure, "_available_cpus", lambda: 4)
-    cache = _build_table_count_cache_parallel("doc.pdf", 20)
+    cache = _build_table_count_cache_pool("doc.pdf", 20)
     assert sorted(cache) == list(range(20))
 
 
@@ -647,6 +654,111 @@ def test_real_pool_counts_tables(tmp_path):
     parallel = _build_table_count_cache_parallel(str(pdf), pages)
 
     assert parallel == _expected_counts(pages)
+
+
+def test_helper_counts_tables(tmp_path):
+    """The Windows path, exercised on every platform.
+
+    Production only takes this branch on win32, so CI's Linux lane would never
+    run it if the test gated on sys.platform -- and a helper broken by a typo,
+    a bad module path or an unwritable temp file would ship green, falling back
+    to a silent 3x-slower sequential scan (or, before the timeout existed, an
+    unbounded hang). The helper is a plain subprocess, so it runs anywhere.
+    """
+    pages = 13
+    pdf = tmp_path / "tables.pdf"
+    _write_table_pdf(pdf, pages=pages)
+
+    assert structure._build_table_count_cache_helper(str(pdf), pages) == (
+        _expected_counts(pages)
+    )
+
+
+def test_helper_and_pool_agree(tmp_path):
+    """The two parallel paths must be interchangeable, not merely both green.
+
+    A platform split is only safe if the branches return the same answer; this
+    is what lets the dispatcher pick either one without changing results.
+    """
+    pages = 13
+    pdf = tmp_path / "tables.pdf"
+    _write_table_pdf(pdf, pages=pages)
+
+    assert structure._build_table_count_cache_helper(str(pdf), pages) == (
+        structure._build_table_count_cache_pool(str(pdf), pages)
+    )
+
+
+def test_parallel_dispatches_by_platform(monkeypatch):
+    """win32 must not build a pool in-process: that is the deadlock."""
+    calls = []
+    monkeypatch.setattr(
+        structure,
+        "_build_table_count_cache_helper",
+        lambda path, pages: calls.append("helper") or {},
+    )
+    monkeypatch.setattr(
+        structure,
+        "_build_table_count_cache_pool",
+        lambda path, pages: calls.append("pool") or {},
+    )
+
+    monkeypatch.setattr(structure.sys, "platform", "win32")
+    _build_table_count_cache_parallel("doc.pdf", 20)
+    monkeypatch.setattr(structure.sys, "platform", "linux")
+    _build_table_count_cache_parallel("doc.pdf", 20)
+
+    assert calls == ["helper", "pool"]
+
+
+def test_pool_map_is_bounded_by_a_timeout(monkeypatch, fake_pool):
+    """Without a timeout there is no way back from a wedged pool.
+
+    enrich_with_table_counts recovers by catching an exception, so the scan has
+    to raise rather than block -- the Windows hang was exactly a pool that
+    never raised.
+    """
+    monkeypatch.setattr(structure, "_available_cpus", lambda: 4)
+    _build_table_count_cache_pool("doc.pdf", 20)
+    assert fake_pool.map_timeout == structure._scan_timeout(20)
+
+
+def test_pool_failure_does_not_wait_on_shutdown(monkeypatch, fake_pool):
+    """shutdown(wait=True) on a wedged pool re-creates the hang it escaped."""
+    monkeypatch.setattr(structure, "_available_cpus", lambda: 4)
+    _FakePool.map_raises = TimeoutError("wedged")
+
+    with pytest.raises(TimeoutError):
+        _build_table_count_cache_pool("doc.pdf", 20)
+
+    assert fake_pool.shutdowns == [{"wait": False, "cancel_futures": True}]
+
+
+def test_scan_timeout_has_a_floor():
+    """A small document must not get a timeout so tight that a slow host trips
+    it; the deadline only exists to catch a stall."""
+    assert structure._scan_timeout(1) == 120.0
+    assert structure._scan_timeout(500) == 500.0
+
+
+def test_parallel_can_be_disabled_by_env(tmp_path, monkeypatch):
+    """The escape hatch for a host where process creation misbehaves."""
+    monkeypatch.setenv("DATASHEETINDEX_PARALLEL", "0")
+
+    def _explode(*args, **kwargs):
+        raise AssertionError("parallel scan attempted with DATASHEETINDEX_PARALLEL=0")
+
+    monkeypatch.setattr(structure, "_build_table_count_cache_parallel", _explode)
+
+    pages = 13
+    pdf = tmp_path / "tables.pdf"
+    _write_table_pdf(pdf, pages=pages)
+    doc = pymupdf.open(str(pdf))
+    try:
+        nodes = build_tree([[1, "A", 1]], total_pages=pages)
+        enrich_with_table_counts(nodes, doc, pdf_path=str(pdf))
+    finally:
+        doc.close()
 
 
 def test_sequential_counts_tables(tmp_path):
