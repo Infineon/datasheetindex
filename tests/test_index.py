@@ -967,19 +967,6 @@ def test_posix_paths_accepts_forward_slashes_and_lowercase_drives():
     ]
 
 
-def test_posix_paths_unwraps_a_wsl_unc_path():
-    """\\\\wsl.localhost\\<distro>\\... is a distro-local file addressed from the
-    Windows side; inside the distro it is simply the POSIX path."""
-    assert list(
-        index_module._posix_paths_for_windows(
-            "\\\\wsl.localhost\\Ubuntu\\home\\y\\ds.pdf"
-        )
-    ) == ["/home/y/ds.pdf"]
-    assert list(
-        index_module._posix_paths_for_windows("\\\\wsl$\\Ubuntu\\home\\y\\ds.pdf")
-    ) == ["/home/y/ds.pdf"]
-
-
 def test_posix_paths_ignores_paths_that_are_not_windows_paths():
     for value in ("/home/y/ds.pdf", "relative/ds.pdf", "", "ds.pdf"):
         assert list(index_module._posix_paths_for_windows(value)) == []

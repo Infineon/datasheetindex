@@ -93,6 +93,23 @@ def _hermetic_llm_env(request, monkeypatch):
     monkeypatch.setattr(dotenv, "load_dotenv", lambda *args, **kwargs: False)
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_wsl_env(monkeypatch):
+    """Keep the developer's own distro out of every test.
+
+    ``index._posix_paths_for_windows`` unwraps a ``\\\\wsl.localhost\\<distro>``
+    path only when it names *this* distro, which it learns from
+    ``WSL_DISTRO_NAME``. That variable is set inside WSL and absent in CI's
+    Linux container, so a test that neither sets nor clears it asserts one
+    thing on a maintainer's machine and the opposite in CI -- which is exactly
+    how a green local suite shipped a red pipeline once already.
+
+    Cleared here so the ambient value can never leak in; tests that need a
+    distro set it explicitly with ``monkeypatch.setenv``.
+    """
+    monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
+
+
 @pytest.fixture()
 def _has_env():
     """Skip if .env credentials are not available."""
