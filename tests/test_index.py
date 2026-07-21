@@ -797,13 +797,13 @@ def test_windows_paths_maps_mnt_to_a_drive(monkeypatch):
     and it must be preferred over the UNC form which would round-trip the file
     back through the distro."""
     monkeypatch.setattr(index_module, "_wsl_distros", lambda: ["Ubuntu"])
-    candidates = index_module._windows_paths_for_posix("/mnt/c/Users/y/ds.pdf")
+    candidates = list(index_module._windows_paths_for_posix("/mnt/c/Users/y/ds.pdf"))
     assert candidates[0] == "C:\\Users\\y\\ds.pdf"
 
 
 def test_windows_paths_uses_unc_for_distro_paths(monkeypatch):
     monkeypatch.setattr(index_module, "_wsl_distros", lambda: ["Ubuntu", "Debian"])
-    assert index_module._windows_paths_for_posix("/home/y/ds.pdf") == [
+    assert list(index_module._windows_paths_for_posix("/home/y/ds.pdf")) == [
         "\\\\wsl.localhost\\Ubuntu\\home\\y\\ds.pdf",
         "\\\\wsl.localhost\\Debian\\home\\y\\ds.pdf",
     ]
@@ -828,66 +828,112 @@ def test_resolve_local_path_returns_original_when_nothing_matches(monkeypatch):
     assert index_module._resolve_local_path("/home/y/ds.pdf") == "/home/y/ds.pdf"
 
 
-def test_wsl_distros_decodes_utf16(monkeypatch):
-    """wsl.exe emits UTF-16LE; decoding it as UTF-8 yields NUL-laced names that
-    match no path while still looking plausible in a log."""
-
-    class _Completed:
-        returncode = 0
-        stdout = "Ubuntu\nDebian\n".encode("utf-16-le")
-
-    monkeypatch.setattr(index_module.subprocess, "run", lambda *a, **k: _Completed())
-    assert index_module._wsl_distros() == ["Ubuntu", "Debian"]
-
-
-def test_wsl_distros_survives_missing_wsl(monkeypatch):
-    """A Windows host with no WSL must degrade quietly, not raise."""
-
-    def _raise(*args, **kwargs):
-        raise FileNotFoundError("wsl.exe")
-
-    monkeypatch.setattr(index_module.subprocess, "run", _raise)
-    assert index_module._wsl_distros() == []
-
-
-def test_wsl_distros_decodes_utf8_when_wsl_utf8_is_set(monkeypatch):
-    """WSL 0.64+ emits UTF-8 when WSL_UTF8=1, and that output is even-length,
-    so decoding it as UTF-16 does NOT raise -- it silently yields one mojibake
-    name that matches nothing, disabling the feature with no error anywhere."""
-
-    class _Completed:
-        returncode = 0
-        stdout = b"Ubuntu\r\nDebian\r\n"
-
-    monkeypatch.setattr(index_module.subprocess, "run", lambda *a, **k: _Completed())
-    assert index_module._wsl_distros() == ["Ubuntu", "Debian"]
-
-
-def test_wsl_distros_ignores_names_that_would_build_odd_paths(monkeypatch):
-    class _Completed:
-        returncode = 0
-        stdout = "Ubuntu\n..\nbad\\name\n".encode("utf-16-le")
-
-    monkeypatch.setattr(index_module.subprocess, "run", lambda *a, **k: _Completed())
-    assert index_module._wsl_distros() == ["Ubuntu"]
-
-
-def test_wsl_distros_returns_empty_on_nonzero_exit(monkeypatch):
-    class _Completed:
-        returncode = 1
-        stdout = b""
-
-    monkeypatch.setattr(index_module.subprocess, "run", lambda *a, **k: _Completed())
-    assert index_module._wsl_distros() == []
-
-
 def test_windows_paths_handles_degenerate_inputs(monkeypatch):
     """A bare /mnt/c names the mount itself, with nothing after the drive, so
     it has no drive-letter spelling -- only the UNC one."""
     monkeypatch.setattr(index_module, "_wsl_distros", lambda: ["Ubuntu"])
 
-    assert index_module._windows_paths_for_posix("") == []
-    assert index_module._windows_paths_for_posix("/") == []
-    assert index_module._windows_paths_for_posix("/mnt/c") == [
+    assert list(index_module._windows_paths_for_posix("")) == []
+    assert list(index_module._windows_paths_for_posix("/")) == []
+    assert list(index_module._windows_paths_for_posix("/mnt/c")) == [
         "\\\\wsl.localhost\\Ubuntu\\mnt\\c"
     ]
+
+
+def test_mnt_candidate_does_not_query_wsl(monkeypatch):
+    """Probing a UNC path against a stopped distro STARTS it -- tens of seconds,
+    and the one unbounded step on this path. A /mnt path maps back exactly, so
+    resolving it must never reach for the distro list at all."""
+    monkeypatch.setattr(index_module, "_is_windows", lambda: True)
+
+    def _explode():
+        raise AssertionError("queried WSL despite an exact /mnt mapping")
+
+    monkeypatch.setattr(index_module, "_wsl_distros", _explode)
+    monkeypatch.setattr(
+        index_module.os.path, "exists", lambda p: p == "C:\\Users\\y\\ds.pdf"
+    )
+
+    assert (
+        index_module._resolve_local_path("/mnt/c/Users/y/ds.pdf")
+        == "C:\\Users\\y\\ds.pdf"
+    )
+
+
+def test_wsl_query_is_bounded_and_windowless(monkeypatch):
+    """The query must not use subprocess.run(capture_output=True): on timeout
+    that is kill() then communicate(), which waits for an EOF a lingering WSL
+    helper may never deliver -- so the timeout would bound nothing."""
+    seen = {}
+
+    class _Proc:
+        def __init__(self, cmd, **kwargs):
+            seen["cmd"] = cmd
+            seen["kwargs"] = kwargs
+
+        def wait(self, timeout=None):
+            seen["timeout"] = timeout
+            return 0
+
+        def kill(self):  # pragma: no cover - not reached in this test
+            seen["killed"] = True
+
+    monkeypatch.setattr(index_module.subprocess, "Popen", _Proc)
+
+    assert index_module._wsl_distros() == []
+    assert seen["cmd"] == ["wsl.exe", "--list", "--quiet"]
+    assert seen["timeout"] == index_module.WSL_QUERY_TIMEOUT_SECONDS
+    assert seen["kwargs"]["stdout"] is not index_module.subprocess.PIPE
+    assert seen["kwargs"]["creationflags"] == getattr(
+        index_module.subprocess, "CREATE_NO_WINDOW", 0
+    )
+
+
+def _install_fake_wsl(monkeypatch, *, stdout=b"", returncode=0, popen_raises=None):
+    """Stub wsl.exe at the Popen seam the real query uses."""
+
+    class _Proc:
+        def __init__(self, cmd, **kwargs):
+            if popen_raises is not None:
+                raise popen_raises
+            kwargs["stdout"].write(stdout)
+            kwargs["stdout"].flush()
+
+        def wait(self, timeout=None):
+            return returncode
+
+        def kill(self):  # pragma: no cover - not reached in these tests
+            pass
+
+    monkeypatch.setattr(index_module.subprocess, "Popen", _Proc)
+
+
+def test_wsl_distros_decodes_utf16(monkeypatch):
+    """wsl.exe emits UTF-16LE by default; decoding it as UTF-8 yields NUL-laced
+    names that match no path while still looking plausible in a log."""
+    _install_fake_wsl(monkeypatch, stdout="Ubuntu\nDebian\n".encode("utf-16-le"))
+    assert index_module._wsl_distros() == ["Ubuntu", "Debian"]
+
+
+def test_wsl_distros_decodes_utf8_when_wsl_utf8_is_set(monkeypatch):
+    """WSL 0.64+ emits UTF-8 when WSL_UTF8=1, and that output is even-length, so
+    decoding it as UTF-16 does NOT raise -- it silently yields one mojibake name
+    that matches nothing, disabling the feature with no error anywhere."""
+    _install_fake_wsl(monkeypatch, stdout=b"Ubuntu\r\nDebian\r\n")
+    assert index_module._wsl_distros() == ["Ubuntu", "Debian"]
+
+
+def test_wsl_distros_ignores_names_that_would_build_odd_paths(monkeypatch):
+    _install_fake_wsl(monkeypatch, stdout="Ubuntu\n..\nbad\\name\n".encode("utf-16-le"))
+    assert index_module._wsl_distros() == ["Ubuntu"]
+
+
+def test_wsl_distros_returns_empty_on_nonzero_exit(monkeypatch):
+    _install_fake_wsl(monkeypatch, stdout=b"", returncode=1)
+    assert index_module._wsl_distros() == []
+
+
+def test_wsl_distros_survives_missing_wsl(monkeypatch):
+    """A Windows host with no WSL must degrade quietly, not raise."""
+    _install_fake_wsl(monkeypatch, popen_raises=FileNotFoundError("wsl.exe"))
+    assert index_module._wsl_distros() == []

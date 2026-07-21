@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -14,6 +15,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -169,24 +171,43 @@ def _is_windows() -> bool:
 
 def _wsl_distros() -> list[str]:
     """Names of the installed WSL distributions, or empty if none/unavailable."""
+    # stdout goes to a file, not a PIPE, and the wait is process.wait(). Under
+    # subprocess.run(capture_output=True), a timeout means kill() followed by
+    # communicate(), which waits for EOF on the pipe -- and wsl.exe brokers
+    # through the WSL service and can leave a handle-inheriting helper behind,
+    # so that EOF may never arrive and the "timeout" would not bound anything.
+    # This is the same trap the scan worker avoids for the same reason.
     try:
-        completed = subprocess.run(
-            ["wsl.exe", "--list", "--quiet"],
-            capture_output=True,
-            timeout=WSL_QUERY_TIMEOUT_SECONDS,
-            check=False,
-            # Same reason the scan worker gets it: this runs on a console-less
-            # MCP server, and without it every query flashes a window.
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            out_path = os.path.join(tmpdir, "distros.txt")
+            with open(out_path, "wb") as out_handle:
+                process = subprocess.Popen(
+                    ["wsl.exe", "--list", "--quiet"],
+                    stdin=subprocess.DEVNULL,
+                    stdout=out_handle,
+                    stderr=subprocess.DEVNULL,
+                    # Same reason the scan worker gets it: this runs on a
+                    # console-less MCP server, and without it every query
+                    # flashes a window.
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                try:
+                    returncode = process.wait(timeout=WSL_QUERY_TIMEOUT_SECONDS)
+                except BaseException:
+                    process.kill()
+                    with contextlib.suppress(subprocess.TimeoutExpired):
+                        process.wait(timeout=WSL_QUERY_TIMEOUT_SECONDS)
+                    raise
+            with open(out_path, "rb") as handle:
+                raw = handle.read()
     except (OSError, subprocess.SubprocessError):
         # Logged, not silent: without this, a wedged WSL service and a host
         # with no WSL at all produce the same empty result and the same
         # unhelpful "no such file", with nothing to tell them apart.
         logger.debug("WSL distribution query failed", exc_info=True)
         return []
-    if completed.returncode != 0:
-        logger.debug("wsl.exe --list exited %d", completed.returncode)
+    if returncode != 0:
+        logger.debug("wsl.exe --list exited %d", returncode)
         return []
 
     # wsl.exe writes UTF-16LE by default, but UTF-8 when WSL_UTF8=1 is set
@@ -195,7 +216,6 @@ def _wsl_distros() -> list[str]:
     # silently yields mojibake with no line breaks, collapsing every distro
     # into one junk name that matches nothing. Sniff on a NUL byte instead of
     # trusting a decode error to catch it.
-    raw = completed.stdout
     text = raw.decode("utf-16-le" if b"\x00" in raw else "utf-8", "replace")
 
     # A name carrying a separator would build a surprising UNC path. These are
@@ -208,35 +228,37 @@ def _wsl_distros() -> list[str]:
     ]
 
 
-def _windows_paths_for_posix(posix_path: str) -> list[str]:
+def _windows_paths_for_posix(posix_path: str) -> Iterator[str]:
     """Windows spellings of a POSIX path, most authoritative first.
 
     ``/mnt/<drive>/...`` is WSL's own mount of a Windows drive, so it maps back
-    deterministically and is tried first. Anything else is assumed to live in a
-    distro's filesystem, which Windows reaches over the ``wsl.localhost`` UNC
+    deterministically and is yielded first. Anything else is assumed to live in
+    a distro's filesystem, which Windows reaches over the ``wsl.localhost`` UNC
     share -- PyMuPDF opens those directly, verified against a real datasheet.
+
+    A generator, so a caller that resolves on the ``/mnt`` candidate never
+    queries WSL at all. That ordering matters: probing a UNC path against a
+    *stopped* distro starts it, which takes tens of seconds and is the one
+    unbounded operation on this path.
     """
     parts = [part for part in posix_path.split("/") if part]
     if not parts:
-        return []
+        return
 
     # Joined with literal backslashes, never os.path.join: these are Windows
     # paths by construction, and on a POSIX host (where the tests run) join
     # would splice them with forward slashes into "C:\/Users/...".
-    candidates: list[str] = []
     if (
         parts[0] == "mnt"
         and len(parts) >= 3
         and len(parts[1]) == 1
         and parts[1].isalpha()
     ):
-        candidates.append(f"{parts[1].upper()}:\\" + "\\".join(parts[2:]))
+        yield f"{parts[1].upper()}:\\" + "\\".join(parts[2:])
 
     tail = "\\".join(parts)
-    candidates.extend(
-        f"\\\\wsl.localhost\\{distro}\\{tail}" for distro in _wsl_distros()
-    )
-    return candidates
+    for distro in _wsl_distros():
+        yield f"\\\\wsl.localhost\\{distro}\\{tail}"
 
 
 def _resolve_local_path(path: str) -> str:

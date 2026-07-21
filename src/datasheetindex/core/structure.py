@@ -13,7 +13,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from datasheetindex.core.boilerplate import flag_boilerplate
 from datasheetindex.core.engine import classic_tables
@@ -41,6 +41,11 @@ _HELPER_GRACE_SECONDS = 30.0
 # A killed process is reaped immediately; this only bounds the window in
 # which the kill has not landed yet, so the escape path is never a bare wait.
 _KILL_WAIT_SECONDS = 10.0
+
+# Absolute ceiling on a scan deadline. Past roughly this point the caller's
+# own request timeout has already fired, so a longer deadline buys nothing
+# and only delays the sequential fallback that would have produced an answer.
+_SCAN_TIMEOUT_CEILING_SECONDS = 600.0
 
 _CGROUP_ROOT = Path("/sys/fs/cgroup")
 _PROC_SELF_CGROUP = Path("/proc/self/cgroup")
@@ -369,6 +374,17 @@ def _mp_context() -> BaseContext:
     )
 
 
+def _parallel_enabled_by_env() -> bool:
+    """Whether DATASHEETINDEX_PARALLEL permits the parallel scan.
+
+    Accepts the spellings a user actually reaches for. Matching only the
+    literal "0" would silently ignore DATASHEETINDEX_PARALLEL=false, leaving
+    the escape hatch looking broken to the person who most needs it.
+    """
+    value = os.environ.get("DATASHEETINDEX_PARALLEL", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
 def _is_windows() -> bool:
     """Whether this is a Windows host.
 
@@ -379,8 +395,12 @@ def _is_windows() -> bool:
     return sys.platform == "win32"
 
 
-def _abandon_pool(pool: concurrent.futures.Executor) -> None:
+def _abandon_pool(pool: Any) -> None:
     """Drop a pool without waiting on it.
+
+    Typed loosely on purpose: this needs only ``shutdown`` and, where it
+    exists, ``kill_workers``. Pinning it to ``Executor`` would force the tests
+    that cover both branches to subclass an ABC to say something simple.
 
     ``shutdown(wait=False)`` returns promptly, but the executor's manager
     thread keeps joining its workers, and ``concurrent.futures`` joins *that*
@@ -414,8 +434,13 @@ def _scan_timeout(total_pages: int) -> float:
     scan instead of hanging forever. One second per page is roughly 5x the
     sequential cost of a slow page and ~40x the parallel cost, so this only
     fires on a genuine stall, never on a document that is merely large.
+
+    Capped, because the fallback has to be reachable *within the call*: a
+    1000-page document would otherwise wait ~1000s, then run a sequential scan
+    on top, long past any MCP client's request timeout -- a deadline nobody
+    lives to see is the hang it replaced, wearing a hat.
     """
-    return max(120.0, float(total_pages))
+    return min(max(120.0, float(total_pages)), _SCAN_TIMEOUT_CEILING_SECONDS)
 
 
 def _build_table_count_cache_pool(pdf_path: str, total_pages: int) -> dict[int, int]:
@@ -444,6 +469,9 @@ def _build_table_count_cache_pool(pdf_path: str, total_pages: int) -> dict[int, 
         # forever -- turning a recoverable failure back into a hang.
         _abandon_pool(pool)
         raise
+    # wait=True is correct here: every result has already been read, so the
+    # workers are idle. A worker wedging in its own atexit after returning
+    # results would still block; that is accepted, not overlooked.
     pool.shutdown(wait=True)
     return cache
 
@@ -508,13 +536,28 @@ def _build_table_count_cache_helper(pdf_path: str, total_pages: int) -> dict[int
                 # report a real traceback; without it the parent's clock, which
                 # starts earlier, always wins and every stall looks identical.
                 process.wait(timeout=_scan_timeout(total_pages) + _HELPER_GRACE_SECONDS)
-            except subprocess.TimeoutExpired:
+            except BaseException as exc:
+                # BaseException, not only TimeoutExpired: a KeyboardInterrupt
+                # out of wait() would otherwise leave the child alive with its
+                # whole pool, holding a handle into the temp directory we are
+                # about to remove -- the orphan this module exists to prevent,
+                # merely relocated.
+                #
                 # kill() signals only this child. Its pool workers are not ours
                 # to signal and may briefly outlive it; they are released by the
                 # parent's death, which is what strands them in the first place.
                 process.kill()
                 with contextlib.suppress(subprocess.TimeoutExpired):
                     process.wait(timeout=_KILL_WAIT_SECONDS)
+                if isinstance(exc, subprocess.TimeoutExpired):
+                    # Reading the worker's stderr back here is the whole payoff
+                    # of the grace margin: a bare TimeoutExpired says something
+                    # stalled but never what, and the answer is already sitting
+                    # in err_path.
+                    raise RuntimeError(
+                        f"scan worker timed out after {exc.timeout}s: "
+                        f"{_read_worker_stderr(err_path)}"
+                    ) from exc
                 raise
 
         if process.returncode != 0:
@@ -526,7 +569,10 @@ def _build_table_count_cache_helper(pdf_path: str, total_pages: int) -> dict[int
         with open(out_path, encoding="utf-8") as handle:
             counts = json.load(handle)
 
-    cache = {int(page): count for page, count in counts.items()}
+    # int() on the value as well as the key: a non-int count would survive
+    # into _apply_table_counts and fail there, outside the try that would
+    # have fallen back.
+    cache = {int(page): int(count) for page, count in counts.items()}
     if len(cache) != total_pages:
         # Downstream, a missing page is indistinguishable from a page with no
         # tables: _apply_table_counts defaults it to 0. Raise so the sequential
@@ -602,7 +648,7 @@ def enrich_with_table_counts(
     _can_parallel = (
         pdf_path is not None
         and total_pages >= _PARALLEL_PAGE_THRESHOLD
-        and os.environ.get("DATASHEETINDEX_PARALLEL", "1") != "0"
+        and _parallel_enabled_by_env()
     )
 
     if _can_parallel and pdf_path is not None:

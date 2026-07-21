@@ -766,7 +766,12 @@ def test_pool_consumes_the_map_before_shutting_down(monkeypatch, fake_pool):
 
 
 def _install_fake_popen(
-    monkeypatch, *, returncode=0, pages_written=None, timeout_first_wait=False
+    monkeypatch,
+    *,
+    returncode=0,
+    pages_written=None,
+    timeout_first_wait=False,
+    wait_raises=None,
 ):
     """Drive the helper's failure branches without a real worker.
 
@@ -790,6 +795,8 @@ def _install_fake_popen(
 
         def wait(self, timeout=None):
             state["waits"].append(timeout)
+            if wait_raises is not None and len(state["waits"]) == 1:
+                raise wait_raises
             if timeout_first_wait and len(state["waits"]) == 1:
                 raise subprocess.TimeoutExpired(cmd="worker", timeout=timeout or 0)
             return self.returncode
@@ -816,18 +823,42 @@ def test_helper_never_pipes_worker_stderr(monkeypatch):
     assert hasattr(state["kwargs"]["stderr"], "write")
     assert state["kwargs"]["stdin"] is subprocess.DEVNULL
     assert state["kwargs"]["stdout"] is subprocess.DEVNULL
+    assert state["kwargs"]["creationflags"] == getattr(
+        subprocess, "CREATE_NO_WINDOW", 0
+    )
+    assert state["cmd"][:3] == [
+        structure.sys.executable,
+        "-m",
+        "datasheetindex.core._scan_worker",
+    ]
 
 
 def test_helper_bounds_every_wait_on_the_timeout_path(monkeypatch):
     """A bare wait() after kill() would reintroduce the unbounded block."""
     state = _install_fake_popen(monkeypatch, timeout_first_wait=True)
 
-    with pytest.raises(subprocess.TimeoutExpired):
+    with pytest.raises(RuntimeError, match="timed out"):
         structure._build_table_count_cache_helper("doc.pdf", 20)
 
     assert state["kills"] == 1
     assert len(state["waits"]) == 2
     assert all(timeout is not None for timeout in state["waits"])
+
+
+def test_helper_kills_the_child_on_a_non_timeout_interruption(monkeypatch):
+    """A narrow `except TimeoutExpired` leaves the child alive on Ctrl-C.
+
+    KeyboardInterrupt out of wait() is the realistic case. The child would keep
+    its whole 8-worker pool running and hold a handle into the temp directory
+    being torn down -- the orphan this module exists to prevent, merely
+    relocated, and invisible to a test that only ever raises TimeoutExpired.
+    """
+    state = _install_fake_popen(monkeypatch, wait_raises=KeyboardInterrupt())
+
+    with pytest.raises(KeyboardInterrupt):
+        structure._build_table_count_cache_helper("doc.pdf", 20)
+
+    assert state["kills"] == 1
 
 
 def test_helper_deadline_exceeds_the_workers_own(monkeypatch):
@@ -874,6 +905,52 @@ def test_helper_refuses_a_frozen_interpreter(monkeypatch):
         structure._build_table_count_cache_helper("doc.pdf", 20)
 
 
+def test_abandon_pool_prefers_kill_workers_where_available():
+    """kill_workers() (3.14+) is the only API that stops a wedged worker.
+
+    shutdown(wait=False) returns promptly but leaves the manager thread joining
+    those workers, and concurrent.futures joins it from an atexit hook -- so the
+    process still hangs, just at exit. Our floor is 3.13, where the attribute is
+    absent, so without this test the branch that matters ships unverified.
+    """
+
+    class _Killable:
+        def __init__(self):
+            self.killed = 0
+            self.shutdowns = 0
+
+        def kill_workers(self):
+            self.killed += 1
+
+        def shutdown(self, wait=True, cancel_futures=False):
+            self.shutdowns += 1
+
+    pool = _Killable()
+    structure._abandon_pool(pool)
+
+    assert (pool.killed, pool.shutdowns) == (1, 0)
+
+
+def test_abandon_pool_falls_back_to_shutdown_without_kill_workers():
+    class _Plain:
+        def __init__(self):
+            self.calls = []
+
+        def shutdown(self, wait=True, cancel_futures=False):
+            self.calls.append((wait, cancel_futures))
+
+    pool = _Plain()
+    structure._abandon_pool(pool)
+
+    assert pool.calls == [(False, True)]
+
+
+def test_scan_timeout_is_capped():
+    """An uncapped deadline outlives the caller's own request timeout, so the
+    sequential fallback it exists to reach never runs."""
+    assert structure._scan_timeout(100_000) == structure._SCAN_TIMEOUT_CEILING_SECONDS
+
+
 def test_scan_timeout_has_a_floor():
     """A small document must not get a timeout so tight that a slow host trips
     it; the deadline only exists to catch a stall."""
@@ -881,14 +958,22 @@ def test_scan_timeout_has_a_floor():
     assert structure._scan_timeout(500) == 500.0
 
 
-def test_parallel_can_be_disabled_by_env(tmp_path, monkeypatch):
-    """The escape hatch for a host where process creation misbehaves."""
-    monkeypatch.setenv("DATASHEETINDEX_PARALLEL", "0")
+@pytest.mark.parametrize("value", ["0", "false", "FALSE", "no", "off", " 0 "])
+def test_parallel_can_be_disabled_by_env(tmp_path, monkeypatch, value):
+    """The escape hatch for a host where process creation misbehaves.
 
-    def _explode(*args, **kwargs):
-        raise AssertionError("parallel scan attempted with DATASHEETINDEX_PARALLEL=0")
-
-    monkeypatch.setattr(structure, "_build_table_count_cache_parallel", _explode)
+    Recorded, never raised: enrich_with_table_counts catches Exception to fall
+    back, so an AssertionError from a stub is swallowed and the test passes
+    whatever the env check does. (Verified: neutering the check to `and True`
+    left the raising version green.) The assertion has to be on the record.
+    """
+    monkeypatch.setenv("DATASHEETINDEX_PARALLEL", value)
+    attempts: list[str] = []
+    monkeypatch.setattr(
+        structure,
+        "_build_table_count_cache_parallel",
+        lambda path, pages: attempts.append(path) or {},
+    )
 
     pages = 13
     pdf = tmp_path / "tables.pdf"
@@ -899,6 +984,32 @@ def test_parallel_can_be_disabled_by_env(tmp_path, monkeypatch):
         enrich_with_table_counts(nodes, doc, pdf_path=str(pdf))
     finally:
         doc.close()
+
+    assert attempts == []
+
+
+def test_parallel_runs_when_the_env_var_does_not_disable_it(tmp_path, monkeypatch):
+    """The other half of the guard: without it, the test above would pass on
+    code that simply never parallelises anything."""
+    monkeypatch.delenv("DATASHEETINDEX_PARALLEL", raising=False)
+    attempts: list[str] = []
+    monkeypatch.setattr(
+        structure,
+        "_build_table_count_cache_parallel",
+        lambda path, pages: attempts.append(path) or {},
+    )
+
+    pages = 13
+    pdf = tmp_path / "tables.pdf"
+    _write_table_pdf(pdf, pages=pages)
+    doc = pymupdf.open(str(pdf))
+    try:
+        nodes = build_tree([[1, "A", 1]], total_pages=pages)
+        enrich_with_table_counts(nodes, doc, pdf_path=str(pdf))
+    finally:
+        doc.close()
+
+    assert attempts == [str(pdf)]
 
 
 def test_sequential_counts_tables(tmp_path):
