@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import contextlib
 import json
 import logging
 import multiprocessing
@@ -30,6 +31,16 @@ logger = logging.getLogger(__name__)
 # worker costs real memory. Cap the fan-out so a large PDF on a many-core host
 # cannot spawn one process per page.
 _MAX_PARALLEL_WORKERS = 8
+
+# The delegating parent must outlast the child's own scan deadline, or it
+# always wins the race (its clock starts first, before the child has even
+# imported pymupdf) and kills a child that was about to report a usable
+# traceback. The margin covers process start plus that import.
+_HELPER_GRACE_SECONDS = 30.0
+
+# A killed process is reaped immediately; this only bounds the window in
+# which the kill has not landed yet, so the escape path is never a bare wait.
+_KILL_WAIT_SECONDS = 10.0
 
 _CGROUP_ROOT = Path("/sys/fs/cgroup")
 _PROC_SELF_CGROUP = Path("/proc/self/cgroup")
@@ -358,6 +369,44 @@ def _mp_context() -> BaseContext:
     )
 
 
+def _is_windows() -> bool:
+    """Whether this is a Windows host.
+
+    A function, not an inline ``sys.platform`` test, so a test can override the
+    platform for one module instead of lying to every library in the process
+    that reads ``sys.platform``.
+    """
+    return sys.platform == "win32"
+
+
+def _abandon_pool(pool: concurrent.futures.Executor) -> None:
+    """Drop a pool without waiting on it.
+
+    ``shutdown(wait=False)`` returns promptly, but the executor's manager
+    thread keeps joining its workers, and ``concurrent.futures`` joins *that*
+    thread from an ``atexit`` hook -- so a wedged worker still hangs the
+    process on the way out, merely later, which for a long-lived MCP server is
+    indistinguishable from the bug being fixed. ``kill_workers()`` (3.14+)
+    terminates them first; on 3.13, our floor, no such API exists and
+    ``shutdown`` is the best available.
+    """
+    kill_workers = getattr(pool, "kill_workers", None)
+    if kill_workers is not None:
+        kill_workers()
+        return
+    pool.shutdown(wait=False, cancel_futures=True)
+
+
+def _read_worker_stderr(err_path: str) -> str:
+    """Tail of the scan worker's stderr, for a failure message."""
+    try:
+        with open(err_path, "rb") as handle:
+            raw = handle.read()
+    except OSError:
+        return "(worker stderr unavailable)"
+    return raw.decode("utf-8", "replace").strip()[-2000:]
+
+
 def _scan_timeout(total_pages: int) -> float:
     """Deadline for a whole-document scan, in seconds.
 
@@ -393,7 +442,7 @@ def _build_table_count_cache_pool(pdf_path: str, total_pages: int) -> dict[int, 
         # Never wait on the way out. A wedged pool is precisely the case the
         # timeout exists to escape, and shutdown(wait=True) would block on it
         # forever -- turning a recoverable failure back into a hang.
-        pool.shutdown(wait=False, cancel_futures=True)
+        _abandon_pool(pool)
         raise
     pool.shutdown(wait=True)
     return cache
@@ -414,44 +463,78 @@ def _build_table_count_cache_helper(pdf_path: str, total_pages: int) -> dict[int
     """
     if not sys.executable:
         raise RuntimeError("no interpreter to launch the scan worker with")
+    if getattr(sys, "frozen", False):
+        # "-m" against a frozen host re-runs the application itself with our
+        # module name as argv, which for a frozen MCP server means starting a
+        # second server. Fail fast into the sequential fallback instead.
+        raise RuntimeError("cannot launch the scan worker from a frozen interpreter")
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    # ignore_cleanup_errors: on the kill path a worker may still hold a handle
+    # here, and a PermissionError raised during unwinding would mask the
+    # TimeoutExpired the caller actually needs to see.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         out_path = os.path.join(tmpdir, "table_counts.json")
-        process = subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "datasheetindex.core._scan_worker",
-                pdf_path,
-                str(total_pages),
-                out_path,
-            ],
-            stdin=subprocess.DEVNULL,
-            # Severing these is the whole point; do not "improve" them into
-            # PIPEs. Results come back through out_path instead.
-            stdout=subprocess.DEVNULL,
-            # CREATE_NO_WINDOW: the server usually has no console, and without
-            # this each scan flashes one. Absent off Windows, hence getattr.
-            stderr=subprocess.PIPE,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        try:
-            _, stderr = process.communicate(timeout=_scan_timeout(total_pages))
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.communicate()
-            raise
+        err_path = os.path.join(tmpdir, "scan_worker.err")
+
+        # stderr goes to a FILE, never a PIPE. The child's own pool workers
+        # inherit fd 2 (_subprocess_init redirects only 0 and 1, so worker
+        # tracebacks survive), which means they hold the write end. A PIPE
+        # would make communicate() wait for an EOF that kill() cannot deliver,
+        # because kill() reaches only the direct child -- reproducing the exact
+        # hang this module exists to remove.
+        with open(err_path, "wb") as err_handle:
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "datasheetindex.core._scan_worker",
+                    pdf_path,
+                    str(total_pages),
+                    out_path,
+                ],
+                stdin=subprocess.DEVNULL,
+                # Severing stdin/stdout is the whole point; do not "improve"
+                # either into a PIPE. Results come back through out_path.
+                stdout=subprocess.DEVNULL,
+                stderr=err_handle,
+                # CREATE_NO_WINDOW: the server usually has no console, and
+                # without this each scan flashes one. Absent off Windows.
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            try:
+                # wait(), not communicate(): it reaps only the direct child and
+                # is indifferent to grandchildren holding inherited handles.
+                # The grace margin lets the child hit its OWN deadline first and
+                # report a real traceback; without it the parent's clock, which
+                # starts earlier, always wins and every stall looks identical.
+                process.wait(timeout=_scan_timeout(total_pages) + _HELPER_GRACE_SECONDS)
+            except subprocess.TimeoutExpired:
+                # kill() signals only this child. Its pool workers are not ours
+                # to signal and may briefly outlive it; they are released by the
+                # parent's death, which is what strands them in the first place.
+                process.kill()
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    process.wait(timeout=_KILL_WAIT_SECONDS)
+                raise
 
         if process.returncode != 0:
-            detail = stderr.decode("utf-8", "replace").strip()
             raise RuntimeError(
-                f"scan worker exited {process.returncode}: {detail[-2000:]}"
+                f"scan worker exited {process.returncode}: "
+                f"{_read_worker_stderr(err_path)}"
             )
 
         with open(out_path, encoding="utf-8") as handle:
             counts = json.load(handle)
 
-    return {int(page): count for page, count in counts.items()}
+    cache = {int(page): count for page, count in counts.items()}
+    if len(cache) != total_pages:
+        # Downstream, a missing page is indistinguishable from a page with no
+        # tables: _apply_table_counts defaults it to 0. Raise so the sequential
+        # fallback runs, rather than shipping a wrong answer that looks valid.
+        raise RuntimeError(
+            f"scan worker returned {len(cache)} of {total_pages} page counts"
+        )
+    return cache
 
 
 def _build_table_count_cache_parallel(
@@ -463,7 +546,7 @@ def _build_table_count_cache_parallel(
     detached child. Everywhere else the in-process pool is proven and one
     process cheaper, so it stays.
     """
-    if sys.platform == "win32":
+    if _is_windows():
         return _build_table_count_cache_helper(pdf_path, total_pages)
     return _build_table_count_cache_pool(pdf_path, total_pages)
 

@@ -1,7 +1,10 @@
 """Tests for ToC tree building and enrichment."""
 
 import concurrent.futures
+import json
+import subprocess
 from pathlib import Path
+from typing import Any
 
 import pymupdf
 import pytest
@@ -527,17 +530,31 @@ class _FakePool:
     map_timeout: float | None = None
     shutdowns: list[dict] = []
     map_raises: BaseException | None = None
+    events: list[str] = []
 
     def __init__(self, **kwargs):
         _FakePool.kwargs = kwargs
 
     def map(self, fn, args, timeout=None):
+        """Returns a LAZY iterator, like the real executor.
+
+        Returning a materialised list would make the fake unable to reproduce
+        the bug it exists to guard: `pool.map` is lazy, and consuming it after
+        shutdown meant the pool was torn down before a single result was read.
+        """
         _FakePool.map_timeout = timeout
         if _FakePool.map_raises is not None:
             raise _FakePool.map_raises
-        return [(page_idx, 0) for _, page_idx in args]
+
+        def _lazy():
+            _FakePool.events.append("consumed")
+            for _, page_idx in args:
+                yield (page_idx, 0)
+
+        return _lazy()
 
     def shutdown(self, wait=True, cancel_futures=False):
+        _FakePool.events.append("shutdown")
         _FakePool.shutdowns.append({"wait": wait, "cancel_futures": cancel_futures})
 
 
@@ -547,6 +564,7 @@ def fake_pool(monkeypatch):
     _FakePool.map_timeout = None
     _FakePool.shutdowns = []
     _FakePool.map_raises = None
+    _FakePool.events = []
     monkeypatch.setattr(
         concurrent.futures, "ProcessPoolExecutor", _FakePool, raising=True
     )
@@ -703,9 +721,9 @@ def test_parallel_dispatches_by_platform(monkeypatch):
         lambda path, pages: calls.append("pool") or {},
     )
 
-    monkeypatch.setattr(structure.sys, "platform", "win32")
+    monkeypatch.setattr(structure, "_is_windows", lambda: True)
     _build_table_count_cache_parallel("doc.pdf", 20)
-    monkeypatch.setattr(structure.sys, "platform", "linux")
+    monkeypatch.setattr(structure, "_is_windows", lambda: False)
     _build_table_count_cache_parallel("doc.pdf", 20)
 
     assert calls == ["helper", "pool"]
@@ -732,6 +750,128 @@ def test_pool_failure_does_not_wait_on_shutdown(monkeypatch, fake_pool):
         _build_table_count_cache_pool("doc.pdf", 20)
 
     assert fake_pool.shutdowns == [{"wait": False, "cancel_futures": True}]
+
+
+def test_pool_consumes_the_map_before_shutting_down(monkeypatch, fake_pool):
+    """The original bug, pinned by ordering rather than by outcome.
+
+    pool.map is lazy: materialising it after the `with` block ran
+    shutdown(wait=True) before a single result had been read, so a stalled
+    worker blocked in shutdown instead of raising. Asserting only the returned
+    counts cannot catch a regression to that -- the order is the invariant.
+    """
+    monkeypatch.setattr(structure, "_available_cpus", lambda: 4)
+    _build_table_count_cache_pool("doc.pdf", 20)
+    assert fake_pool.events == ["consumed", "shutdown"]
+
+
+def _install_fake_popen(
+    monkeypatch, *, returncode=0, pages_written=None, timeout_first_wait=False
+):
+    """Drive the helper's failure branches without a real worker.
+
+    These paths (kill-on-timeout, non-zero exit, short result) only run when
+    something has already gone wrong, and they are where a hang fix is easiest
+    to get wrong -- so they need coverage that does not depend on being able to
+    wedge a real subprocess.
+    """
+    # Annotated: the values are heterogeneous, and an inferred union makes
+    # every use of them a type error.
+    state: dict[str, Any] = {"kills": 0, "waits": []}
+
+    class _Proc:
+        def __init__(self, cmd, **kwargs):
+            state["cmd"] = cmd
+            state["kwargs"] = kwargs
+            self.returncode = returncode
+            if pages_written is not None:
+                with open(cmd[-1], "w", encoding="utf-8") as handle:
+                    json.dump({str(i): 0 for i in range(pages_written)}, handle)
+
+        def wait(self, timeout=None):
+            state["waits"].append(timeout)
+            if timeout_first_wait and len(state["waits"]) == 1:
+                raise subprocess.TimeoutExpired(cmd="worker", timeout=timeout or 0)
+            return self.returncode
+
+        def kill(self):
+            state["kills"] += 1
+
+    monkeypatch.setattr(structure.subprocess, "Popen", _Proc)
+    return state
+
+
+def test_helper_never_pipes_worker_stderr(monkeypatch):
+    """stderr must be a file, never a PIPE.
+
+    The worker's own pool children inherit fd 2, so they hold the write end.
+    communicate() on a PIPE would then wait for an EOF that kill() cannot
+    deliver -- kill() reaches only the direct child -- which is precisely the
+    hang this module exists to remove. Verified reproducible before this guard.
+    """
+    state = _install_fake_popen(monkeypatch, pages_written=20)
+    structure._build_table_count_cache_helper("doc.pdf", 20)
+
+    assert state["kwargs"]["stderr"] is not subprocess.PIPE
+    assert hasattr(state["kwargs"]["stderr"], "write")
+    assert state["kwargs"]["stdin"] is subprocess.DEVNULL
+    assert state["kwargs"]["stdout"] is subprocess.DEVNULL
+
+
+def test_helper_bounds_every_wait_on_the_timeout_path(monkeypatch):
+    """A bare wait() after kill() would reintroduce the unbounded block."""
+    state = _install_fake_popen(monkeypatch, timeout_first_wait=True)
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        structure._build_table_count_cache_helper("doc.pdf", 20)
+
+    assert state["kills"] == 1
+    assert len(state["waits"]) == 2
+    assert all(timeout is not None for timeout in state["waits"])
+
+
+def test_helper_deadline_exceeds_the_workers_own(monkeypatch):
+    """The child must get to hit its own deadline first.
+
+    The parent's clock starts earlier (it spawns the child, which then imports
+    pymupdf), so without a margin the parent always wins the race and kills a
+    worker that was about to report a real traceback.
+    """
+    state = _install_fake_popen(monkeypatch, pages_written=20)
+    structure._build_table_count_cache_helper("doc.pdf", 20)
+
+    assert state["waits"][0] > structure._scan_timeout(20)
+
+
+def test_helper_raises_when_the_worker_fails(monkeypatch):
+    state = _install_fake_popen(monkeypatch, returncode=3)
+
+    with pytest.raises(RuntimeError, match="exited 3"):
+        structure._build_table_count_cache_helper("doc.pdf", 20)
+
+    assert state["kills"] == 0
+
+
+def test_helper_rejects_a_short_result(monkeypatch):
+    """A missing page is indistinguishable from a page with no tables.
+
+    _apply_table_counts defaults an absent page to 0, so a truncated result
+    would ship as a confident wrong answer. Raising lets the sequential
+    fallback produce a right one.
+    """
+    _install_fake_popen(monkeypatch, pages_written=17)
+
+    with pytest.raises(RuntimeError, match="17 of 20"):
+        structure._build_table_count_cache_helper("doc.pdf", 20)
+
+
+def test_helper_refuses_a_frozen_interpreter(monkeypatch):
+    """`-m` against a frozen host re-runs the app itself, which for a frozen
+    MCP server means starting a second server."""
+    monkeypatch.setattr(structure.sys, "frozen", True, raising=False)
+
+    with pytest.raises(RuntimeError, match="frozen"):
+        structure._build_table_count_cache_helper("doc.pdf", 20)
 
 
 def test_scan_timeout_has_a_floor():

@@ -157,6 +157,16 @@ def _is_http_url(value: str) -> bool:
 WSL_QUERY_TIMEOUT_SECONDS = 5
 
 
+def _is_windows() -> bool:
+    """Whether this is a Windows host.
+
+    A function, not an inline ``sys.platform`` test, so a test can override the
+    platform for one module instead of lying to every library in the process
+    that reads ``sys.platform``.
+    """
+    return sys.platform == "win32"
+
+
 def _wsl_distros() -> list[str]:
     """Names of the installed WSL distributions, or empty if none/unavailable."""
     try:
@@ -165,21 +175,36 @@ def _wsl_distros() -> list[str]:
             capture_output=True,
             timeout=WSL_QUERY_TIMEOUT_SECONDS,
             check=False,
+            # Same reason the scan worker gets it: this runs on a console-less
+            # MCP server, and without it every query flashes a window.
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (OSError, subprocess.SubprocessError):
+        # Logged, not silent: without this, a wedged WSL service and a host
+        # with no WSL at all produce the same empty result and the same
+        # unhelpful "no such file", with nothing to tell them apart.
+        logger.debug("WSL distribution query failed", exc_info=True)
         return []
     if completed.returncode != 0:
+        logger.debug("wsl.exe --list exited %d", completed.returncode)
         return []
 
-    # wsl.exe writes UTF-16LE. Decoding it as UTF-8 yields NUL-separated
-    # characters that still "look" fine in a log and silently match nothing.
+    # wsl.exe writes UTF-16LE by default, but UTF-8 when WSL_UTF8=1 is set
+    # (WSL 0.64+), and that setting is inherited by this child. UTF-8 output is
+    # almost always even-length, so decoding it as UTF-16 does NOT raise -- it
+    # silently yields mojibake with no line breaks, collapsing every distro
+    # into one junk name that matches nothing. Sniff on a NUL byte instead of
+    # trusting a decode error to catch it.
     raw = completed.stdout
-    try:
-        text = raw.decode("utf-16-le")
-    except UnicodeDecodeError:
-        text = raw.decode("utf-8", "replace")
+    text = raw.decode("utf-16-le" if b"\x00" in raw else "utf-8", "replace")
+
+    # A name carrying a separator would build a surprising UNC path. These are
+    # local machine config and only ever feed os.path.exists, so this is
+    # hygiene rather than a security boundary.
     return [
-        line.strip() for line in text.replace("\x00", "").splitlines() if line.strip()
+        name
+        for name in (line.strip() for line in text.splitlines())
+        if name and "\\" not in name and "/" not in name and name not in (".", "..")
     ]
 
 
@@ -225,8 +250,13 @@ def _resolve_local_path(path: str) -> str:
 
     Only consulted when the literal path does not resolve, so a real Windows
     path -- or any path on a POSIX host -- is never rewritten.
+
+    Scope: the *input* PDF only. ``output_dir`` is deliberately not translated;
+    a directory that does not exist yet cannot be probed with ``exists()``, and
+    the artifact paths returned to the agent would still be Windows paths it
+    cannot open. Running the server inside WSL is the fix for that half.
     """
-    if sys.platform != "win32" or not path.startswith("/") or os.path.exists(path):
+    if not _is_windows() or not path.startswith("/") or os.path.exists(path):
         return path
 
     for candidate in _windows_paths_for_posix(path):

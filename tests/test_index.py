@@ -769,7 +769,12 @@ def test_build_with_blank_output_dir_falls_through_to_resolver(monkeypatch, tmp_
 
 def test_resolve_local_path_is_a_noop_off_windows(monkeypatch):
     """A POSIX host must never rewrite a POSIX path."""
-    monkeypatch.setattr(index_module.sys, "platform", "linux")
+    monkeypatch.setattr(index_module, "_is_windows", lambda: False)
+
+    def _explode():
+        raise AssertionError("distros queried on a non-Windows host")
+
+    monkeypatch.setattr(index_module, "_wsl_distros", _explode)
     assert index_module._resolve_local_path("/home/u/ds.pdf") == "/home/u/ds.pdf"
 
 
@@ -778,7 +783,7 @@ def test_resolve_local_path_leaves_existing_paths_alone(tmp_path, monkeypatch):
     so a genuine Windows path can't be mangled into a UNC one."""
     pdf = tmp_path / "ds.pdf"
     pdf.write_bytes(b"%PDF-1.4")
-    monkeypatch.setattr(index_module.sys, "platform", "win32")
+    monkeypatch.setattr(index_module, "_is_windows", lambda: True)
 
     def _explode():
         raise AssertionError("distros queried for a path that already exists")
@@ -806,7 +811,7 @@ def test_windows_paths_uses_unc_for_distro_paths(monkeypatch):
 
 def test_resolve_local_path_picks_the_candidate_that_exists(monkeypatch):
     """With several distros installed, the one actually holding the file wins."""
-    monkeypatch.setattr(index_module.sys, "platform", "win32")
+    monkeypatch.setattr(index_module, "_is_windows", lambda: True)
     monkeypatch.setattr(index_module, "_wsl_distros", lambda: ["Ubuntu", "Debian"])
     found = "\\\\wsl.localhost\\Debian\\home\\y\\ds.pdf"
     monkeypatch.setattr(index_module.os.path, "exists", lambda p: p == found)
@@ -816,7 +821,7 @@ def test_resolve_local_path_picks_the_candidate_that_exists(monkeypatch):
 
 def test_resolve_local_path_returns_original_when_nothing_matches(monkeypatch):
     """The error the user sees must name the path they passed, not a rewrite."""
-    monkeypatch.setattr(index_module.sys, "platform", "win32")
+    monkeypatch.setattr(index_module, "_is_windows", lambda: True)
     monkeypatch.setattr(index_module, "_wsl_distros", lambda: ["Ubuntu"])
     monkeypatch.setattr(index_module.os.path, "exists", lambda p: False)
 
@@ -843,3 +848,46 @@ def test_wsl_distros_survives_missing_wsl(monkeypatch):
 
     monkeypatch.setattr(index_module.subprocess, "run", _raise)
     assert index_module._wsl_distros() == []
+
+
+def test_wsl_distros_decodes_utf8_when_wsl_utf8_is_set(monkeypatch):
+    """WSL 0.64+ emits UTF-8 when WSL_UTF8=1, and that output is even-length,
+    so decoding it as UTF-16 does NOT raise -- it silently yields one mojibake
+    name that matches nothing, disabling the feature with no error anywhere."""
+
+    class _Completed:
+        returncode = 0
+        stdout = b"Ubuntu\r\nDebian\r\n"
+
+    monkeypatch.setattr(index_module.subprocess, "run", lambda *a, **k: _Completed())
+    assert index_module._wsl_distros() == ["Ubuntu", "Debian"]
+
+
+def test_wsl_distros_ignores_names_that_would_build_odd_paths(monkeypatch):
+    class _Completed:
+        returncode = 0
+        stdout = "Ubuntu\n..\nbad\\name\n".encode("utf-16-le")
+
+    monkeypatch.setattr(index_module.subprocess, "run", lambda *a, **k: _Completed())
+    assert index_module._wsl_distros() == ["Ubuntu"]
+
+
+def test_wsl_distros_returns_empty_on_nonzero_exit(monkeypatch):
+    class _Completed:
+        returncode = 1
+        stdout = b""
+
+    monkeypatch.setattr(index_module.subprocess, "run", lambda *a, **k: _Completed())
+    assert index_module._wsl_distros() == []
+
+
+def test_windows_paths_handles_degenerate_inputs(monkeypatch):
+    """A bare /mnt/c names the mount itself, with nothing after the drive, so
+    it has no drive-letter spelling -- only the UNC one."""
+    monkeypatch.setattr(index_module, "_wsl_distros", lambda: ["Ubuntu"])
+
+    assert index_module._windows_paths_for_posix("") == []
+    assert index_module._windows_paths_for_posix("/") == []
+    assert index_module._windows_paths_for_posix("/mnt/c") == [
+        "\\\\wsl.localhost\\Ubuntu\\mnt\\c"
+    ]
