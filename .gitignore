@@ -45,3 +45,6 @@ output_*/
 *.png
 *.jpg
 *.jpeg
+
+# Datasheets used as local demo/test input
+*.pdf
