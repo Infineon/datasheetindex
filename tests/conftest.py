@@ -56,6 +56,42 @@ class FakeResponse:
         return False
 
 
+def sdk_envelope_to_content(envelope: dict) -> list[dict]:
+    """Convert a neutral envelope the way ``claude-agent-sdk`` really does.
+
+    A deliberate, key-for-key duplicate of the conversion inside
+    ``claude_agent_sdk.create_sdk_mcp_server``'s ``call_tool`` -- notably that it
+    reads ``item["mimeType"]`` (camelCase) for images while reading
+    ``result["is_error"]`` (snake_case) for the envelope. The SDK's format is
+    mixed-case; matching it is the contract, not a style choice.
+
+    This exists because the SDK tests used to stub the conversion out entirely:
+    the fake ``create_sdk_mcp_server`` accepted the envelope and never read a
+    single key from it, so the envelope was free to spell a key any way it liked
+    and every SDK test still passed. That blind spot is how #13 -- inspect_page
+    raising ``KeyError('mimeType')`` on every call through the SDK surface --
+    survived for two months.
+
+    Keep the subscripts as subscripts. A ``KeyError`` here is the entire point;
+    switching any of them to ``.get()`` restores the blind spot this closes.
+    ``tests/test_sdk_integration.py`` pins this mirror against the real SDK.
+    """
+    content: list[dict] = []
+    for item in envelope.get("content", []):
+        item_type = item.get("type")
+        if item_type == "text":
+            content.append({"type": "text", "text": item["text"]})
+        elif item_type == "image":
+            content.append(
+                {
+                    "type": "image",
+                    "data": item["data"],
+                    "mimeType": item["mimeType"],
+                }
+            )
+    return content
+
+
 _LLM_ENV_VARS = (
     "LITELLM_BASE_URL",
     "LITELLM_MASTER_KEY",

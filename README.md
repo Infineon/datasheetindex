@@ -140,6 +140,17 @@ for d in tool_defs:
     )
 ```
 
+Text blocks are `{"type": "text", "text": ...}`. `inspect_page` is the only tool
+returning an image block, and it spells the media type twice on purpose --
+`{"type": "image", "data": ..., "mime_type": "image/png", "mimeType": "image/png"}`
+-- so hosts reading either convention work unchanged. Read whichever you prefer;
+both always carry the same value.
+
+When a handler raises, the envelope is `is_error: True` with a single text block
+reading `"TypeName: message"` (e.g. `"ValueError: Page 9999 out of range..."`).
+Messages the handler writes itself, like `"pdf_source is required"`, are not
+prefixed.
+
 `create_datasheet_tools_server()` is a thin adapter over this factory -- it wraps
 each def with the SDK `@tool` decorator -- so the two surfaces expose identical
 tool names, descriptions, and schemas.

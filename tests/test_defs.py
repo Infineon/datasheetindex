@@ -128,6 +128,79 @@ def test_build_then_query_end_to_end(tmp_path):
     assert isinstance(table_result["is_error"], bool)
 
 
+def test_inspect_page_image_block_carries_both_mime_spellings(tmp_path):
+    """The image block must satisfy snake_case and camelCase readers alike.
+
+    The neutral envelope is the Claude Agent SDK's envelope, and that format is
+    mixed-case by construction: the SDK reads ``is_error`` (snake) but
+    ``item["mimeType"]`` (camel). Emitting only ``mime_type`` made every
+    inspect_page call through ``create_datasheet_tools_server`` raise
+    ``KeyError('mimeType')`` (#13). Emitting only ``mimeType`` would break the
+    other direction -- ``mcp_server._envelope_to_content`` and any host already
+    reading the documented snake_case key. Both spellings, same value.
+    """
+    pdf_path = tmp_path / "test.pdf"
+    _make_pdf(pdf_path)
+    defs = _defs_by_name()
+    _run(
+        defs["build_datasheet"].handler,
+        {"pdf_source": str(pdf_path), "output_dir": str(tmp_path / "out")},
+    )
+
+    result = _run(defs["inspect_page"].handler, {"page": 1})
+
+    assert result["is_error"] is False
+    block = result["content"][0]
+    assert block["type"] == "image"
+    assert block["mime_type"] == "image/png"
+    assert block["mimeType"] == "image/png"
+    assert block["data"]
+
+
+def test_error_envelopes_name_the_exception_type(tmp_path):
+    """A raised exception must be reported as 'TypeName: message', not bare.
+
+    ``str(KeyError('end_page'))`` is just ``"'end_page'"``. When that is the
+    entire text of a tool result it reads like truncated output rather than a
+    failure, which is what made #13 take two months to trace. Every handler
+    wraps its body in a blanket ``except Exception``, so any exception whose
+    message is just its argument -- KeyError, IndexError -- degrades this way.
+    """
+    pdf_path = tmp_path / "test.pdf"
+    _make_pdf(pdf_path)
+    defs = _defs_by_name()
+    _run(
+        defs["build_datasheet"].handler,
+        {"pdf_source": str(pdf_path), "output_dir": str(tmp_path / "out")},
+    )
+
+    # A required argument the model forgot to send: raises KeyError inside the
+    # handler and is caught by its blanket except.
+    missing_arg = _run(defs["get_section_text"].handler, {"start_page": 1})
+    assert missing_arg["is_error"] is True
+    assert missing_arg["content"][0]["text"] == "KeyError: 'end_page'"
+
+    # The unbound-document guard raises RuntimeError with a real message; the
+    # type prefix must not swallow it.
+    unbound = _run(_defs_by_name()["search_text"].handler, {"query": "x"})
+    assert unbound["is_error"] is True
+    assert unbound["content"][0]["text"].startswith("RuntimeError: ")
+    assert "No datasheet loaded" in unbound["content"][0]["text"]
+
+
+def test_validation_errors_are_not_prefixed():
+    """Messages the handler writes itself are already legible -- leave them alone.
+
+    Only *exceptions* get a type prefix. ``_err`` is still the plain path, so a
+    hand-written validation message does not become 'str: pdf_source is required'.
+    """
+    defs = _defs_by_name()
+    result = _run(defs["build_datasheet"].handler, {})
+
+    assert result["is_error"] is True
+    assert result["content"][0]["text"] == "pdf_source is required"
+
+
 def test_build_datasheet_rebinds_on_new_source(tmp_path):
     """A second build with a different source switches the active document."""
     pdf_a = tmp_path / "a.pdf"

@@ -121,6 +121,19 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
     def _err(msg: str) -> dict[str, Any]:
         return {"content": [{"type": "text", "text": msg}], "is_error": True}
 
+    def _err_exc(exc: BaseException) -> dict[str, Any]:
+        """Report a caught exception as ``TypeName: message``.
+
+        ``str(exc)`` alone is the worst case for diagnosability on the very
+        exceptions a blanket ``except`` is most likely to catch: ``KeyError``,
+        ``IndexError`` and friends stringify to their bare argument, so a tool
+        result whose entire text is ``'end_page'`` reads like truncated output
+        rather than a failure. Naming the type makes the failure mode legible at
+        a glance. Hand-written validation messages keep using ``_err``, so
+        "pdf_source is required" does not acquire a useless prefix.
+        """
+        return _err(f"{type(exc).__name__}: {exc}")
+
     def _require() -> DatasheetTools:
         if tools_instance is None:
             raise RuntimeError(
@@ -176,7 +189,7 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                 _safe_close(previous)
             return _ok(tools_instance.get_artifact_manifest())
         except Exception as exc:
-            return _err(str(exc))
+            return _err_exc(exc)
 
     async def get_section_text(args: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -189,7 +202,7 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
             }
             return _ok(result)
         except Exception as exc:
-            return _err(str(exc))
+            return _err_exc(exc)
 
     async def search_text(args: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -201,7 +214,7 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
             )
             return _ok({"query": args["query"], "results": results})
         except Exception as exc:
-            return _err(str(exc))
+            return _err_exc(exc)
 
     async def inspect_page(args: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -216,13 +229,26 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                     {
                         "type": "image",
                         "data": blocks[0]["data"],
+                        # Both spellings, same value, deliberately. This envelope
+                        # is the Claude Agent SDK's envelope, and that format is
+                        # mixed-case by construction: the SDK reads "is_error"
+                        # (snake) but item["mimeType"] (camel). Emitting only
+                        # "mime_type" made every inspect_page call through
+                        # create_datasheet_tools_server raise KeyError('mimeType')
+                        # inside the SDK's converter (#13). Emitting only
+                        # "mimeType" would break the other direction:
+                        # mcp_server._envelope_to_content and any host already
+                        # reading the documented snake_case key. Do not "tidy"
+                        # this down to one key -- there is no single spelling
+                        # that satisfies both, which is why both are here.
                         "mime_type": blocks[0]["mime_type"],
+                        "mimeType": blocks[0]["mime_type"],
                     }
                 ],
                 "is_error": False,
             }
         except Exception as exc:
-            return _err(str(exc))
+            return _err_exc(exc)
 
     async def locate_text(args: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -233,7 +259,7 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
             )
             return _ok({"query": args["query"], "results": results})
         except Exception as exc:
-            return _err(str(exc))
+            return _err_exc(exc)
 
     async def extract_table_markdown(args: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -243,7 +269,7 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
             return _ok({"page": args["page"], "markdown": md})
         except Exception as exc:
             # Includes the ImportError when the optional pymupdf4llm is missing.
-            return _err(str(exc))
+            return _err_exc(exc)
 
     def _close() -> None:
         # End-of-session cleanup: release the bound document (idempotent).

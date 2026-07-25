@@ -307,8 +307,13 @@ def inspect_page(
                 default to "medium" to halve cost on long loops.
 
     Returns:
-        Content block list for the Claude Agent SDK:
+        Library-internal content block list:
         [{"type": "image", "data": "<base64 PNG>", "mime_type": "image/png"}]
+
+        The neutral tool envelope is NOT this block verbatim -- the
+        inspect_page handler in tools/defs.py re-emits the media type
+        under both "mime_type" and "mimeType". See "The image block
+        carries two media-type keys" below.
     """
 ```
 
@@ -579,6 +584,46 @@ any one agent framework:
 `build_datasheet` returns the enriched ToC manifest; `search_text` accepts a
 single pattern or a list and tags each hit with its section breadcrumb;
 `get_section_text` returns a page range prefixed with a position header.
+
+#### The image block carries two media-type keys
+
+`inspect_page` is the only tool returning a non-text block, and its envelope
+spells the media type **twice**:
+
+```python
+{"type": "image", "data": "<base64 PNG>",
+ "mime_type": "image/png", "mimeType": "image/png"}
+```
+
+This is deliberate and must not be tidied down to one key. The envelope is the
+Claude Agent SDK's envelope format, and that format is mixed-case *by
+construction*: the SDK reads `is_error` (snake_case) for the result but
+`item["mimeType"]` (camelCase) for an image block, from the same dict. So there
+is no single spelling that satisfies every reader:
+
+- Emitting only `mime_type` is what shipped through 0.21.0. Every `inspect_page`
+  call through `create_datasheet_tools_server()` raised `KeyError('mimeType')`
+  inside the SDK's own converter — see the gotcha in issue #13.
+- Emitting only `mimeType` breaks the other direction:
+  `mcp_server._envelope_to_content` and any host already reading the documented
+  snake_case key.
+
+Note the *library primitive* `tools/vision.py:inspect_page` still returns
+`mime_type` alone; the dual key is added by the handler in `tools/defs.py` when
+it builds the envelope. `DatasheetTools.inspect_page` returns the primitive's
+block, not the envelope.
+
+**Testing.** `create_datasheet_tools_server` is only as correct as the converter
+it feeds, and the suite used to stub that converter out entirely — the fake
+`create_sdk_mcp_server` accepted the envelope and never read a key from it, so
+the envelope could spell a key any way it liked and every SDK test still passed.
+That is how #13 survived two months in production. Two layers now cover it:
+`tests/conftest.py:sdk_envelope_to_content` mirrors the real converter key for
+key and runs in the default lane, and `tests/test_sdk_integration.py` runs the
+genuine SDK and pins the mirror against it. The latter needs the optional `sdk`
+dependency group (`uv sync --group sdk`) and skips without it — it is not in
+`dev` because the wheel unpacks to ~263 MB, almost all of it a bundled `claude`
+CLI binary the tests never invoke.
 
 Per-session state lives in the `create_datasheet_tool_defs()` closure: the
 current `DatasheetTools` is bound (and rebound) by the `build_datasheet` handler

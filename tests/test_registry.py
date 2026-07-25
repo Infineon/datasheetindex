@@ -242,8 +242,19 @@ def test_datasheet_tools_lazy_doc(tmp_path):
     assert tools._doc is None
 
 
-def test_create_server_raises_without_sdk():
-    """create_datasheet_tools_server should raise ImportError without SDK."""
+def test_create_server_raises_without_sdk(monkeypatch):
+    """create_datasheet_tools_server should raise ImportError without SDK.
+
+    Force the import to fail rather than relying on claude-agent-sdk being
+    absent from the environment. That precondition held implicitly until the
+    optional `sdk` group was added, at which point this test asserted the
+    library's behaviour in one lane and the environment's in the other -- it
+    passed under a plain `uv sync` and failed under `uv sync --group sdk`,
+    despite nothing about the code under test having changed. A None entry in
+    sys.modules makes `import claude_agent_sdk` raise ImportError either way.
+    """
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
+
     with pytest.raises(ImportError, match="claude-agent-sdk"):
         create_datasheet_tools_server()
 
@@ -726,3 +737,86 @@ def test_sdk_server_reports_installed_version(monkeypatch):
 
     assert server.version == package_version()
     assert server.version != "1.0.0"
+
+
+def test_sdk_content_conversion_survives_every_tool(monkeypatch, tmp_path):
+    """Drive each tool's envelope through the SDK's real conversion rules.
+
+    The other fakes in this file accept the envelope and never read a key out of
+    it, so they cannot see a key-name mismatch between what a handler emits and
+    what the SDK reads. That is precisely the blind spot #13 lived in: for two
+    months inspect_page raised KeyError('mimeType') inside the SDK's converter
+    on every call, and this file stayed green.
+
+    `sdk_envelope_to_content` mirrors that converter key for key (see its
+    docstring); tests/test_sdk_integration.py pins the mirror against the real
+    SDK when the optional 'sdk' group is installed.
+    """
+    import asyncio
+
+    from tests.conftest import sdk_envelope_to_content
+
+    pdf_path = tmp_path / "test.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page()
+    writer = pymupdf.TextWriter(page.rect)
+    writer.append((72, 72), "Supply voltage 4.5V to 5.5V")
+    writer.write_text(page)
+    doc.save(str(pdf_path))
+    doc.close()
+
+    def fake_tool(name, description, params):
+        def decorator(func):
+            func._tool_name = name
+            return func
+
+        return decorator
+
+    def fake_create_sdk_mcp_server(name, version, tools):
+        return types.SimpleNamespace(
+            name=name, version=version, tools={t._tool_name: t for t in tools}
+        )
+
+    monkeypatch.setitem(
+        sys.modules,
+        "claude_agent_sdk",
+        types.SimpleNamespace(
+            tool=fake_tool, create_sdk_mcp_server=fake_create_sdk_mcp_server
+        ),
+    )
+
+    server = create_datasheet_tools_server()
+
+    def call(name, args):
+        # Convert exactly as the SDK does -- a mismatched key raises KeyError
+        # here rather than silently passing.
+        envelope = asyncio.run(server.tools[name](args))
+        return envelope, sdk_envelope_to_content(envelope)
+
+    build_envelope, build_content = call(
+        "build_datasheet",
+        {"pdf_source": str(pdf_path), "output_dir": str(tmp_path / "out")},
+    )
+    assert build_envelope["is_error"] is False
+    assert build_content[0]["type"] == "text"
+
+    image_envelope, image_content = call("inspect_page", {"page": 1})
+    assert image_envelope["is_error"] is False
+    assert image_content[0]["type"] == "image"
+    assert image_content[0]["mimeType"] == "image/png"
+    assert image_content[0]["data"]
+
+    # Error envelopes convert too -- they are text blocks, and a handler that
+    # raised must still produce something the SDK can render.
+    error_envelope, error_content = call("get_section_text", {"start_page": 1})
+    assert error_envelope["is_error"] is True
+    assert error_content[0]["text"] == "KeyError: 'end_page'"
+
+    for name, args in (
+        ("search_text", {"query": "voltage"}),
+        ("locate_text", {"query": "Supply", "page": 1}),
+        ("extract_table_markdown", {"page": 1}),
+    ):
+        envelope, content = call(name, args)
+        assert isinstance(envelope["is_error"], bool)
+        assert content and content[0]["type"] == "text"
