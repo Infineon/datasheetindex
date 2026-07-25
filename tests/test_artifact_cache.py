@@ -17,6 +17,7 @@ from datasheetindex.core.artifact_cache import (
     is_editable_install,
     read_sidecar,
     remove_sidecar,
+    reuse_blocker,
     sha256_file,
     sha256_text,
     sidecar_path,
@@ -329,3 +330,141 @@ def test_remove_sidecar_deletes(tmp_path):
     remove_sidecar(path)
 
     assert not path.exists()
+
+
+@pytest.fixture
+def source_file(tmp_path):
+    """A stand-in source; this module never needs a real PDF."""
+    path = tmp_path / "ds.pdf"
+    path.write_bytes(b"%PDF-1.7 fake source bytes")
+    return path
+
+
+def matching_record(source_file, **overrides) -> ArtifactRecord:
+    return make_record(
+        source_sha256=sha256_file(source_file),
+        source_size=source_file.stat().st_size,
+        **overrides,
+    )
+
+
+def test_reuse_blocker_returns_none_when_everything_matches(source_file):
+    record = matching_record(source_file)
+
+    blocker = reuse_blocker(
+        record,
+        source_path=source_file,
+        build_options=record.build_options,
+        running_version="0.24.0",
+    )
+
+    assert blocker is None
+
+
+def test_reuse_blocker_rejects_a_different_version(source_file):
+    record = matching_record(source_file)
+
+    blocker = reuse_blocker(
+        record,
+        source_path=source_file,
+        build_options=record.build_options,
+        running_version="0.25.0",
+    )
+
+    assert blocker == "version_changed"
+
+
+def test_reuse_blocker_rejects_changed_source_bytes(source_file):
+    record = matching_record(source_file)
+    source_file.write_bytes(b"%PDF-1.7 different bytes here")
+
+    blocker = reuse_blocker(
+        record,
+        source_path=source_file,
+        build_options=record.build_options,
+        running_version="0.24.0",
+    )
+
+    assert blocker in {"source_size_changed", "source_content_changed"}
+
+
+def test_reuse_blocker_detects_a_same_size_source_edit(source_file):
+    """The size pre-check must not be the only source check."""
+    record = matching_record(source_file)
+    original = source_file.read_bytes()
+    source_file.write_bytes(b"X" + original[1:])
+
+    blocker = reuse_blocker(
+        record,
+        source_path=source_file,
+        build_options=record.build_options,
+        running_version="0.24.0",
+    )
+
+    assert blocker == "source_content_changed"
+
+
+def test_reuse_blocker_rejects_a_missing_source(source_file):
+    record = matching_record(source_file)
+    source_file.unlink()
+
+    blocker = reuse_blocker(
+        record,
+        source_path=source_file,
+        build_options=record.build_options,
+        running_version="0.24.0",
+    )
+
+    assert blocker == "source_missing"
+
+
+def test_reuse_blocker_rejects_changed_build_options(source_file):
+    record = matching_record(source_file)
+    changed = dict(record.build_options)
+    changed["include_summaries"] = True
+
+    blocker = reuse_blocker(
+        record,
+        source_path=source_file,
+        build_options=changed,
+        running_version="0.24.0",
+    )
+
+    assert blocker == "build_options_changed"
+
+
+def test_reuse_blocker_rejects_incomplete_enrichment(source_file):
+    """A degraded artifact must never be pinned in place."""
+    record = matching_record(
+        source_file,
+        llm_enrichment_incomplete=True,
+        llm_enrichment_notes=("toc_fallback_raised",),
+    )
+
+    blocker = reuse_blocker(
+        record,
+        source_path=source_file,
+        build_options=record.build_options,
+        running_version="0.24.0",
+    )
+
+    assert blocker == "llm_enrichment_incomplete"
+
+
+def test_reuse_blocker_checks_the_cheap_fields_before_hashing(source_file, monkeypatch):
+    """A version mismatch must not pay for a 2.6 MB hash."""
+
+    def unexpected(_path):
+        raise AssertionError("hashed the source despite a version mismatch")
+
+    monkeypatch.setattr("datasheetindex.core.artifact_cache.sha256_file", unexpected)
+    record = matching_record(source_file)
+
+    blocker = reuse_blocker(
+        record,
+        source_path=source_file,
+        build_options=record.build_options,
+        running_version="9.9.9",
+    )
+
+    assert blocker == "version_changed"

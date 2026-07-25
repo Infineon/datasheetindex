@@ -199,3 +199,38 @@ def remove_sidecar(path: Path) -> None:
         path.unlink(missing_ok=True)
     except OSError:
         logger.debug("Could not remove build sidecar at %s", path)
+
+
+def reuse_blocker(
+    record: ArtifactRecord,
+    *,
+    source_path: str | Path,
+    build_options: dict[str, object],
+    running_version: str,
+) -> str | None:
+    """Return why ``record`` cannot be reused, or None when it can.
+
+    Ordered cheapest-first: the version and the recorded flags cost nothing, the
+    source size is one stat, and only then is the source hashed.
+
+    Artifact *content* is deliberately not checked here -- the caller hashes the
+    bytes it actually read, which is what closes the mixed-generation window
+    rather than narrowing it. Editability is not checked here either: it is a
+    property of the process, not of a record, so the caller short-circuits on it
+    first.
+    """
+    if record.datasheetindex_version != running_version:
+        return "version_changed"
+    if record.llm_enrichment_incomplete:
+        return "llm_enrichment_incomplete"
+    if dict(record.build_options) != dict(build_options):
+        return "build_options_changed"
+    try:
+        source_size = Path(source_path).stat().st_size
+    except OSError:
+        return "source_missing"
+    if source_size != record.source_size:
+        return "source_size_changed"
+    if sha256_file(source_path) != record.source_sha256:
+        return "source_content_changed"
+    return None
