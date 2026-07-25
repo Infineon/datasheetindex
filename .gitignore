@@ -48,3 +48,7 @@ output_*/
 
 # Datasheets used as local demo/test input
 *.pdf
+
+# Subagent-driven-development scratch (ledger, briefs, review packages).
+# Also keeps hatchling from sweeping it into the sdist, as it did on 0.21.0.
+.superpowers/
