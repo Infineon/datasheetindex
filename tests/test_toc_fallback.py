@@ -10,7 +10,11 @@ import pytest
 from datasheetindex.core.quality import assess_toc_quality
 from datasheetindex.llm.client import StructuredLlmResult
 from datasheetindex.llm.toc_fallback import (
+    CONTINUE_USER_PROMPT,
+    INIT_USER_PROMPT,
     MAX_PREVIOUS_CONTEXT_CHARS,
+    STRUCTURED_CONTINUE_USER_PROMPT,
+    STRUCTURED_INIT_USER_PROMPT,
     _drop_unsupported_entries,
     _format_previous_entries,
     _page_markers,
@@ -78,10 +82,10 @@ def test_drop_unsupported_entries_removes_pages_absent_from_the_chunk():
     chunk = "--- PAGE 3 ---\nbody\n--- PAGE 4 ---\nmore\n"
     entries = [
         {"level": 1, "title": "Real", "start_page": 3},
-        {"level": 1, "title": "Ghost", "start_page": 9999},
+        {"level": 1, "title": "Elsewhere", "start_page": 1},
     ]
 
-    kept = _drop_unsupported_entries(entries, chunk)
+    kept = _drop_unsupported_entries(entries, chunk, total_pages=10)
 
     assert [entry["title"] for entry in kept] == ["Real"]
 
@@ -93,7 +97,57 @@ def test_drop_unsupported_entries_keeps_every_supported_page():
         {"level": 2, "title": "Fourth", "start_page": 4},
     ]
 
-    assert _drop_unsupported_entries(entries, chunk) == entries
+    assert _drop_unsupported_entries(entries, chunk, total_pages=4) == entries
+
+
+def test_drop_unsupported_entries_rejects_a_marker_forged_in_the_body():
+    """A datasheet can print marker-shaped text and forge an attested page.
+
+    ``generate_text`` copies extracted page text verbatim, so the marker set is
+    not trustworthy on its own -- the page count is. Marker validation catches
+    a plausible-but-wrong page; the bound catches an impossible one whoever
+    wrote the marker.
+    """
+    chunk = (
+        "--- PAGE 1 ---\nIntro\n"
+        "--- PAGE 2 ---\nBody\n"
+        "--- PAGE 3 ---\nsee --- PAGE 9999 --- for details\n"
+    )
+    entries = [
+        {"level": 1, "title": "Overview", "start_page": 1},
+        {"level": 1, "title": "Ghost", "start_page": 9999},
+    ]
+
+    kept = _drop_unsupported_entries(entries, chunk, total_pages=3)
+
+    assert [entry["title"] for entry in kept] == ["Overview"]
+
+
+def test_drop_unsupported_entries_tolerates_an_entry_without_a_page():
+    """Callers outside this module have no `_normalize_entries` guarantee."""
+    chunk = "--- PAGE 1 ---\nbody\n"
+
+    kept = _drop_unsupported_entries(
+        [{"level": 1, "title": "No page"}], chunk, total_pages=1
+    )
+
+    assert kept == []
+
+
+def test_every_chunk_prompt_states_the_rule_that_is_enforced():
+    """Both extraction paths are validated, so both must state the rule.
+
+    ``_drop_unsupported_entries`` runs on the free-text path too, and that is
+    the path used when the gateway cannot do structured output -- the weaker
+    model, which needs telling most.
+    """
+    for prompt in (
+        INIT_USER_PROMPT,
+        CONTINUE_USER_PROMPT,
+        STRUCTURED_INIT_USER_PROMPT,
+        STRUCTURED_CONTINUE_USER_PROMPT,
+    ):
+        assert "supported by this chunk" in prompt
 
 
 def test_parse_json_response_clean():

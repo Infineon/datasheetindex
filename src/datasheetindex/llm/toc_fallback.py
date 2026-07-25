@@ -45,6 +45,8 @@ INIT_USER_PROMPT = (
     "Analyze this datasheet text and identify its hierarchical section "
     "structure. The text contains --- PAGE N --- markers indicating page "
     "boundaries.\n\n"
+    "Return only section entries whose `start_page` is supported by this "
+    "chunk.\n\n"
     "Return ONLY a JSON array, no other text:\n"
     '[{{"level": 1, "title": "Section Name", "start_page": 1}}, ...]\n\n'
     "Text:\n{text}"
@@ -53,6 +55,8 @@ INIT_USER_PROMPT = (
 CONTINUE_USER_PROMPT = (
     "Continue extracting the section structure from the next part of the "
     "datasheet. Here is the structure found so far:\n{previous}\n\n"
+    "Return only section entries whose `start_page` is supported by this "
+    "chunk.\n\n"
     "Return ONLY the NEW sections as a JSON array (do not repeat previous "
     "sections):\n"
     '[{{"level": 1, "title": "Section Name", "start_page": 10}}, ...]\n\n'
@@ -80,7 +84,8 @@ STRUCTURED_CONTINUE_USER_PROMPT = (
     "hierarchical section structure. The text contains --- PAGE N --- markers "
     "indicating page boundaries.\n\n"
     "Sections already captured from earlier chunks:\n{previous}\n\n"
-    "Return only NEW section entries from this chunk.\n\n"
+    "Return only NEW section entries from this chunk, and only those whose "
+    "`start_page` is supported by this chunk.\n\n"
     "Text:\n{text}"
 )
 
@@ -124,18 +129,27 @@ def generate_toc_from_text(
 
     structured_llm = get_structured_output_client(llm_callable)
     if structured_llm is not None:
-        all_entries = _collect_entries(chunks, _structured_extractor(structured_llm))
+        all_entries = _collect_entries(
+            chunks, _structured_extractor(structured_llm), total_pages
+        )
         if not all_entries:
             # The structured path yielded nothing at all: the model or gateway
             # may not honour ``text.format=json_schema``. Retry the whole
             # document with the free-text prompt rather than give up on a ToC.
+            # Page validation can also empty the list, so a model that
+            # hallucinates every page costs a second pass over the document.
+            # Accepted: the end state is the same (a thin candidate that
+            # ``_accept_llm_toc_candidate`` rejects), and the alternative is
+            # failing to retry a gateway that genuinely lacks schema support.
             logger.warning(
                 "Structured ToC extraction yielded no entries; "
                 "retrying with the free-text prompt"
             )
 
     if not all_entries:
-        all_entries = _collect_entries(chunks, _legacy_extractor(llm_callable))
+        all_entries = _collect_entries(
+            chunks, _legacy_extractor(llm_callable), total_pages
+        )
 
     # Convert flat entries to TocNode tree via the shared builder
     raw_toc = [[e["level"], e["title"], e["start_page"]] for e in all_entries]
@@ -186,7 +200,7 @@ def _structured_extractor(llm_callable: StructuredLlmCallable) -> _ChunkExtracto
 
 
 def _collect_entries(
-    chunks: list[str], extractor: _ChunkExtractor
+    chunks: list[str], extractor: _ChunkExtractor, total_pages: int
 ) -> list[dict[str, int | str]]:
     """Run one extractor over every chunk, tolerating per-chunk failures.
 
@@ -227,7 +241,7 @@ def _collect_entries(
                 return []
             continue
 
-        entries = _drop_unsupported_entries(entries, chunk)
+        entries = _drop_unsupported_entries(entries, chunk, total_pages)
         all_entries.extend(_dedupe_entries(all_entries, entries))
 
     return all_entries
@@ -236,7 +250,9 @@ def _collect_entries(
 def _split_into_chunks(text: str, max_chars: int) -> list[str]:
     """Split text into chunks on ``--- PAGE N ---`` boundaries.
 
-    Each chunk stays under ``max_chars`` while respecting page boundaries.
+    ``max_chars`` is a target, not a guarantee: splits fall only on page
+    boundaries, so a single page larger than ``max_chars`` yields an oversized
+    chunk, and the repeated marker below adds its own length on top.
     """
     parts = _PAGE_MARKER_RE.split(text)
 
@@ -271,8 +287,10 @@ def _page_markers(text: str) -> set[int]:
     return {int(n) for n in _PAGE_NUMBER_RE.findall(text)}
 
 
-def _drop_unsupported_entries(entries: list[dict], chunk: str) -> list[dict]:
-    """Discard entries whose ``start_page`` the chunk cannot attest.
+def _drop_unsupported_entries(
+    entries: list[dict], chunk: str, total_pages: int
+) -> list[dict]:
+    """Discard entries whose ``start_page`` the document cannot support.
 
     The prompt asks the model for pages supported by the chunk it was given;
     this enforces it. A page outside the chunk's markers is a fabrication, and
@@ -280,28 +298,60 @@ def _drop_unsupported_entries(entries: list[dict], chunk: str) -> list[dict]:
     next sibling's start, so one bad page stretches the section before it
     across the rest of the document.
 
+    Two checks, because they catch different things. The markers catch a
+    plausible-but-wrong page. ``total_pages`` catches an impossible one *no
+    matter who wrote the marker* -- ``generate_text`` copies extracted page
+    text verbatim, so a datasheet that prints "--- PAGE 9999 ---" in its body
+    forges a marker this function would otherwise treat as attested. It also
+    bounds the page range downstream: ``assess_toc_quality`` and
+    ``_apply_table_counts`` both walk ``range(start_page, end_page + 1)``.
+
     Dropped rather than clamped -- a wrong page that looks plausible is worse
     than a missing section, which ``index._accept_llm_toc_candidate`` can still
     weigh when it decides whether to take the candidate at all.
+
+    Entries without a usable integer ``start_page`` are dropped too. Callers in
+    this module have run ``_normalize_entries`` first, but that is a
+    precondition this function does not require.
     """
     supported = _page_markers(chunk)
-    kept = [entry for entry in entries if entry["start_page"] in supported]
+    kept = [
+        entry
+        for entry in entries
+        if isinstance(entry.get("start_page"), int)
+        and entry["start_page"] in supported
+        and 1 <= entry["start_page"] <= total_pages
+    ]
 
-    dropped = len(entries) - len(kept)
-    if dropped:
+    if len(kept) != len(entries):
+        rejected = [entry for entry in entries if entry not in kept]
         logger.warning(
-            "Dropped %d ToC %s citing pages absent from their chunk (markers %s)",
-            dropped,
-            "entry" if dropped == 1 else "entries",
+            "Dropped %d of %d ToC entries citing unsupported pages "
+            "(chunk attests %d markers in %s, document has %d pages): %s",
+            len(rejected),
+            len(entries),
+            len(supported),
             _describe_markers(supported),
+            total_pages,
+            ", ".join(
+                f"{entry.get('title')!r}@{entry.get('start_page')}"
+                for entry in rejected
+            ),
         )
     return kept
 
 
 def _describe_markers(markers: set[int]) -> str:
+    """Range of a marker set, kept honest about gaps.
+
+    A forged in-body marker is exactly what this log line reports, and it is
+    the value that stretches the range -- so ``1-9999`` for ``{1, 2, 3, 9999}``
+    would misdescribe the chunk in the one case that matters.
+    """
     if not markers:
         return "none"
-    return f"{min(markers)}-{max(markers)}"
+    span = f"{min(markers)}-{max(markers)}"
+    return span if len(markers) == max(markers) - min(markers) + 1 else f"{span} (gaps)"
 
 
 def _parse_json_response(raw: str) -> list[dict]:
