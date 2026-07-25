@@ -45,7 +45,8 @@ Two different mechanisms with very different reliability:
   could be one diagram or fifty.
 - **Enumerating raster images is exact.** `get_image_info` reads the PDF's image
   XObjects and returns real bboxes and pixel dimensions. Nothing is inferred, so
-  there is no false-positive rate to calibrate.
+  there is no false-positive rate to calibrate. The bbox is the *placement*
+  rectangle, which can extend past the page; section 3 clips it.
 
 And the blind spot is genuinely raster-only: the PSoC pinout page has no raster
 image at all, 232 vector drawings, and still extracts 1191 characters, because
@@ -55,10 +56,13 @@ regions therefore targets the actual failure rather than settling for part of it
 
 ## Two signals, because neither covers both documents
 
-- **Captions from the text layer.** 30 `Figure N` matches in the PSoC across 134
-  pages. Exact, free, and yields a human-meaningful name.
+- **Captions from the text layer.** 24 caption lines in the PSoC across 134 pages.
+  Free, and yields a human-meaningful name -- but *not* exact, and the naive
+  pattern is actively wrong; see "Captions are a pattern, not a search" below.
 - **Raster regions.** The PCN's table has its title (`Product Attributes`)
   rendered *inside* the image, so no caption exists in the text layer to find.
+  The PCN has **zero** `Figure` lines of any form, so on that document captions
+  contribute nothing at all.
 
 A datasheet's figures are typically vector with captions; this PCN's are raster
 without them. Both signals are needed.
@@ -90,11 +94,12 @@ already compute, so there is one source of truth rather than a duplicated list.
     "caption_source": null
   },
   {
-    "page": 8,
+    "page": 10,
     "kind": "caption",
     "region": null,
     "bbox": null,
-    "caption": "Figure 1. PSOC 6 MCU block diagram",
+    "figure_number": 2,
+    "caption": "Figure 2 Block diagram",
     "caption_source": "text"
   }
 ]
@@ -112,7 +117,78 @@ coordinates, such as highlighting in a viewer.
 here" signal -- 294 characters beside a 25.5% image is the whole finding -- and
 putting it on the entry saves the consumer a join.
 
-### 2. Captions are reported separately, never merged with regions
+### 2. Captions are a pattern, not a search
+
+Matching `Figure N` anywhere in the text layer publishes prose as captions.
+Measured on the PSoC, and the numbers are decisive:
+
+| pattern | matches | what they are |
+|---|---|---|
+| `Figure N` anywhere | 36 | mostly prose |
+| line-anchored `^Figure N <text>` | 6 | **all six are prose**: "Figure 2 shows the major subsystems...", "Figure 3 shows that the clock system..." |
+| same-line `^Figure N[.:] <title>` | **0** | this form does not occur in either fixture |
+| bare `^Figure N$` | **24** | the actual captions |
+
+So a naive pattern is not merely imprecise, it is inverted: line-anchoring alone
+yields six matches of which zero are captions, while the 24 real ones are missed
+because this vendor puts the number and the title on **separate lines**:
+
+```
+Figure 2
+Block diagram
+```
+
+Two accepted forms, and prose is excluded structurally rather than by scoring:
+
+- **Split form.** A line that is exactly `Figure N` or `Fig. N`, optional trailing
+  `.`/`:`, nothing else. The title is the next non-empty line. `caption` is the
+  two joined; `figure_number` carries `N`.
+- **Same-line form.** `Figure N` followed by a **mandatory** `.` or `:` separator,
+  then the title. The mandatory punctuation is exactly what excludes
+  "Figure 2 shows the major subsystems" -- that separator is a space. This form
+  occurs zero times in both fixtures and is included because it is common in other
+  vendors' documents; it is therefore **unverified here** and its test is
+  synthetic.
+
+A `Figure N` mention that matches neither form emits **nothing**. Rejected the
+alternative of emitting it as a "text mention": an entry saying page 12 mentions
+Figure 3 is noise the agent must filter, and the whole point of the array is that
+its entries are worth acting on.
+
+**Two known limits, stated rather than hidden.** The split form's title comes from
+line adjacency, so a bare `Figure N` whose next line is body text yields a wrong
+title -- textual adjacency is far stronger evidence than the geometric proximity
+section 4 rejects, but it is still an inference. And adjacency must be evaluated on
+the **same column-aware extraction the text file carries** (`_extract_page_text`),
+not `page.get_text()`, or a two-column page can interleave the number and title
+with unrelated lines. Both fixtures were measured with the raw extractor, so the
+24 must be re-confirmed against the column-aware one during implementation.
+
+### 3. Regions are clipped to the page
+
+`get_image_info` returns the placement bbox, which can extend past the page --
+a bleed image, or a placement the producer never intended to be fully visible.
+Normalizing an unclipped bbox yields a coordinate outside `0..1`, and
+`inspect_page` **raises** on that (`vision.py:96-100`: "Region 'top' and 'bottom'
+must be between 0.0 and 1.0"). The spec would then be publishing a `region` that
+its own documented consumer rejects.
+
+So: intersect the bbox with `page.rect` first, and derive `region`,
+`page_area_pct`, and the emitted `bbox` from the **visible** rectangle. An image
+whose intersection is empty is dropped, not emitted with a degenerate region --
+`inspect_page` also requires `top < bottom` and `left < right`.
+
+Normalize **relative to the page rect's origin**, not to zero:
+`left = (x0 - rect.x0) / rect.width`. `inspect_page` builds its clip as
+`rect.x0 + left * rect.width` (`vision.py:105-110`), so origin-relative is the
+contract; a page whose CropBox does not start at `(0, 0)` would otherwise be
+offset by exactly that origin.
+
+Neither fixture exercises either case -- 0 of 22 images off-page on the PSoC, 0 of
+9 on the PCN, and every page rect origin is `(0, 0)` in both. Like `min_area_pct`,
+this is precautionary and the tests for it are synthetic.
+
+### 4. Captions are reported separately, never merged with regions
 
 A page carrying both a raster image and a `Figure N` caption is *probably* one
 figure, and associating them by vertical proximity is a heuristic. It is left
@@ -124,7 +200,7 @@ page number if it wants to.
 The cost is mild redundancy on captioned raster figures. That is the right trade
 against a plausible-looking wrong name in a published artifact.
 
-### 3. Threshold, and it is not silent
+### 5. Threshold, and it is not silent
 
 `min_area_pct`, default 1.0, excludes decorative images -- a vendor logo
 repeated on 134 pages would otherwise produce 134 junk entries.
@@ -155,7 +231,7 @@ Neither document contains a single image below 0.5%, so this corpus cannot
 calibrate the value. It is set low on purpose: excluding real content is the
 expensive error, and a few logo entries are the cheap one.
 
-### 4. Opt-in VLM captions
+### 6. Opt-in VLM captions
 
 An uncaptioned raster region is located but unnamed, so an agent asking "where
 is the die size table" cannot find it without inspecting pages one by one. An
@@ -195,7 +271,7 @@ cost near zero inside the existing page pass and are always emitted; only the VL
 pass is opt-in. So an agent always learns a figure is *there*, and pays only for
 learning what it is.
 
-**`min_area_pct` stays out of the cache key**, consistent with section 3: it is
+**`min_area_pct` stays out of the cache key**, consistent with section 5: it is
 not plumbed through `build()`, so it cannot vary between two builds of the same
 document by the same version. A change to its default ships with a release, and
 the sidecar already keys on the exact version.
@@ -218,6 +294,14 @@ Two consequences of reusing it:
   therefore leave `caption` null, log at warning, and leave the deterministic
   index untouched -- the same posture as a failed summary or a failed sidecar
   write, never a failed build.
+- **A swallowed caption failure must also mark the artifact incomplete.** Logging
+  a warning and returning is exactly how a degraded artifact gets written, and
+  `2026-07-25-on-disk-artifact-reuse-design.md` would then cache it permanently:
+  every fingerprint field matches on the next request, so the transient gateway
+  error becomes a document with no captions, forever. So the build sets
+  `llm_enrichment_incomplete` (that spec's field) when any caption call raises,
+  and reuse is refused. A *successful* caption pass that legitimately produces no
+  captions -- no uncaptioned regions to name -- is complete, not incomplete.
 
 **`LlmCallable` cannot carry an image, so the protocol needs extending.** It is
 `__call__(system, user) -> str` (`client.py:19`) with no image parameter. Follow
@@ -263,14 +347,24 @@ is a navigation aid, not data.
 
 Six regions on the PCN, so cost is trivial.
 
-### 5. Where it runs
+### 7. Where it runs
 
 Enumerating every raster placement standalone measures 815 ms for the 134-page
 PSoC and 502 ms for the 7-page PCN -- the per-page cost tracks content
-complexity, not page count. Against an 8 s build that is a 10% addition, which is
-avoidable: `generate_text` already iterates every page with the page object
-loaded, so the enumeration belongs in that existing pass at near-zero marginal
-cost rather than in a second sweep.
+complexity, not page count. Against an 8 s build that is a 10% addition.
+
+**Folding it into the existing pass does not make it free, and the earlier draft
+overclaimed.** `get_image_info()` still runs once per page and still costs whatever
+it costs; what the fold avoids is a *second* traversal -- reopening and re-loading
+every page object, which `generate_text` has already paid for. So the 502-815 ms
+standalone figure is an **upper bound** on the addition, and the fold removes only
+the page-loading share of it, which was not measured separately.
+
+It is still the right placement: strictly cheaper than a second sweep, with no
+offsetting cost, and the pass already holds everything the entries need. But the
+build gets measurably slower, and the honest number to plan against is up to
+~800 ms on a 134-page document until the split is measured. Measure it during
+implementation and record the real marginal cost here.
 
 That pass also already holds everything the entries need: the page rect for
 normalizing `region`, the extracted text for `page_text_chars` and for
@@ -298,7 +392,7 @@ def generate_text(doc) -> str:
 
 `index.py` switches to `scan_pages` and emits `figures` and `figures_excluded`
 from the result. `min_area_pct` is keyword-only and reaches its module default
-here, per section 3.
+here, per section 5.
 
 **Implementation note, the same hazard the preamble spec carries.**
 `tests/test_index.py` monkeypatches `datasheetindex.index.generate_text` with
@@ -347,8 +441,34 @@ Synthetic PDFs, so assertions are exact and no fixture is required:
   the coordinate contract with `inspect_page`.
 - `region` is accepted by `inspect_page` unchanged -- assert against the real
   tool rather than by inspection, so the two cannot drift.
-- A `Figure N` caption in the text layer yields a `captioned` entry with
-  `caption_source: "text"`.
+- **An image extending past the page is clipped**, and the resulting `region` is
+  within `0..1`. Assert by passing the emitted region to the real `inspect_page`:
+  an unclipped one raises `ValueError`, so this test fails loudly on a regression
+  rather than merely reporting an odd number. Also assert `page_area_pct` and the
+  emitted `bbox` describe the visible rectangle, not the placement.
+- **An image entirely off-page is dropped**, not emitted with a degenerate region
+  that `inspect_page`'s `top < bottom` check would reject.
+- **A page whose rect origin is not `(0, 0)`** (a CropBox offset) normalizes
+  relative to that origin: the emitted region, fed back through `inspect_page`,
+  crops the same rectangle. Synthetic -- every page in both fixtures starts at
+  `(0, 0)`, so nothing else would catch an absolute-coordinate mistake.
+- **The split caption form**: a page whose text has `Figure 2` alone on a line and
+  `Block diagram` on the next yields one entry with `figure_number: 2` and
+  `caption: "Figure 2 Block diagram"`, `caption_source: "text"`. This is the form
+  24 of the PSoC's captions actually take.
+- **The same-line form**, with mandatory punctuation: `Figure 3. Package outline`
+  yields that caption. Synthetic, since the form occurs in neither fixture.
+- **Prose is not a caption, three ways.** `as Figure 5 shows` mid-line, a line
+  *opening* `Figure 2 shows the major subsystems` (which the mandatory separator
+  excludes), and `See Figure 3` each yield **zero** entries. These are the 30
+  false positives a naive pattern produced, so they are the tests that matter most
+  in this section -- publishing prose as a caption puts a wrong figure name in the
+  artifact.
+- **Caption detection runs on the column-aware extraction**, not `page.get_text()`:
+  a two-column page whose raw text order would interleave the number and title
+  still yields the correct pairing. Assert against `_extract_page_text` output.
+- A bare `Figure N` as the last line of a page yields no title rather than
+  reaching into the next page or raising.
 - A page with both an image and a caption yields **two** entries, pinning the
   no-merge decision so a future change cannot quietly start associating them.
 - Images below `min_area_pct` are excluded and counted, and the count is
@@ -371,7 +491,9 @@ Synthetic PDFs, so assertions are exact and no fixture is required:
   assert the deterministic index is complete with every `caption` null. This is
   the compatibility guarantee for consumers injecting their own callable.
 - **A `describe_image` that raises leaves the build successful**, with `caption`
-  null and a warning logged -- the text-only-model case.
+  null and a warning logged -- the text-only-model case -- **and sets
+  `llm_enrichment_incomplete`**, so the caption-less artifact is not cached
+  permanently.
 - The captioning pass calls `inspect_page` with the emitted `region` unmodified,
   asserted with a recording stub, so an internal caller cannot start
   transforming coordinates the agent is told to use verbatim.
@@ -384,7 +506,13 @@ Synthetic PDFs, so assertions are exact and no fixture is required:
 - Vector figure detection (above).
 - Merging captions with regions (above).
 - Any change to `inspect_page`, which already does what is needed and is reused
-  as-is by the captioning pass.
+  as-is by the captioning pass. Its `0..1` validation is treated as the contract to
+  satisfy, not a restriction to relax -- section 3 clips to fit it.
+- Caption forms beyond the two in section 2. `Table N`, `Diagram N`, non-English
+  labels, and vendor-specific numbering (`Figure 3-2`) are all real and all
+  uncalibrated on a two-document corpus. Emitting nothing is the safe answer;
+  widening the pattern needs a wider corpus first.
+- Correlating a caption entry with a raster entry on the same page (section 4).
 - Any new model configuration. Figure captions use the callable the caller
   already provides, on the same model as the ToC fallback and summaries.
 - Figure indexing for the page-matched text file. The text file mirrors what is

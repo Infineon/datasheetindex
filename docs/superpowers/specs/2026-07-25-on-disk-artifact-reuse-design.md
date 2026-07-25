@@ -82,7 +82,8 @@ of how a build works, so it is testable without a PDF.
 
 `models.py` gains `TocNode.from_dict()` and `TocQuality.from_dict()`.
 
-`DatasheetArtifacts` gains one field, `llm_enrichment_skipped: bool = False`. Only
+`DatasheetArtifacts` gains two fields, `llm_enrichment_incomplete: bool = False` and
+`llm_enrichment_notes: tuple[str, ...] = ()`. Only
 `build()` knows whether an eligible LLM step was skipped, and only
 `build_datasheet` writes the sidecar, so the fact has to travel between them. It
 defaults `False` and no existing consumer reads it, so the addition is
@@ -108,7 +109,8 @@ Contents:
 | `datasheetindex_version` | from `_version.package_version()` |
 | `artifacts` | JSON and text filenames, and the **sha256** of each |
 | `toc_quality` | the complete `TocQuality`, `details` included |
-| `llm_enrichment_skipped` | true when LLM work this build was *eligible* for did not run for want of a client (below) |
+| `llm_enrichment_incomplete` | true when LLM work this build was *eligible* for did not produce its result -- skipped for want of a client, or run and failed (below) |
+| `llm_enrichment_notes` | short reason strings; diagnostic only, not part of validity |
 
 **Content hash, not path plus mtime.** Three reasons. The JSON's existing
 `source` field holds a bare basename, so path identity cannot distinguish two
@@ -159,14 +161,43 @@ The artifact is not corrupt, but it is worse than what the current environment c
 produce, and nothing would ever dislodge it short of deleting the directory.
 
 **The sidecar therefore records what the build actually did, not just what it was
-asked to do:** a single boolean, `llm_enrichment_skipped`, true when LLM work the
-build was eligible for did not happen because no callable was available. On the
-`build_datasheet` path -- the only path that writes a sidecar -- that means exactly
-one case, since `bound.py:166` already rejects `include_summaries` without a
-`model`: ToC quality below `TOC_FALLBACK_THRESHOLD` with no callable obtainable.
+asked to do:** a single boolean, `llm_enrichment_incomplete`, true when LLM work the
+build was eligible for did not produce its result. Reuse is refused when it is set:
+the artifact is self-described as degraded, so a rebuild is given the chance to do
+better.
 
-Reuse is refused when the flag is true. The artifact is self-described as
-degraded, so a rebuild is given the chance to do better.
+Two distinct causes, and **both** must set it. Recording only the first was the
+earlier draft's mistake, and it left the larger hole of the two:
+
+1. **No callable was available.** ToC quality below `TOC_FALLBACK_THRESHOLD` and
+   `_try_create_default_llm_client` returned `None`. On the `build_datasheet`
+   path -- the only path that writes a sidecar -- this is the only *skip* case, since
+   `bound.py:166` already rejects `include_summaries` without a `model`.
+2. **The work ran and failed, and the failure was swallowed.** `index.py:611-615`
+   catches every exception from the ToC fallback, logs a warning, and continues with
+   the weak native ToC. The figure spec's caption pass does the same by design. So a
+   single transient gateway error, rate limit, or timeout produces an artifact
+   indistinguishable from a successful build -- and with only cause 1 recorded, every
+   fingerprint field matches on the next request and that artifact is served
+   *permanently*. A dropped connection would silently cost the document its ToC for
+   the life of the output directory. This is the worse failure, because it needs no
+   unusual environment: it is one bad network moment.
+
+`add_summaries` is not a third case: it does not catch (`llm/summarizer.py:35`), so a
+summary failure propagates out of `build()` and nothing is written at all.
+
+**What must *not* set it: a fallback that ran and was rejected.** `index.py:593-610`
+compares the candidate against the original and declines it on the merits
+(`_accept_llm_toc_candidate`). That is a completed decision, not a failure -- the LLM
+was consulted and its answer was worse. Marking it incomplete would rebuild and
+re-pay the LLM cost on every request for exactly the documents the fallback cannot
+help, which is the opposite of what reuse is for. The distinction is therefore
+`except` versus `else`, and it is the one thing an implementation must not blur.
+
+The sidecar also carries `llm_enrichment_notes`, a list of short reason strings
+("toc_fallback_no_client", "toc_fallback_raised", "figure_caption_raised"). Purely
+diagnostic -- validity keys on the boolean alone -- but it is what makes a sidecar
+answer "why is this document rebuilding every time" without a re-run.
 
 Recorded rather than derived from the stored `toc_quality.score`, for the reason
 the two rules above already give: `to_dict` omitting empty fields and `details`
@@ -212,7 +243,7 @@ Reuse only when *all* hold:
 - `datasheetindex_version` equals the running version exactly;
 - `source_sha256` matches the resolved PDF;
 - `build_options` match;
-- `llm_enrichment_skipped` is false;
+- `llm_enrichment_incomplete` is false;
 - both artifacts load, and the **sha256 of the bytes actually read** equals the
   recorded hash.
 
@@ -318,11 +349,21 @@ assert the rebuild came from the field under test.
 - Invalidation, one test per fingerprint field: changed PDF bytes, changed
   build options, changed version, missing artifact file, truncated artifact
   file. Each must rebuild.
-- **`llm_enrichment_skipped=true` rebuilds** even when every other field matches,
-  and a build whose ToC quality is above threshold records it `false` so the
-  common path is not permanently uncacheable. Drive this through the flag on the
-  sidecar rather than by manipulating credentials, so the test states the rule and
-  needs no environment.
+- **`llm_enrichment_incomplete=true` rebuilds** even when every other field
+  matches, and a build whose ToC quality is above threshold records it `false` so
+  the common path is not permanently uncacheable. Drive this through the flag on
+  the sidecar rather than by manipulating credentials, so the test states the rule
+  and needs no environment.
+- **A raising ToC fallback sets the flag, so its artifact is never reused.** Inject
+  a callable whose ToC call raises, build, and assert the sidecar records
+  `llm_enrichment_incomplete=true`; then build again with a working callable and
+  assert it rebuilt rather than serving the ToC-less artifact. This is the
+  one-bad-network-moment case, and without it a transient error is permanent.
+- **A rejected fallback candidate does *not* set the flag, and its artifact is
+  reused.** Inject a callable returning a candidate that `_accept_llm_toc_candidate`
+  declines, and assert the second build reuses. This is the `except`-versus-`else`
+  distinction; a test on only one side of it would let an implementation collapse
+  the two and silently make every hard document uncacheable.
 - **Same-size corruption rebuilds.** Overwrite one byte of the text file in
   place, preserving its length, and assert a rebuild. This is the case a size
   check accepts and a hash rejects, so it is the test that justifies the hash.
@@ -372,12 +413,14 @@ Tests must not depend on the `[llm]` or `[layout]` extras, so a plain
   until it reopens.
 - **No reuse under an editable install**, so a source checkout behaves exactly
   as it does today and contributors see their edits take effect.
-- **A weak-ToC document built with no LLM available is never reused**, so it
-  rebuilds on every request until credentials are configured. That is the
-  degenerate environment -- `datasheet-agent` runs with the gateway configured, so
+- **An artifact whose LLM enrichment did not complete is never reused**, so it
+  rebuilds on every request until the enrichment succeeds. Two shapes: no
+  credentials configured, which is the degenerate environment and stays broken
+  until fixed; and a transient failure, which self-heals on the next request at
+  the cost of one rebuild. `datasheet-agent` runs with the gateway configured, so
   its weak-ToC documents (the PCN among them) record the flag `false` and cache
-  normally -- and paying the rebuild is the price of not pinning a degraded
-  artifact in place forever.
+  normally. Paying the rebuild is the price of not pinning a degraded artifact in
+  place forever.
 - The output directory becomes a cache rather than a scratch space. Deleting it
   remains safe at all times, and is the recovery action for any suspected
   staleness.

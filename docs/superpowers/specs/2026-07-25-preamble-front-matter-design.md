@@ -82,10 +82,22 @@ be. Worse, it is circular: the note names the truncation point, so its length is
 not known until after truncating, and reserving space for it would mean
 truncating twice.
 
-The overhead is bounded and computable in advance -- at most
-`max_pages * 17` characters of markers plus two `NOTE` lines of about 120
-characters each -- so a caller sizing a token budget can account for it. State the
-bound in the docstring.
+**The overhead is exact after the fact and an estimate before it.** A caller that
+has the result needs no formula at all: it is `len(text) - chars_shown`, and both
+are returned.
+
+Before the call, only the marker share is exact. The marker is
+`f"--- PAGE {n} ---"` (`core/textfile.py:224`), joined with a newline, so it is
+`14 + digits(n)` characters per page -- 13 for the literal plus the separator. For
+pages 1..P the total is `14 * P + sum(digits(n) for n in 1..P)`, which at the
+default `max_pages=2` is exactly 30.
+
+The two `NOTE` lines embed page numbers and character counts, so their length
+depends on the same digit counts and cannot be stated as a constant. Roughly 120
+characters each on realistic inputs, and that is an **estimate, not a bound** --
+say so in the docstring rather than implying a guarantee the format does not
+provide. A caller needing certainty should size against `chars_shown`, which is
+exactly what `max_chars` governs.
 
 This changes an existing guarantee. `test_respects_max_chars` and
 `test_real_pdf_respects_max_chars` assert `len(preamble) <= max_chars` on the
@@ -313,8 +325,11 @@ that can quietly weaken existing tests.
   the text fit. The two notes are independent.
 - A document that trips both caps carries both lines, character note first.
 - `max_chars` bounds `chars_shown`, not `len(text)`: assert `chars_shown` is within
-  the cap while the returned string legitimately exceeds it by the marker and note
-  overhead, and assert that overhead is within the stated bound.
+  the cap while the returned string legitimately exceeds it.
+- The marker overhead matches the formula exactly -- `14 * P + sum of digits` -- so
+  assert `len(text) - chars_shown == 30` on a two-page document with no notes. Do
+  **not** assert an upper bound on the note lengths; they are estimated, not
+  bounded, and a test asserting otherwise would fail on a 4-digit page number.
 - `max_pages` and `max_chars` are both honoured, including `max_pages` larger
   than the document -- where `pages_omitted` is 0 and no page note is emitted.
 - Signals, on synthetic pages so the assertions are exact: a bulleted feature
