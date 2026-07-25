@@ -323,7 +323,9 @@ That is a genuine trade rather than a free win, and it is recorded as one.
 branch today. It must now also create one when caption candidates exist, and both
 branches must share that single client and the existing `close_llm_client` in the
 `finally` -- a second client would double the connection cost and leak on the path
-where only captions need it.
+where only captions need it. When `bound.py` hands in a probe client, `build()`
+constructs none at all; see "The capability probe owns a client" below for who
+closes what.
 
 **There is no `model=None` guard, deliberately.** `include_summaries` raises when
 set without a model (`bound.py:199`) because an explicit opt-in that cannot be
@@ -413,13 +415,19 @@ not plumbed through `build()`, so it cannot vary between two builds of the same
 document by the same version. A change to its default ships with a release, and
 the sidecar already keys on the exact version.
 
-**`figure_captions_pending` is a sidecar field but not a build option**, and the
+**`figure_captions_pending` is a build outcome, not a build option**, and the
 distinction is load-bearing. `build_options` records what the caller *asked for*
 and is compared for equality; `figure_captions_pending` records what the build
 *achieved* and is compared against the current environment by the rule below. Put
-in `_BuildOptions` it would key the in-memory cache on a build outcome, which is
-neither meaningful nor stable. It belongs beside the existing fingerprint fields
-on `ArtifactRecord`.
+in `_BuildOptions` it would key both caches on an outcome, which is neither
+meaningful nor stable.
+
+It therefore lands in **two** places, and both are required: on `ArtifactRecord`
+beside the existing fingerprint fields, for the sidecar, and on
+`DatasheetArtifacts`, for the in-memory gate. Adding it to only the record leaves
+the hole described under "A missing client is a capability, not a defect" -- the
+same instance keeps serving its caption-less artifact from memory, never reaching
+the sidecar logic that would have rebuilt it.
 
 #### A missing client is a capability, not a defect
 
@@ -433,12 +441,12 @@ users. `llm_enrichment_incomplete` exists to stop a **transient** failure being
 cached permanently; a machine with no `openai` installed is not transient, and
 treating a stable environment as a defect destroys the reuse 0.24.0 just shipped.
 
-So capability is recorded rather than flagged. The sidecar gains
-`figure_captions_pending`: the number of candidates left uncaptioned because no
-vision-capable client was available. Reuse is refused only when that count is
-non-zero **and** vision capability is available now:
+So capability is recorded rather than flagged. `figure_captions_pending` is the
+number of candidates left uncaptioned because no vision-capable client was
+available. Reuse is refused only when that count is non-zero **and** vision
+capability is available now:
 
-| sidecar `figure_captions_pending` | vision available now | outcome |
+| `figure_captions_pending` | vision available now | outcome |
 |---|---|---|
 | 0 | either | reuse |
 | > 0 | no | **reuse** -- nothing has changed, and a rebuild would produce the same artifact |
@@ -446,9 +454,29 @@ non-zero **and** vision capability is available now:
 
 A keyless machine therefore reuses its artifacts indefinitely, and the moment
 credentials appear the artifact is rebuilt with captions -- without anyone
-hand-clearing the output directory. Probing capability at reuse time is cheap:
-constructing the client performs no network call, and an injected callable is a
-`getattr` for `describe_image`.
+hand-clearing the output directory.
+
+**It counts eligible candidates, not all of them.** The count is taken *after*
+`caption_figures` and `max_figure_captions` are applied: it is the number of
+regions that would have been captioned had a client existed. With
+`caption_figures=False` or `max_figure_captions=0` it is therefore **0**, never
+the candidate count. Counting all candidates instead would mark work pending that
+the caller explicitly declined, and the rule above would then refuse reuse on
+every build that has a key -- an artifact rebuilt forever precisely because the
+caller asked for no captions. Regions dropped by the cap are likewise not pending;
+they are excluded and disclosed by `figure_captions_excluded`, and a rebuild would
+drop them again.
+
+**The same rule governs the in-memory cache, not only the sidecar.** A keyless
+build leaves `_artifacts` populated and *complete* -- the whole point of not
+flagging it -- so the gate at `bound.py:221-233`, which tests
+`llm_enrichment_incomplete`, would hand back the caption-less artifact on the next
+call even after credentials appeared. That is the same class of bug as the
+incomplete-artifact hole closed in 0.24.0, reintroduced through a field that gate
+does not know about. So `figure_captions_pending` is a field on
+**`DatasheetArtifacts`** as well as on the sidecar record, and the in-memory gate
+gains the identical `pending > 0 and vision available` condition. One rule, two
+caches, stated once and applied in both places.
 
 This is strictly better than the note-and-flag approach for the ToC fallback too,
 which has the same defect today: a keyless machine never caches a weak-ToC
@@ -459,6 +487,44 @@ for it.
 A caption call that *raises*, or returns empty, still sets
 `llm_enrichment_incomplete` as above. The distinction throughout is
 transient-versus-stable, not present-versus-absent.
+
+#### The capability probe owns a client, and its lifecycle is explicit
+
+An earlier draft of this section called the probe free. It is not.
+`create_llm_client` builds a real HTTP client and its own docstring says the
+caller owns it -- it exposes `close()` for exactly that reason. Probing by
+construction therefore creates a resource, and probing on every reuse check would
+leak one per check. Three rules, in order:
+
+- **Probe last, and only when it can matter.** `reuse_blocker` stays a pure
+  function of the record and gains no I/O: it reports a non-zero
+  `figure_captions_pending` as a *signal*, not a blocker. `_reuse_from_disk`
+  probes capability only after every cheap deterministic check -- version,
+  incomplete flag, build options, size, hashes -- has passed and the pending count
+  is non-zero. A version bump, a changed source, or a fully captioned artifact
+  therefore constructs nothing at all, which is the common case on every path.
+- **A supplied callable is never owned.** When the caller passed an
+  `llm_callable`, capability is `getattr(callable, "describe_image", None)` --
+  free, no construction, nothing to close.
+- **A self-created probe is owned by `bound.py` until it is either closed or
+  handed to `build()`.** Absent capability means `_try_create_default_llm_client`
+  returned `None` and there is nothing to close. Present capability forces a
+  rebuild under the rule above, and the probe is then **passed into `build()`**
+  rather than discarded and reconstructed. `build()` leaves `owns_llm_callable`
+  `False` for a passed-in callable, so ownership stays with `bound.py`, which
+  closes it in a `finally` covering the build. Every other exit -- a
+  deserialization failure discovered after the probe, an exception mid-check --
+  closes it too.
+
+The invariant worth testing directly is that **no path returns while holding an
+unclosed probe**, and the reason for handing it to `build()` rather than closing
+it is that this is what keeps "one client, not two" true across the reuse
+boundary: constructing a client to answer "should I rebuild?", discarding it, and
+having `build()` immediately construct another would double connection setup on
+exactly the path already doing the most work.
+
+The in-memory gate probes under the same rules. It reaches the probe even less
+often, since it runs only when `_artifacts` is populated and pending is non-zero.
 
 **The deterministic index is never gated.** Regions and text-layer captions cost
 near zero inside the existing page pass and are always emitted, whatever the flag,
@@ -768,6 +834,34 @@ Synthetic PDFs, so assertions are exact and no fixture is required:
   would fix it.
 - **`figure_captions_pending` of zero reuses under both capability states**, so a
   fully captioned artifact is never rebuilt merely because the client went away.
+- **The in-memory cache obeys the same rule, on one instance.** Build keyless on a
+  single `DatasheetTools`, make vision capability appear, and call
+  `build_datasheet` again on that *same* instance: assert it rebuilds and captions
+  rather than returning `_artifacts`. Without this the sidecar logic is never
+  reached, and the test must not create a second instance -- doing so silently
+  tests the disk path instead. This is the direct analogue of the
+  retry-on-the-same-instance test 0.24.0 added for `llm_enrichment_incomplete`.
+- **`figure_captions_pending` counts only eligible candidates.** With no vision
+  client: `caption_figures=False` yields 0, `max_figure_captions=0` yields 0, and
+  22 candidates under a cap of 20 yields 20 rather than 22. Then assert the first
+  two artifacts are reused *even with capability present* -- the regression this
+  guards is an artifact rebuilt forever precisely because the caller asked for no
+  captions.
+- **No path returns holding an unclosed probe.** Wrap
+  `_try_create_default_llm_client` with a recorder that tracks every construction
+  and every `close()`, and assert the counts match after: a reuse hit, a
+  capability-triggered rebuild, and a reuse attempt that fails deserialization
+  after the probe. `create_llm_client` builds a real HTTP client, so a leak here
+  is a leaked connection pool per call.
+- **The probe is not constructed when it cannot matter.** With the same recorder,
+  assert zero constructions when `figure_captions_pending` is 0, and zero when a
+  cheaper check -- a version mismatch or a changed source hash -- already blocks
+  reuse. This pins the probe-last ordering rather than leaving it to reviewer
+  vigilance.
+- **A capability-triggered rebuild reuses the probe client.** Assert `build()`
+  received the same object the probe constructed and did not create a second, and
+  that `owns_llm_callable` stayed `False` so ownership remained with `bound.py`.
+  This is the "one client, not two" guarantee across the reuse boundary.
 - **A `describe_image` that raises leaves the build successful**, with `caption`
   null and a warning logged -- the text-only-model case -- **and sets
   `llm_enrichment_incomplete`**, so the caption-less artifact is not cached
