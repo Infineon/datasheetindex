@@ -274,7 +274,7 @@ may cause permanent damage to the device.
 
 ## Agent Tools
 
-Beyond the built-in file reading capabilities of the Claude Agent SDK, the agent has custom PDF-native inspection tools: `inspect_page` (visual inspection) and `locate_text` (text-to-coordinate grounding).
+Beyond the built-in file reading capabilities of the Claude Agent SDK, the agent has a custom PDF-native inspection tool: `inspect_page` (visual inspection). Text-to-coordinate grounding (`locate_text`) is a Python API rather than an agent tool -- see below for why.
 
 ### `inspect_page`
 
@@ -331,15 +331,28 @@ Common region patterns:
 - `get_figure` — `get_images()` can't detect vector graphics (which is how 95% of datasheet diagrams are rendered). Visual inspection shows figures in full page context.
 - `get_page_tables_overview` — Returns row/column counts from an unreliable detector. The text file already gives richer information: table titles, column headers, "(continued)" markers, and actual values.
 
-### `locate_text`
+### `locate_text` — a Python API, not an agent tool
 
-Maps a query string to its bounding box(es) on a page — the bridge between
-`search_text` (find text) and `inspect_page` (render a region). It returns one
+Maps a query string to its bounding box(es) on a page. It returns one
 result per match, each carrying `region` (a bounding rectangle) and `boxes`
 (one or more per-line rectangles, with `region` their union), expressed in
-**both** normalized percentages (0.0-1.0, so they feed straight into
-`inspect_page(region=...)`) and raw PDF points (for annotating the PDF
-directly), plus page dimensions.
+**both** normalized percentages (0.0-1.0, clamped to the page so they feed
+straight into `inspect_page(region=...)`) and raw, unclamped PDF points (for
+annotating the PDF directly), plus page dimensions.
+
+**It is deliberately not exposed as an agent tool.** It was, until measurement
+showed the workflow does not pay off: a hit covers 0.07-0.58% of a page (a
+heading match is a 1.6%-tall sliver), so cropping `inspect_page` to it renders
+a picture of the query string and nothing else. To see the table *under* a
+heading the agent would have to expand the region by an amount nothing tells it.
+`inspect_page(page, detail="low")` is a cheaper overview from which the agent can
+crop to what it actually observed, and no consumer was ever found calling the
+tool — every real use is Python code calling the method directly.
+
+Its real consumer is **source grounding**: a deterministic post-pass that
+re-finds an extracted value's `source_text` in the live PDF and attaches page +
+bounding box for citation and for highlight overlays in a UI. That is library
+code, not an agent decision, which is why the method stays and the tool does not.
 
 Matching is hybrid: `page.search_for` on the verbatim query (fast path), with a
 normalized word-level fallback (`page.get_text("words")`) that tolerates the
@@ -350,8 +363,7 @@ words by `(block_no, line_no)` into a single result whose `region` is their
 union.
 
 It is stateless: the direct `DatasheetTools(pdf).locate_text(...)` Python API
-works off the live PDF with no `build_datasheet` call. On the Agent SDK and
-local MCP tool surfaces a document must first be loaded via `build_datasheet`
+works off the live PDF with no `build_datasheet` call. A document must first be loaded via `DatasheetTools(pdf)` or `build_datasheet`
 (which binds the PDF), after which `locate_text` reads it directly without
 needing the built text/JSON artifacts.
 
@@ -567,8 +579,8 @@ The tool surface is designed in two layers so the tool *logic* is decoupled from
 any one agent framework:
 
 1. **`tools/defs.py` — the framework-neutral source of truth.**
-   `create_datasheet_tool_defs()` returns the six tools (`build_datasheet`,
-   `get_section_text`, `search_text`, `inspect_page`, `locate_text`,
+   `create_datasheet_tool_defs()` returns the five tools (`build_datasheet`,
+   `get_section_text`, `search_text`, `inspect_page`,
    `extract_table_markdown`) as plain `DatasheetToolDef` records -- `name`,
    `description`, `input_schema` (JSON Schema dict), and an async `handler`
    returning the `{"content": [...], "is_error": bool}` envelope. It imports **no**
@@ -649,7 +661,7 @@ class DatasheetToolDef:
 
 
 def create_datasheet_tool_defs() -> list[DatasheetToolDef]:
-    """Framework-neutral: the six tools as plain defs, no claude-agent-sdk import."""
+    """Framework-neutral: the five tools as plain defs, no claude-agent-sdk import."""
     tools_instance: DatasheetTools | None = None
 
     async def build_datasheet(args: dict[str, Any]) -> dict[str, Any]:
@@ -678,7 +690,7 @@ def create_datasheet_tool_defs() -> list[DatasheetToolDef]:
             },
             handler=inspect_page,
         ),
-        ...  # build_datasheet, get_section_text, search_text, locate_text, ...
+        ...  # build_datasheet, get_section_text, search_text, inspect_page, ...
     ]
 
 
@@ -809,8 +821,8 @@ You have access to a datasheet with:
 1. A structured JSON map (enriched ToC) — sections, page ranges, table hints
 2. A text file of the full document with page markers (--- PAGE N ---)
 3. MCP tools that can build and read the artifacts, search the extracted text,
-   locate a string's coordinates (`locate_text`), and call `inspect_page` for
-   visual inspection
+   call `inspect_page` for visual inspection, and re-extract a page's tables
+   as Markdown (`extract_table_markdown`)
 
 WORKFLOW:
 
@@ -963,11 +975,11 @@ Output: {"parameter": "Supply voltage VS relative", "symbol": "VVS_rel_max",
 - **ToC quality assessment** — auto-detect whether summaries are worth generating
 - **Page-matched text file** — PyMuPDF `get_text("blocks")` with column-aware reordering and page markers
 - **Vision as primary escalation** — `inspect_page` for when text isn't sufficient
-- **`locate_text`** — text-to-coordinate source grounding (bounding boxes as
+- **`locate_text`** (Python API, not an agent tool) — text-to-coordinate source grounding (bounding boxes as
   percentages + PDF points), so an agent or review UI can turn a located string
   into a precise highlight or a tightly cropped `inspect_page` call
 - **Agent tools** — `build_datasheet`, `get_section_text`, `search_text`,
-  `inspect_page`, `locate_text`, and `extract_table_markdown`, with text-first navigation,
+  `inspect_page`, and `extract_table_markdown`, with text-first navigation,
   breadcrumb-tagged single- or multi-pattern search across wrapped/interleaved
   table text, position-headed section reads, and visual escalation when needed
 - **Page alignment validation** — ensure JSON page numbers match text file markers
@@ -1041,7 +1053,7 @@ datasheetindex/
 
 ### Phase 2: Agent Tools
 - `inspect_page` — page rendering as image for visual inspection
-- `locate_text` — text-to-coordinate grounding (bounding boxes for highlighting)
+- `locate_text` — text-to-coordinate grounding (bounding boxes for highlighting); Python API only, not an agent tool
 - Tool registration for Claude Agent SDK
 
 ### Phase 3: LLM Fallbacks

@@ -79,11 +79,16 @@ def create_datasheet_tool_defs() -> list[DatasheetToolDef]:
     when you need to close the bound document at end of session (URL sources
     leave a temporary file behind until closed).
 
-    Returns the same six tools that
+    Returns the same five tools that
     :func:`datasheetindex.tools.registry.create_datasheet_tools_server` exposes
     -- ``build_datasheet``, ``get_section_text``, ``search_text``,
-    ``inspect_page``, ``locate_text``, ``extract_table_markdown`` -- without
-    importing ``claude-agent-sdk``.
+    ``inspect_page``, ``extract_table_markdown`` -- without importing
+    ``claude-agent-sdk``.
+
+    ``DatasheetTools.locate_text`` is deliberately **not** among them. It remains
+    a supported Python API for coordinate grounding; it is simply not a tool an
+    agent has reason to call, since the box it returns covers well under 1% of a
+    page and renders back as a picture of the query string.
     """
     return create_datasheet_tool_session().defs
 
@@ -250,17 +255,6 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
         except Exception as exc:
             return _err_exc(exc)
 
-    async def locate_text(args: dict[str, Any]) -> dict[str, Any]:
-        try:
-            results = _require().locate_text(
-                args["query"],
-                page=args.get("page"),
-                max_results=args.get("max_results", 20),
-            )
-            return _ok({"query": args["query"], "results": results})
-        except Exception as exc:
-            return _err_exc(exc)
-
     async def extract_table_markdown(args: dict[str, Any]) -> dict[str, Any]:
         try:
             md = await asyncio.to_thread(
@@ -419,42 +413,6 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                 "required": ["page"],
             },
             handler=inspect_page,
-        ),
-        DatasheetToolDef(
-            name="locate_text",
-            description=(
-                "Map a piece of text to its bounding-box coordinates on a page, "
-                "for highlighting or precise visual inspection. Returns a result "
-                "per match, each with `region` (a bounding rectangle) and `boxes` "
-                "(one or more per-line rectangles; `region` is their union), in "
-                "both normalized percentages and PDF points. A string that appears "
-                "more than once yields multiple results. Feed region['pct'] into "
-                "inspect_page(region=...) to crop to the exact spot; use "
-                "region['points'] (PDF points) to annotate the PDF. Pass `page` "
-                "when you know it (e.g. from a search_text hit) to stay cheap; omit "
-                "it to scan all pages. `query` may be a single string or a list of "
-                "strings."
-            ),
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "oneOf": [
-                            {"type": "string"},
-                            {"type": "array", "items": {"type": "string"}},
-                        ],
-                        "description": "A single pattern or a list of patterns.",
-                    },
-                    "page": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "description": "1-indexed page to locate on. Omit to scan all.",
-                    },
-                    "max_results": {"type": "integer", "minimum": 1},
-                },
-                "required": ["query"],
-            },
-            handler=locate_text,
         ),
         DatasheetToolDef(
             name="extract_table_markdown",

@@ -105,11 +105,6 @@ def test_call_tool_end_to_end(tmp_path):
     multi = _call(server, types, "search_text", {"query": ["5.5v", "voltage"]})
     assert multi.isError is False
 
-    locate = _call(server, types, "locate_text", {"query": "Supply", "page": 1})
-    assert locate.isError is False
-    located = json.loads(locate.content[0].text)["results"][0]
-    assert located["match_method"] == "search_for"
-
     image = _call(server, types, "inspect_page", {"page": 1})
     assert image.isError is False
     assert image.content[0].type == "image"
@@ -289,7 +284,6 @@ _EXPECTED = {
     "get_section_text",
     "search_text",
     "inspect_page",
-    "locate_text",
     "extract_table_markdown",
 }
 

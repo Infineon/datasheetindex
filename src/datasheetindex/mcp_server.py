@@ -2,7 +2,7 @@
 
 This server is a thin adapter over the framework-neutral tool session
 (:func:`datasheetindex.tools.defs.create_datasheet_tool_session`): it serves the
-same six tools -- with the same names, descriptions, and JSON schemas -- that the
+same five tools -- with the same names, descriptions, and JSON schemas -- that the
 Claude Agent SDK surface (``create_datasheet_tools_server``) and non-SDK hosts
 get. There is a single source of truth for the tool definitions; this module only
 wires them onto MCP transports (stdio / streamable-http / sse).
@@ -82,9 +82,9 @@ def _build_mcp_server(
             "build_datasheet FIRST with a pdf_source (local path or URL) to load "
             "a document -- it returns the full enriched ToC for navigation "
             "planning. Then use get_section_text to read page ranges, search_text "
-            "to locate keywords, locate_text for a string's bounding box, "
-            "inspect_page for visual content, and extract_table_markdown for a "
-            "clean Markdown table when get_section_text shows a garbled one."
+            "to locate keywords, inspect_page for visual content, and "
+            "extract_table_markdown for a clean Markdown table when "
+            "get_section_text shows a garbled one."
         ),
     )
 

@@ -17,9 +17,8 @@ All page numbers are **1-indexed** across the JSON, the text file markers, and
 `inspect_page(page=...)`.
 
 The library also exposes `create_datasheet_tools_server()`, which packages
-artifact-building, ToC/text access, text search, text-to-coordinate grounding
-(`locate_text`), and `inspect_page` as the MCP/tool-server surface the agent can
-mount. The server starts without a bound PDF; the agent loads one at runtime by
+artifact-building, ToC/text access, text search, `inspect_page`, and
+`extract_table_markdown` as the MCP/tool-server surface the agent can mount. The server starts without a bound PDF; the agent loads one at runtime by
 calling the `build_datasheet` tool with a `pdf_source`.
 
 ## Philosophy
@@ -214,14 +213,19 @@ tools for the bound PDF source:
   single pattern or a list of patterns), even when labels wrap across lines or
   table values interrupt the phrase; each hit carries the section breadcrumb
 - `inspect_page` - render a page image when visual confirmation is needed
-- `locate_text` - map a string to its bounding-box coordinates (percentages +
-  PDF points) on a page, for highlighting or to crop `inspect_page` precisely
 - `extract_table_markdown` - re-extract a page as layout-aware Markdown tables
 
-Build once, then use `get_section_text`, `search_text`, `inspect_page`,
-`locate_text`, and `extract_table_markdown` together. `search_text` prefers exact matches, then
+Build once, then use `get_section_text`, `search_text`, `inspect_page`, and
+`extract_table_markdown` together. `search_text` prefers exact matches, then
 falls back to whitespace-normalized and ordered-token matching for line-wrapped
 table rows.
+
+`locate_text` is **not** among the tools. It stays a supported Python API for
+coordinate grounding (see above), but an agent has no reason to call it: the box
+it returns covers well under 1% of a page, so cropping `inspect_page` to it
+renders a picture of the query string. An agent that wants a closer look is
+better served by `inspect_page(page, detail="low")` to see the layout, then
+cropping to what it observed.
 
 The server takes no PDF argument; it starts unbound and the client loads a
 document at runtime by calling `build_datasheet` with a `pdf_source`.
@@ -269,9 +273,9 @@ and no printed contents page either. For those, `build_datasheet` returns
 the page text.
 
 Without that fallback the server still works. Only `build_datasheet`'s ToC
-output degrades: `get_section_text`, `search_text`, `locate_text`,
-`inspect_page`, and `extract_table_markdown` address the document by page and
-raw text, and never consult the ToC. The agent loses the section map, not the
+output degrades: `get_section_text`, `search_text`, `inspect_page`, and
+`extract_table_markdown` address the document by page and raw text, and never
+consult the ToC. The agent loses the section map, not the
 document -- it navigates by searching instead of by planning a route, which is
 how a person reads a datasheet with no bookmarks.
 

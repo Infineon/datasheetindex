@@ -341,7 +341,6 @@ def test_create_server_registers_tools(monkeypatch, tmp_path):
         "search_text",
         "inspect_page",
         "extract_table_markdown",
-        "locate_text",
     }
 
     build_result = asyncio.run(
@@ -367,16 +366,6 @@ def test_create_server_registers_tools(monkeypatch, tmp_path):
 
     inspect_result = asyncio.run(server.tools["inspect_page"]({"page": 1}))
     assert inspect_result["is_error"] is False
-
-    import json
-
-    locate_result = asyncio.run(
-        server.tools["locate_text"]({"query": "Registry", "page": 1})
-    )
-    assert locate_result["is_error"] is False
-    locate_payload = json.loads(locate_result["content"][0]["text"])
-    assert locate_payload["results"], "SDK locate_text returned no results"
-    assert locate_payload["results"][0]["match_method"] == "search_for"
 
     # extract_table_markdown requires pymupdf4llm; verify graceful error
     table_md_result = asyncio.run(server.tools["extract_table_markdown"]({"page": 1}))
@@ -814,7 +803,6 @@ def test_sdk_content_conversion_survives_every_tool(monkeypatch, tmp_path):
 
     for name, args in (
         ("search_text", {"query": "voltage"}),
-        ("locate_text", {"query": "Supply", "page": 1}),
         ("extract_table_markdown", {"page": 1}),
     ):
         envelope, content = call(name, args)

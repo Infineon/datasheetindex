@@ -26,7 +26,6 @@ EXPECTED_TOOL_NAMES = {
     "get_section_text",
     "search_text",
     "inspect_page",
-    "locate_text",
     "extract_table_markdown",
 }
 
@@ -110,11 +109,6 @@ def test_build_then_query_end_to_end(tmp_path):
     assert search_result["is_error"] is False
     search_payload = json.loads(search_result["content"][0]["text"])
     assert search_payload["results"][0]["page"] == 1
-
-    locate_result = _run(defs["locate_text"].handler, {"query": "Supply", "page": 1})
-    assert locate_result["is_error"] is False
-    locate_payload = json.loads(locate_result["content"][0]["text"])
-    assert locate_payload["results"][0]["match_method"] == "search_for"
 
     inspect_result = _run(defs["inspect_page"].handler, {"page": 1})
     assert inspect_result["is_error"] is False
