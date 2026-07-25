@@ -195,3 +195,65 @@ def test_repeated_single_line_string_yields_one_result_per_occurrence():
         assert len(loc["boxes"]) == 1
     xs = sorted(loc["region"]["points"]["x0"] for loc in results)
     assert xs[0] < xs[1]
+
+
+def _doc_overflowing_bottom() -> pymupdf.Document:
+    """A glyph whose descender crosses the bottom page edge."""
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 845), "Hello", fontsize=14)
+    return doc
+
+
+def _doc_cropped_past_match() -> pymupdf.Document:
+    """A CropBox whose origin sits to the right of, and below, the match."""
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "Hello world", fontsize=14)
+    page.set_cropbox(pymupdf.Rect(80, 60, 300, 300))
+    return doc
+
+
+def test_pct_clamped_when_a_glyph_overflows_the_bottom_edge():
+    doc = _doc_overflowing_bottom()
+    loc = locate_text(doc, "Hello", page=1)[0]
+    doc.close()
+
+    for box in (loc["region"], *loc["boxes"]):
+        for edge, value in box["pct"].items():
+            assert 0.0 <= value <= 1.0, f"{edge}={value} outside [0, 1]"
+
+
+def test_pct_clamped_when_the_cropbox_cuts_the_match():
+    doc = _doc_cropped_past_match()
+    loc = locate_text(doc, "Hello", page=1)[0]
+    doc.close()
+
+    for box in (loc["region"], *loc["boxes"]):
+        for edge, value in box["pct"].items():
+            assert 0.0 <= value <= 1.0, f"{edge}={value} outside [0, 1]"
+
+
+def test_overflowing_region_round_trips_into_inspect_page():
+    # The contract clamping exists to keep: inspect_page validates 0.0-1.0 and
+    # raises otherwise, so an unclamped pct makes locate_text emit a region its
+    # own documented consumer rejects.
+    doc = _doc_overflowing_bottom()
+    loc = locate_text(doc, "Hello", page=1)[0]
+    rendered = inspect_page(doc, page=1, region=loc["region"]["pct"])
+    doc.close()
+
+    assert rendered[0]["type"] == "image"
+
+
+def test_points_are_not_clamped():
+    # Deliberate asymmetry: pct feeds inspect_page and must be renderable, while
+    # points are raw PDF coordinates for annotation, where a glyph that really
+    # does cross the page edge should still be described where it sits.
+    doc = _doc_overflowing_bottom()
+    page_height = doc[0].rect.y1
+    loc = locate_text(doc, "Hello", page=1)[0]
+    doc.close()
+
+    assert loc["region"]["points"]["y1"] > page_height
+    assert loc["region"]["pct"]["bottom"] == 1.0

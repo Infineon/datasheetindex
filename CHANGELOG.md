@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **`locate_text` now clamps its normalized coordinates to the page.** `pct` is documented as the `inspect_page(region=...)` input, and `inspect_page` *raises* `ValueError: Region 'top' and 'bottom' must be between 0.0 and 1.0` on an out-of-range region -- so a match whose box crossed a page edge made `locate_text` emit a region its own documented consumer rejects. Two ordinary cases produce it: a glyph whose descender crosses the bottom edge, and a CropBox whose origin falls inside the match. The downstream consumer had already hit this in production and carried its own `_clamp01` helper to compensate; that workaround is now redundant, though harmless to keep. **`points` is deliberately left unclamped**, because it means something different -- raw PDF coordinates for annotation and highlighting, where a glyph that really does cross the page edge should be described where it actually sits. The consequence worth knowing: the `pct * page_width == points - page_rect.x0` identity holds for every box inside the page and is intentionally broken for one that overflows.
+
 ## [0.24.0] - 2026-07-25
 
 ### Added

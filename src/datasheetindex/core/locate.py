@@ -2,8 +2,8 @@
 
 The missing edge between ``search_text`` (find text -> char offset) and
 ``inspect_page`` (render a region): given a string and a page, return where it
-sits, as normalized percentages (for the ``inspect_page`` round-trip) and raw
-PDF points (for PDF-native annotation).
+sits, as normalized percentages clamped to the page (for the ``inspect_page``
+round-trip) and raw, unclamped PDF points (for PDF-native annotation).
 """
 
 from __future__ import annotations
@@ -25,8 +25,8 @@ _Rect = tuple[float, float, float, float]
 
 
 class _Box(TypedDict):
-    pct: dict[str, float]  # {"top","bottom","left","right"}, each 0.0-1.0
-    points: dict[str, float]  # {"x0","y0","x1","y1"}, PDF points
+    pct: dict[str, float]  # {"top","bottom","left","right"}, clamped to 0.0-1.0
+    points: dict[str, float]  # {"x0","y0","x1","y1"}, raw PDF points, unclamped
 
 
 class TextLocation(TypedDict):
@@ -39,16 +39,39 @@ class TextLocation(TypedDict):
     pattern: NotRequired[str]  # which query produced this hit (list queries only)
 
 
+def _clamp01(value: float) -> float:
+    """Clamp a normalized coordinate into ``[0.0, 1.0]``."""
+    return min(1.0, max(0.0, value))
+
+
 def _box_from_rect(rect: _Rect, page_rect: pymupdf.Rect) -> _Box:
+    """Normalize a match rectangle against the page.
+
+    ``pct`` is clamped to the page; ``points`` deliberately is not.
+
+    A glyph can sit partly outside the page rect -- a descender crossing the
+    bottom edge, or a CropBox whose origin falls inside the match -- and the
+    normalized value is then just outside ``[0, 1]``. That matters because
+    ``pct`` is documented as the ``inspect_page(region=...)`` input and
+    ``inspect_page`` *raises* on an out-of-range region, so an unclamped box
+    makes this function emit a region its own documented consumer rejects.
+    Clamping keeps a genuine match usable instead of unrenderable.
+
+    ``points`` stays raw because it means something different: PDF-native
+    coordinates for annotation and highlighting, where a glyph that really does
+    cross the page edge should be described where it actually sits. So the
+    ``pct * page_width == points - page_rect.x0`` identity holds for every box
+    inside the page and is intentionally broken for one that overflows.
+    """
     x0, y0, x1, y1 = rect
     width = page_rect.width
     height = page_rect.height
     return {
         "pct": {
-            "left": (x0 - page_rect.x0) / width,
-            "right": (x1 - page_rect.x0) / width,
-            "top": (y0 - page_rect.y0) / height,
-            "bottom": (y1 - page_rect.y0) / height,
+            "left": _clamp01((x0 - page_rect.x0) / width),
+            "right": _clamp01((x1 - page_rect.x0) / width),
+            "top": _clamp01((y0 - page_rect.y0) / height),
+            "bottom": _clamp01((y1 - page_rect.y0) / height),
         },
         "points": {"x0": x0, "y0": y0, "x1": x1, "y1": y1},
     }
