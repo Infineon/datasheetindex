@@ -535,3 +535,129 @@ def test_a_disappearing_source_during_reuse_check_rebuilds(
     assert "source_unreadable" in caplog.text
     assert again.json_path is not None
     assert again.json_path.exists()
+
+
+def test_a_corrupted_text_deliverable_rebuilds_rather_than_raises(
+    tmp_path, toc_pdf, build_spy, not_editable, caplog
+):
+    """UnicodeDecodeError is a ValueError, not an OSError -- read_text's
+    ``except OSError`` alone would let it escape _reuse_from_disk and crash
+    the whole build instead of degrading to a rebuild.
+
+    A dangling UTF-8 lead byte (what a cut through a multi-byte character like
+    micro or degree leaves behind) is exactly what a truncated write in this
+    domain looks like, since datasheet text is full of such characters.
+    """
+    out = tmp_path / "out"
+    with DatasheetTools(str(toc_pdf)) as tools:
+        first = tools.build_datasheet(output_dir=str(out))
+    assert first.text_path is not None
+    first.text_path.write_bytes(first.text_path.read_bytes() + b"\xc2")
+
+    with caplog.at_level("DEBUG", logger="datasheetindex.tools.bound"):
+        with DatasheetTools(str(toc_pdf)) as tools:
+            again = tools.build_datasheet(output_dir=str(out))
+
+    assert len(build_spy) == 2
+    assert "artifact_unreadable" in caplog.text
+    assert again.json_path is not None
+    assert again.json_path.exists()
+
+
+def test_a_corrupted_sidecar_encoding_rebuilds_rather_than_raises(
+    tmp_path, toc_pdf, build_spy, not_editable, caplog
+):
+    """The same UnicodeDecodeError gap one level down, in read_sidecar.
+
+    _reuse_from_disk calls read_sidecar with no try/except of its own, so a
+    malformed-encoding sidecar must be handled inside read_sidecar itself.
+    """
+    out = tmp_path / "out"
+    with DatasheetTools(str(toc_pdf)) as tools:
+        first = tools.build_datasheet(output_dir=str(out))
+    assert first.json_path is not None
+    sidecar = sidecar_path(out, first.json_path.stem)
+    sidecar.write_bytes(b"\xc2")
+
+    with caplog.at_level("DEBUG", logger="datasheetindex.tools.bound"):
+        with DatasheetTools(str(toc_pdf)) as tools:
+            again = tools.build_datasheet(output_dir=str(out))
+
+    assert len(build_spy) == 2
+    assert "no_sidecar" in caplog.text
+    assert again.json_path is not None
+    assert again.json_path.exists()
+
+
+def test_an_unresolvable_source_rebuilds(
+    tmp_path, toc_pdf, build_spy, not_editable, monkeypatch, caplog
+):
+    """Only the reuse check's own resolve call fails.
+
+    The rebuild that follows a rejected reuse check also resolves the source
+    (to open the document, and again to write the fresh sidecar), so the
+    patch must fail once and then get out of the way -- a permanent failure
+    would make the fallback rebuild raise too and prove nothing about
+    degrading gracefully.
+    """
+    out = tmp_path / "out"
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=str(out))
+
+    original_resolve = DatasheetIndex._resolve_pdf_source
+    calls: list[int] = []
+
+    def flaky_resolve(self):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("cannot resolve source")
+        return original_resolve(self)
+
+    monkeypatch.setattr(DatasheetIndex, "_resolve_pdf_source", flaky_resolve)
+
+    with caplog.at_level("DEBUG", logger="datasheetindex.tools.bound"):
+        with DatasheetTools(str(toc_pdf)) as tools:
+            again = tools.build_datasheet(output_dir=str(out))
+
+    assert len(build_spy) == 2
+    assert "source_unresolvable" in caplog.text
+    assert again.json_path is not None
+    assert again.json_path.exists()
+
+
+def test_a_malformed_json_deliverable_triggers_deserialization_failed(
+    tmp_path, toc_pdf, build_spy, not_editable, caplog
+):
+    """The hash check must pass before the deserialize branch is reached.
+
+    Rewriting the JSON without also fixing up the sidecar's recorded
+    json_sha256 would only re-exercise json_hash_mismatch, which is already
+    covered elsewhere -- that would be a test that claims to cover
+    deserialization_failed but actually proves nothing about it.
+    """
+    out = tmp_path / "out"
+    with DatasheetTools(str(toc_pdf)) as tools:
+        first = tools.build_datasheet(output_dir=str(out))
+    assert first.json_path is not None
+    sidecar_file = sidecar_path(out, first.json_path.stem)
+
+    payload = json.loads(first.json_path.read_text(encoding="utf-8"))
+    del payload["toc"]
+    new_json_text = json.dumps(payload, indent=2, ensure_ascii=False)
+    first.json_path.write_text(new_json_text, encoding="utf-8")
+    new_json_sha256 = hashlib.sha256(new_json_text.encode("utf-8")).hexdigest()
+
+    record = json.loads(sidecar_file.read_text(encoding="utf-8"))
+    record["artifacts"]["json"]["sha256"] = new_json_sha256
+    sidecar_file.write_text(
+        json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+
+    with caplog.at_level("DEBUG", logger="datasheetindex.tools.bound"):
+        with DatasheetTools(str(toc_pdf)) as tools:
+            again = tools.build_datasheet(output_dir=str(out))
+
+    assert len(build_spy) == 2
+    assert "deserialization_failed" in caplog.text
+    assert again.json_path is not None
+    assert again.json_path.exists()

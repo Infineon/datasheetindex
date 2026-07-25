@@ -325,7 +325,7 @@ class DatasheetTools:
         try:
             json_text = json_path.read_text(encoding="utf-8")
             text_content = text_path.read_text(encoding="utf-8")
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             logger.debug("Not reusing on-disk artifacts: %s", "artifact_unreadable")
             return None
 

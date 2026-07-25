@@ -173,7 +173,7 @@ def read_sidecar(path: Path) -> ArtifactRecord | None:
     """
     try:
         raw = path.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         logger.debug("No readable build sidecar at %s", path)
         return None
     try:
