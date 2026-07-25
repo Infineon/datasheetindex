@@ -186,3 +186,65 @@ def test_datasheet_artifacts_defaults():
     assert a.json_data == {}
     assert a.text_content == ""
     assert a.toc_quality is None
+
+
+def test_toc_node_round_trips_every_field():
+    """from_dict must restore fields to_dict omits when empty."""
+    node = TocNode(
+        title="Electrical Characteristics",
+        level=2,
+        start_page=12,
+        end_page=20,
+        node_id="0003",
+        breadcrumb="Product > Electrical Characteristics",
+        boilerplate_category="legal",
+        has_tables=True,
+        table_count=7,
+        summary="Absolute maximum ratings.",
+        continued_tables=["Table 5"],
+        footnote_markers=["1)", "2)"],
+        cross_references=[{"target": "Figure 3", "page": 14}],
+        nodes=[TocNode(title="Child", level=3, start_page=13, end_page=13)],
+    )
+
+    restored = TocNode.from_dict(node.to_dict())
+
+    assert restored == node
+
+
+def test_toc_node_from_dict_supplies_omitted_defaults():
+    """A minimal dict, which is what to_dict emits for a bare node."""
+    minimal = TocNode(title="Overview", level=1, start_page=1).to_dict()
+
+    restored = TocNode.from_dict(minimal)
+
+    assert restored.summary == ""
+    assert restored.continued_tables == []
+    assert restored.footnote_markers == []
+    assert restored.cross_references == []
+    assert restored.nodes == []
+
+
+def test_toc_quality_round_trips_including_details():
+    """``details`` is absent from the deliverable, so the sidecar must carry it."""
+    quality = TocQuality(
+        score=0.62,
+        entry_count=2,
+        max_depth=1,
+        page_coverage=1.0,
+        recommend_summaries=True,
+        details="2 entries, 1 level, full coverage",
+    )
+
+    restored = TocQuality.from_dict(quality.to_dict())
+
+    assert restored == quality
+    assert restored.details == "2 entries, 1 level, full coverage"
+
+
+def test_artifacts_default_to_complete_enrichment():
+    """Existing constructors keep working, and mean 'nothing was skipped'."""
+    artifacts = DatasheetArtifacts()
+
+    assert artifacts.llm_enrichment_incomplete is False
+    assert artifacts.llm_enrichment_notes == ()

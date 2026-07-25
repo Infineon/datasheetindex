@@ -52,6 +52,30 @@ class TocNode:
             result["nodes"] = [child.to_dict() for child in self.nodes]
         return result
 
+    @classmethod
+    def from_dict(cls, data: dict) -> TocNode:
+        """Rebuild a node from ``to_dict`` output.
+
+        ``to_dict`` omits empty fields, so every optional key needs a default
+        here or a reloaded artifact would differ from the one that produced it.
+        """
+        return cls(
+            title=data["title"],
+            level=data["level"],
+            start_page=data["start_page"],
+            end_page=data.get("end_page", 0),
+            node_id=data.get("node_id", ""),
+            breadcrumb=data.get("breadcrumb", ""),
+            boilerplate_category=data.get("boilerplate_category", ""),
+            has_tables=data.get("has_tables", False),
+            table_count=data.get("table_count", 0),
+            summary=data.get("summary", ""),
+            continued_tables=list(data.get("continued_tables", [])),
+            footnote_markers=list(data.get("footnote_markers", [])),
+            cross_references=list(data.get("cross_references", [])),
+            nodes=[cls.from_dict(child) for child in data.get("nodes", [])],
+        )
+
 
 @dataclass
 class TocQuality:
@@ -63,6 +87,34 @@ class TocQuality:
     page_coverage: float = 0.0
     recommend_summaries: bool = False
     details: str = ""
+
+    def to_dict(self) -> dict:
+        """Serialize every field, ``details`` included.
+
+        Deliberately not what ``index.py`` writes into the ToC JSON's
+        ``toc_quality`` block, which omits ``details`` and must stay
+        byte-identical. This one exists for the build sidecar.
+        """
+        return {
+            "score": self.score,
+            "entry_count": self.entry_count,
+            "max_depth": self.max_depth,
+            "page_coverage": self.page_coverage,
+            "recommend_summaries": self.recommend_summaries,
+            "details": self.details,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> TocQuality:
+        """Rebuild from ``to_dict`` output."""
+        return cls(
+            score=data.get("score", 0.0),
+            entry_count=data.get("entry_count", 0),
+            max_depth=data.get("max_depth", 0),
+            page_coverage=data.get("page_coverage", 0.0),
+            recommend_summaries=data.get("recommend_summaries", False),
+            details=data.get("details", ""),
+        )
 
 
 @dataclass
@@ -78,6 +130,13 @@ class DatasheetArtifacts:
     # serialization). Retained so tools can resolve structure via TocNode
     # attributes instead of reaching into the serialized dict shape.
     nodes: list[TocNode] = field(default_factory=list)
+    # True when LLM work this build was eligible for did not produce its
+    # result -- no callable was obtainable, or the call ran and raised. A
+    # rejected fallback candidate is a completed decision and does NOT set
+    # this. Read by the artifact cache, which refuses to reuse a degraded
+    # build, from disk or from memory.
+    llm_enrichment_incomplete: bool = False
+    llm_enrichment_notes: tuple[str, ...] = ()
 
 
 def flatten_nodes(nodes: list[TocNode]) -> list[TocNode]:
