@@ -1007,6 +1007,8 @@ datasheetindex/
 │   │                      #   Page alignment validation
 │   ├── _textmatch.py      # Shared dash/token normalization + matcher
 │   ├── locate.py          # locate_text: text -> bounding-box coordinates
+│   ├── artifact_cache.py  # Build sidecar: fingerprint, validity, atomic writes
+│   │                      #   <stem>.build.json beside the two deliverables
 │   ├── preamble.py        # Pages 1-2 raw text for agent orientation
 │   └── quality.py         # Page-level quality scoring
 │                          #   (text density, extraction confidence)

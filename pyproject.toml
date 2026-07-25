@@ -1,6 +1,6 @@
 [project]
 name = "datasheetindex"
-version = "0.23.0"
+version = "0.24.0"
 description = "Agent-first parameter extraction from technical datasheets"
 readme = "README.md"
 requires-python = ">=3.13"
