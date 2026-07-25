@@ -1,8 +1,12 @@
 # Figure indexing: raster regions and captions
 
-Design, 2026-07-25. Status: approved, not implemented.
+Design, 2026-07-25. Status: approved, not implemented. Section 6 revised the same
+day: VLM captioning moved from opt-in to on-by-default with deterministic triage
+and a caller-settable cap.
 
-Independent of the artifact-reuse and preamble specs of the same date.
+Independent of the preamble spec of the same date. **Depends on artifact reuse**,
+shipped in 0.24.0: section 6 uses its `llm_enrichment_incomplete` field and its
+`build_options` cache key.
 
 ## Problem
 
@@ -218,7 +222,9 @@ cannot judge them without knowing the bar, and the default may change.
 default. It is deliberately **not** plumbed through `DatasheetIndex.build()` or
 the tool schemas until a caller asks: adding a knob to the public surface for a
 value nobody has needed to change is the kind of speculative API this design
-otherwise avoids.
+otherwise avoids. Section 6's `max_figure_captions` *is* plumbed, and the
+difference is not inconsistency -- see "Why this is plumbed when `min_area_pct`
+is not" there.
 
 **The threshold is precautionary and uncalibrated.** Measured distribution:
 
@@ -231,59 +237,167 @@ Neither document contains a single image below 0.5%, so this corpus cannot
 calibrate the value. It is set low on purpose: excluding real content is the
 expensive error, and a few logo entries are the cheap one.
 
-### 6. Opt-in VLM captions
+### 6. VLM captions, on by default where the text layer failed
 
 An uncaptioned raster region is located but unnamed, so an agent asking "where
-is the die size table" cannot find it without inspecting pages one by one. An
-optional pass renders each uncaptioned region and asks a VLM for one line,
-stored as `caption` with `caption_source: "llm"`.
+is the die size table" cannot find it without inspecting pages one by one. A pass
+renders each such region and asks a VLM for one line, stored as `caption` with
+`caption_source: "llm"`.
 
-#### The flag is `caption_figures`, and captioning requires it
+#### Only where the deterministic signal failed
 
-Captioning must **not** be triggered by a callable merely happening to support
-vision. `DatasheetIndex.build()` creates a default client on its own whenever ToC
-quality is below threshold (`index.py:565-567`), and that client is
-vision-capable, so vision-capability alone as the gate would make every weak-ToC
-build silently start issuing VLM calls. The gate is therefore
-`caption_figures=True` **and** a vision-capable callable; either alone yields no
-captions.
+Captioning every raster region would be waste, and measurably so. On the PSoC all
+22 raster placements sit on pages that already carry a `Figure N` caption in the
+text layer; on the PCN none of the 8 do.
 
-`caption_figures: bool = False` is plumbed exactly as `include_summaries` is,
-which is the existing precedent for an opt-in LLM cost:
+| | raster placements >=1% | on already-captioned pages | VLM candidates |
+|---|---|---|---|
+| PSoC 6 (134p) | 22 | 22 | **0** |
+| PCN (7p) | 8 | 0 | **8** |
+
+The rule: **a page's raster regions are candidates unless the page carries at
+least as many text-layer captions as raster regions.** A well-formed datasheet
+therefore costs nothing, and the calls land on exactly the documents where the
+index is otherwise blind -- on the PCN they include the page-5 Product Attributes
+table that motivates this design.
+
+Both counts come from the `scan_pages` result. Caption entries and raster entries
+are already in one page-keyed array, so the comparison needs no new plumbing.
+
+"At least as many" rather than "no caption at all" is what stops a page with one
+caption and three raster regions from silently skipping two. **Neither fixture
+contains such a page** -- every raster-bearing page in the PSoC has exactly one
+caption and exactly one region, and no page in either document has more regions
+than captions -- so like the clipping in section 3 this branch is precautionary
+and its test is synthetic. When the counts do disagree, *all* of that page's
+regions become candidates rather than some arbitrary subset: section 4 already
+accepts caption/region redundancy rather than guess an association, and picking
+"which two of three are uncaptioned" would be exactly that guess.
+
+#### The gate is a key, not a flag
+
+`caption_figures: bool = True`. Captioning runs when the flag is set **and** a
+vision-capable callable is available; either alone yields no captions. A caller
+with no credentials configured gets the deterministic index and nothing else,
+which is the intended fallback rather than an error.
+
+This follows the ToC fallback, not summaries, and the distinction is repair versus
+enhancement. `index.py:578` already creates a client on its own when ToC quality
+is below threshold -- cost incurred on key presence, with no explicit flag,
+because the deterministic path failed and the artifact is degraded without it.
+Summaries sit behind `include_summaries` because they apply to every document and
+scale with its size. Triaged captioning has the fallback's shape: it fires only
+where the text layer yielded no caption, and on a normal datasheet it does not
+fire at all.
+
+`caption_figures` remains a real off switch, for a caller who wants a key for the
+ToC fallback but no figure spend.
+
+**One client, not two.** `build()` self-creates a client only for the weak-ToC
+branch today. It must now also create one when caption candidates exist, and both
+branches must share that single client and the existing `close_llm_client` in the
+`finally` -- a second client would double the connection cost and leak on the path
+where only captions need it.
+
+**There is no `model=None` guard, deliberately.** `include_summaries` raises when
+set without a model (`bound.py:199`) because an explicit opt-in that cannot be
+honoured is a caller error. That reasoning inverts here: with the default `True`,
+the same guard would make **every keyless build raise**, destroying the fallback
+this design is built around. A missing client yields no captions and a recorded
+note instead.
+
+#### The cap is a parameter
+
+`max_figure_captions: int = 20`. Candidates are ordered by visible area
+descending, so the cap retains the most substantive regions. What it dropped is
+never silent:
+
+```json
+"figure_captions_excluded": {"above_max": 14, "max_figure_captions": 20}
+```
+
+The key is emitted on every build, with `above_max: 0` when nothing was dropped,
+matching `figures_excluded` -- a consumer reads the effective cap from the
+artifact rather than assuming this version's default.
+
+Neither fixture approaches the cap. It exists for the shape neither fixture has:
+a scanned document whose every page is one full-page image over an empty text
+layer, where the triage rule authorizes one VLM call per page inside a single
+`build_datasheet` the caller is blocked on.
+
+**Hitting the cap leaves the artifact complete and cacheable.** The cap is
+deterministic, recorded in the artifact, and reproducible from the same inputs, so
+reuse serves exactly what a rebuild would produce. A caption call that *raises* is
+the opposite -- transient and not reproducible -- and still sets
+`llm_enrichment_incomplete`. Keeping the two apart is the point: a disclosed limit
+is a fact about the artifact, a gateway error is not.
+
+**Why this is plumbed when `min_area_pct` is not.** Section 5 keeps `min_area_pct`
+off the public surface because no caller has needed to change it. That reasoning
+does not transfer. `min_area_pct` changes what the free deterministic index
+contains; `max_figure_captions` bounds spend and latency, which a caller can
+reasonably want to set per document. The tool description must say so plainly --
+each caption is one VLM call, and raising the cap raises cost proportionally.
+
+Both fields are plumbed as `include_summaries` is:
 
 | site | change |
 |---|---|
-| `index.py` `build()` | new keyword parameter, defaults `False` |
-| `tools/bound.py` `build_datasheet()` | new parameter; raises `ValueError` when set with `model=None`, mirroring the `include_summaries` guard at `bound.py:166` |
-| `tools/bound.py` `_BuildOptions` | new field -- so it keys the in-memory cache and the sidecar's `build_options` |
-| `tools/defs.py` | `"caption_figures": {"type": "boolean"}` in the input schema, `args.get("caption_figures", False)` at the call site, and an `IMPORTANT - caption_figures` paragraph in the tool description warning that it costs one VLM call per uncaptioned region |
-| `batch.py` `build_batch()` | new keyword parameter, passed through |
-| `cli.py` | `--caption-figures`, with the same "requires `--model`" check as `--include-summaries` |
+| `index.py` `build()` | `caption_figures: bool = True`, `max_figure_captions: int = 20` |
+| `tools/bound.py` `build_datasheet()` | both parameters, no `model=None` guard (above) |
+| `tools/bound.py` `_BuildOptions` | both as new fields -- so they key the in-memory cache and the sidecar's `build_options` |
+| `tools/defs.py` | `"caption_figures": {"type": "boolean"}` and `"max_figure_captions": {"type": "integer"}` in the input schema, read with the same defaults at the call site, and an `IMPORTANT - figure captioning cost` paragraph stating that captioning runs by default when credentials are configured, that each caption is one VLM call, and that raising `max_figure_captions` raises cost proportionally |
+| `batch.py` `build_batch()` | both keyword parameters, passed through |
+| `cli.py` | `--no-caption-figures` and `--max-figure-captions`; no "requires `--model`" check, per the guard note above |
 
-**It belongs in the disk-cache key.** `2026-07-25-on-disk-artifact-reuse-design.md`
-records the resolved `build_options` in the sidecar, and adding the field to
-`_BuildOptions` puts it there by construction. Without that, a captioned artifact
-would be served to a caller who did not ask for captions and, worse, an
-uncaptioned one to a caller who did.
+#### They belong in the cache key
 
-**The deterministic index is not flag-gated.** Regions and text-layer captions
-cost near zero inside the existing page pass and are always emitted; only the VLM
-pass is opt-in. So an agent always learns a figure is *there*, and pays only for
-learning what it is.
+`2026-07-25-on-disk-artifact-reuse-design.md` records the resolved `build_options`
+in the sidecar, so adding both fields to `_BuildOptions` puts them there by
+construction. Without that, a captioned artifact would be served to a caller who
+turned captioning off and, worse, an uncaptioned one to a caller who did not.
+
+Keying on `max_figure_captions` over-keys slightly: caps of 20 and 50 produce
+identical artifacts on a document with 8 candidates, yet miss each other's cache
+entries. That is the safe direction -- a spurious rebuild costs one build, while
+an under-keyed hit serves an artifact the caller did not ask for.
 
 **`min_area_pct` stays out of the cache key**, consistent with section 5: it is
 not plumbed through `build()`, so it cannot vary between two builds of the same
 document by the same version. A change to its default ships with a release, and
 the sidecar already keys on the exact version.
 
+#### A missing key marks the artifact incomplete
+
+When candidates exist and no vision-capable client is available, the build appends
+`figure_captions_no_client` to the enrichment notes, so `llm_enrichment_incomplete`
+is set and the artifact is not reused. This mirrors `toc_fallback_no_client`
+(`index.py:582-586`) exactly.
+
+The consequence is deliberate and worth stating plainly: **a keyless build of a
+document with blind regions loses on-disk reuse.** Adding credentials later then
+yields captions without hand-clearing the output directory, which is the behaviour
+the reuse design intends. The measured blast radius is small -- the PSoC produces
+zero candidates and stays cacheable, and the PCN was already uncacheable for its
+ToC -- so this costs reuse only on documents whose artifacts are genuinely
+degraded.
+
+A document with **no** candidates appends nothing and stays complete. A missing key
+is only a defect where there was something to caption.
+
+**The deterministic index is never gated.** Regions and text-layer captions cost
+near zero inside the existing page pass and are always emitted, whatever the flag,
+the cap, or the credentials. An agent always learns a figure is *there*, and pays
+only for learning what it is.
+
 #### The same model as the ToC fallback and summaries, and no new model knob
 
 `"gpt-4.1"` is already the default in `create_llm_client` (`llm/client.py:250`)
 and what `index.py:671` uses for the automatic fallback, and it is
-vision-capable. `caption_figures` gates *whether* captioning runs; the model
-comes from the callable the caller already supplies.
+vision-capable. `caption_figures` gates *whether* captioning runs; the model comes
+from the callable the caller supplies, or from the one `build()` self-creates.
 
-Two consequences of reusing it:
+Three consequences of reusing it:
 
 - **`"gpt-4.1"` is currently a duplicated literal**, in `client.py:250` and
   `index.py:671`. A third copy for figure captions would make drift a matter of
@@ -345,7 +459,21 @@ the artifact from carrying hallucinated numbers a downstream consumer would
 trust. `research.md` is explicit that VLMs hallucinate table rows, and a caption
 is a navigation aid, not data.
 
-Six regions on the PCN, so cost is trivial.
+#### Rendering is serial, dispatch is concurrent
+
+PyMuPDF is not thread-safe for concurrent page work -- the parallel table scan
+already carries that scar, and measured *wrong counts* rather than merely slower
+ones. So every selected region is rendered first, serially, through
+`inspect_page`. The resulting base64 PNGs are then dispatched to the VLM through
+a small bounded thread pool, which is network I/O and safe to overlap.
+
+Eight candidates on the PCN, so its cost is trivial either way. At the default cap
+of 20, serial dispatch at typical multi-second VLM latency would put tens of
+seconds inside one `build_datasheet`, which is why the split is worth its
+complexity. **Per-call latency is unmeasured** -- neither fixture has been run
+against a live gateway for this -- so implementation must measure it and record
+the real serial and concurrent numbers here, exactly as section 7 requires for the
+scan cost.
 
 ### 7. Where it runs
 
@@ -421,14 +549,27 @@ that the stub value reaches the emitted JSON keeps them honest afterwards.
 
 ## Compatibility
 
-`figures` and `figures_excluded` are new top-level keys in the ToC JSON. Purely
-additive; no existing key changes. `caption_figures` is a new keyword parameter
-defaulting to `False` on `build()`, `build_datasheet()`, and `build_batch()`, and
-an optional property in the tool schema, so every existing caller and every
-existing tool invocation behaves exactly as today. A document with no qualifying raster images
-and no figure captions emits an empty `figures` array rather than omitting the
-key, so a consumer can distinguish "none found" from "this artifact predates the
-feature" by the key's presence.
+`figures`, `figures_excluded` and `figure_captions_excluded` are new top-level
+keys in the ToC JSON. Purely additive; no existing key changes. A document with no
+qualifying raster images and no figure captions emits an empty `figures` array
+rather than omitting the key, so a consumer can distinguish "none found" from
+"this artifact predates the feature" by the key's presence.
+
+`caption_figures` and `max_figure_captions` are new keyword parameters on
+`build()`, `build_datasheet()` and `build_batch()`, and optional properties in the
+tool schema, so no existing call site needs to change.
+
+**`caption_figures` defaulting to `True` is a behaviour change, not an addition**,
+and it is the one thing here an existing caller can notice. A build that supplies
+-- or self-creates -- a vision-capable client will begin issuing VLM calls
+wherever the triage finds candidates. Three things bound it: the deterministic
+index is identical either way, a well-formed datasheet yields zero candidates
+(measured, section 6), and `caption_figures=False` restores today's behaviour
+exactly.
+
+Artifacts written by an earlier version are already refused by the sidecar's
+version check, which `reuse_blocker` evaluates before `build_options`, so the two
+added fields cannot be misread against an older sidecar.
 
 ## Testing
 
@@ -478,22 +619,44 @@ Synthetic PDFs, so assertions are exact and no fixture is required:
   wrapper cannot drift from the function it delegates to.
 - The seven repointed `generate_text` stubs in `tests/test_index.py` return a
   `PageScan` and their text still reaches the emitted artifacts.
-- **`caption_figures` defaults False, and a vision-capable callable alone does
-  not caption.** Pass a stub exposing `describe_image` without setting the flag
-  and assert every `caption` is null and `describe_image` was never called. This
-  is the test for the weak-ToC build that creates its own vision-capable client.
-- `caption_figures=True` with `model=None` raises on `DatasheetTools`, mirroring
-  the `include_summaries` guard.
-- **Two builds differing only in `caption_figures` do not share a cache entry**,
-  on the in-memory cache and on the sidecar once artifact reuse lands.
-- **A callable without `describe_image` yields no captions and does not error**
-  with `caption_figures=True`. Pass a plain `(system, user) -> str` stub and
-  assert the deterministic index is complete with every `caption` null. This is
-  the compatibility guarantee for consumers injecting their own callable.
+- **A page whose caption count matches its raster count is not captioned.** One
+  image and one `Figure N` caption, a `describe_image` stub, defaults everywhere:
+  assert the stub was never called. This is the PSoC's shape on all 22 placements
+  and the test that keeps a normal datasheet free.
+- **A page with more raster regions than captions makes them all candidates.**
+  Two images and one caption yields two `describe_image` calls, not one. Synthetic
+  -- no page in either fixture has this shape.
+- **`caption_figures` defaults True**: an uncaptioned region plus a
+  `describe_image` stub yields a caption with `caption_source: "llm"` without the
+  caller setting anything. `caption_figures=False` with the same inputs yields
+  none and never calls the stub.
+- **`caption_figures=True` with `model=None` does not raise**, unlike
+  `include_summaries` -- it degrades to no captions. Assert the build succeeds;
+  this pins the deliberate absence of that guard.
+- **The cap retains the largest regions and discloses the rest.** With 25
+  candidates of differing area and `max_figure_captions=20`, exactly the 20
+  largest carry captions, `figure_captions_excluded` reads
+  `{"above_max": 5, "max_figure_captions": 20}`, and the artifact is **not**
+  marked incomplete -- a disclosed deterministic limit stays cacheable.
+- **Two builds differing only in `caption_figures`, and two differing only in
+  `max_figure_captions`, do not share a cache entry** -- on the in-memory cache
+  and on the sidecar.
+- **A callable without `describe_image` yields no captions and does not error.**
+  Pass a plain `(system, user) -> str` stub with candidates present and assert the
+  deterministic index is intact with every `caption` null. This is the
+  compatibility guarantee for consumers injecting their own callable.
+- **No vision client plus candidates marks the artifact incomplete**, with a
+  `figure_captions_no_client` note, so it is refused for reuse. **No vision client
+  plus no candidates stays complete and cacheable** -- the pair matters more than
+  either alone, since the second is what keeps keyless reuse working on a normal
+  datasheet.
 - **A `describe_image` that raises leaves the build successful**, with `caption`
   null and a warning logged -- the text-only-model case -- **and sets
   `llm_enrichment_incomplete`**, so the caption-less artifact is not cached
   permanently.
+- **Every render precedes every dispatch.** With a recording stub on both
+  `inspect_page` and `describe_image`, assert no render is interleaved with a
+  dispatch, pinning the thread-safety split rather than leaving it to the reader.
 - The captioning pass calls `inspect_page` with the emitted `region` unmodified,
   asserted with a recording stub, so an internal caller cannot start
   transforming coordinates the agent is told to use verbatim.
