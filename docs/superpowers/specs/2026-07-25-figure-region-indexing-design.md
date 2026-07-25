@@ -3,7 +3,12 @@
 Design, 2026-07-25. Status: approved, not implemented. Section 6 revised the same
 day: VLM captioning moved from opt-in to on-by-default, bounded by a
 caller-settable cap rather than by triage -- two triage rules were designed,
-measured, and rejected as unsound in the process.
+measured, and rejected as unsound in the process. Sections 2, 3 and 5 were then
+recalibrated against a **14-document, 998-page, 5-vendor corpus** (TI, Infineon,
+Microchip, Nexperia, Diodes) rather than the two documents they were designed on;
+that measurement corrected the caption number pattern, promoted page clipping from
+precautionary to necessary, and confirmed both thresholds. The corpus is not in the
+repository -- it produced numbers, not fixtures, and the suite stays synthetic.
 
 Independent of the preamble spec of the same date. **Depends on artifact reuse**,
 shipped in 0.24.0: section 6 uses its `llm_enrichment_incomplete` field and its
@@ -61,9 +66,10 @@ regions therefore targets the actual failure rather than settling for part of it
 
 ## Two signals, because neither covers both documents
 
-- **Captions from the text layer.** 24 caption lines in the PSoC across 134 pages.
-  Free, and yields a human-meaningful name -- but *not* exact, and the naive
-  pattern is actively wrong; see "Captions are a pattern, not a search" below.
+- **Captions from the text layer.** 492 caption lines across a 14-document,
+  998-page corpus; 24 of them in the PSoC. Free, and yields a human-meaningful
+  name -- but *not* exact, and the naive pattern is actively wrong; see "Captions
+  are a pattern, not a search" below.
 - **Raster regions.** The PCN's table has its title (`Product Attributes`)
   rendered *inside* the image, so no caption exists in the text layer to find.
   The PCN has **zero** `Figure` lines of any form, so on that document captions
@@ -103,7 +109,7 @@ already compute, so there is one source of truth rather than a duplicated list.
     "kind": "caption",
     "region": null,
     "bbox": null,
-    "figure_number": 2,
+    "figure_number": "2",
     "caption": "Figure 2 Block diagram",
     "caption_source": "text"
   }
@@ -124,38 +130,51 @@ putting it on the entry saves the consumer a join.
 
 ### 2. Captions are a pattern, not a search
 
-Matching `Figure N` anywhere in the text layer publishes prose as captions.
-Measured on the PSoC, and the numbers are decisive:
+Matching `Figure N` anywhere in the text layer publishes prose as captions. The
+pattern below was designed on the PSoC alone and then measured against a
+**14-document, 998-page, 5-vendor corpus** (TI, Infineon, Microchip, Nexperia,
+Diodes), read through `_extract_page_text` -- the column-aware extractor the text
+file uses, not `page.get_text()`. The corpus both vindicated the design and found
+one real defect.
 
-| pattern | matches | what they are |
-|---|---|---|
-| `Figure N` anywhere | 36 | mostly prose |
-| line-anchored `^Figure N <text>` | 6 | **all six are prose**: "Figure 2 shows the major subsystems...", "Figure 3 shows that the clock system..." |
-| same-line `^Figure N[.:] <title>` | **0** | this form does not occur in either fixture |
-| bare `^Figure N$` | **24** | the actual captions |
+| form | example | occurrences | documents |
+|---|---|---|---|
+| same-line, section-relative | `Figure 10-1. Reset Logic` | **404** | 9 / 14 |
+| bare, section-relative | `Figure 3-2` + next line | 49 | 1 / 14 |
+| bare, plain | `Figure 12` + next line | 33 | 2 / 14 |
+| same-line, plain | `Fig. 10. Enable and disable times` | 6 | 1 / 14 |
+| no separator (**rejected**) | `Figure 6-2 shows the structure of...` | 70 | prose, correctly excluded |
 
-So a naive pattern is not merely imprecise, it is inverted: line-anchoring alone
-yields six matches of which zero are captions, while the 24 real ones are missed
-because this vendor puts the number and the title on **separate lines**:
+Two findings, in order of importance.
 
-```
-Figure 2
-Block diagram
-```
+**The mandatory-separator rule is correct, and it is the load-bearing part.** It
+divides 404 real captions from 70 prose lines across 998 pages with no scoring and
+no tuning: every rejected line reads "Figure X shows/presents/illustrates...".
+Designed against a document where the same-line form occurred *zero* times, it
+turned out to describe the most common caption form in the corpus.
 
-Two accepted forms, and prose is excluded structurally rather than by scoring:
+**The number pattern was the defect.** `(\d+)` does not match `10-1`, so the
+original pattern found captions in **2 of 14** documents. The number is therefore
+`(\d+(?:[-–]\d+)?)` -- section-relative numbering, en-dash included, since
+publishers use both. That single change takes coverage to **11 of 14** documents
+and 492 captions. The three documents still yielding none genuinely contain no
+figure captions.
+
+Two accepted forms, then, with prose excluded structurally rather than by scoring:
 
 - **Split form.** A line that is exactly `Figure N` or `Fig. N`, optional trailing
-  `.`/`:`, nothing else. The title is the next non-empty line. `caption` is the
-  two joined; `figure_number` carries `N`.
+  `.`/`:`, nothing else. The title is the next non-empty line. `caption` is the two
+  joined.
 - **Same-line form.** `Figure N` followed by a **mandatory** `.` or `:` separator,
-  then the title. The mandatory punctuation is exactly what excludes
-  "Figure 2 shows the major subsystems" -- that separator is a space. This form
-  occurs zero times in both fixtures and is included because it is common in other
-  vendors' documents; it is therefore **unverified here** and its test is
-  synthetic.
+  then the title. That separator is what excludes "Figure 2 shows the major
+  subsystems", where it is a space.
 
-A `Figure N` mention that matches neither form emits **nothing**. Rejected the
+**`figure_number` is a string, always** -- `"10-1"` as readily as `"12"`. Not an
+integer that becomes a string when hyphenated: a union type costs every consumer a
+branch, and the field is an identifier to display and match on, never an arithmetic
+value.
+
+A `Figure N` mention matching neither form emits **nothing**. Rejected the
 alternative of emitting it as a "text mention": an entry saying page 12 mentions
 Figure 3 is noise the agent must filter, and the whole point of the array is that
 its entries are worth acting on.
@@ -164,10 +183,17 @@ its entries are worth acting on.
 line adjacency, so a bare `Figure N` whose next line is body text yields a wrong
 title -- textual adjacency is far stronger evidence than the geometric proximity
 section 4 rejects, but it is still an inference. And adjacency must be evaluated on
-the **same column-aware extraction the text file carries** (`_extract_page_text`),
-not `page.get_text()`, or a two-column page can interleave the number and title
-with unrelated lines. Both fixtures were measured with the raw extractor, so the
-24 must be re-confirmed against the column-aware one during implementation.
+the column-aware extraction, or a two-column page can interleave the number and
+title with unrelated lines; the corpus numbers above were measured that way, so
+they are the numbers the implementation should reproduce.
+
+**A missed caption is cheap, and that bounds this whole section's risk.** Captions
+gate nothing: since section 6 abandoned triage, a raster figure whose caption the
+pattern misses is still enumerated and still VLM-captioned. The pattern is an
+optimization that supplies a free name, not the mechanism by which figures are
+discovered. The one case where a miss is unrecoverable is a **vector** figure,
+which has no raster region and so no fallback -- see the layout engine under
+Rejected.
 
 ### 3. Regions are clipped to the page
 
@@ -189,9 +215,16 @@ Normalize **relative to the page rect's origin**, not to zero:
 contract; a page whose CropBox does not start at `(0, 0)` would otherwise be
 offset by exactly that origin.
 
-Neither fixture exercises either case -- 0 of 22 images off-page on the PSoC, 0 of
-9 on the PCN, and every page rect origin is `(0, 0)` in both. Like `min_area_pct`,
-this is precautionary and the tests for it are synthetic.
+**Clipping is not precautionary; a real vendor document needs it.** The original
+two fixtures showed 0 off-page placements of 22 and of 9, which made this look
+defensive. Across the 14-document corpus there are **9 placements extending past
+the page**, all in `ti-tlv9061` -- a 99-page TI datasheet. Without clipping those
+nine normalize outside `0..1` and `inspect_page` rejects every one of them, so the
+feature would ship publishing regions its own documented consumer refuses.
+
+A non-zero page rect origin remains unobserved -- 0 pages of 998 -- so *that* half
+stays precautionary with a synthetic test. The two cases are no longer in the same
+category and the spec should not keep implying they are.
 
 ### 4. Captions are reported separately, never merged with regions
 
@@ -232,16 +265,23 @@ otherwise avoids. Section 6's `max_figure_captions` *is* plumbed, and the
 difference is not inconsistency -- see "Why this is plumbed when `min_area_pct`
 is not" there.
 
-**The threshold is precautionary and uncalibrated.** Measured distribution:
+**The threshold is load-bearing, and the original two documents said the
+opposite.** On the PSoC and PCN alone, not one image fell below 0.5%, which made
+`min_area_pct` look like dead code kept for safety. Across the 14-document corpus:
 
-| | placements | <0.5% | 0.5-2% | 2-5% | >5% |
-|---|---|---|---|---|---|
-| PSoC 6 (134p) | 22 | 0 | 0 | 1 | 21 |
-| PCN (7p) | 9 | 0 | 1 | 2 | 6 |
+| | placements | below 1.0% (excluded) | below 0.5% | documents with a repeated xref |
+|---|---|---|---|---|
+| 14 documents, 998 pages | 168 | **73 (43%)** | 61 (36%) | 4 / 14 |
 
-Neither document contains a single image below 0.5%, so this corpus cannot
-calibrate the value. It is set low on purpose: excluding real content is the
-expensive error, and a few logo entries are the cheap one.
+So the threshold discards nearly half of all raster placements, and the repeated
+image XObject -- the vendor logo stamped on every page, which the two-document
+corpus disproved -- occurs in 4 of 14 documents. Both the threshold and its default
+are retained on this evidence rather than on caution.
+
+It stays set low on purpose: excluding real content is the expensive error, and a
+few logo entries are the cheap one. Since section 6 dropped triage, the cheap error
+now also costs a VLM call, but area-descending ordering sorts logos last, so the
+cap absorbs them before they displace anything substantive.
 
 ### 6. VLM captions, on by default and bounded by a cap
 
@@ -360,7 +400,12 @@ rather than passing it through. `0` is valid and means the deterministic index
 with no captioning -- the same result as `caption_figures=False`, reached by the
 cost knob instead of the switch.
 
-**The PSoC reaches the cap**, at 22 candidates against a default of 20, so the
+**The default is calibrated, not guessed.** Across the 14-document corpus the
+candidate count per document has a median of **4** and a maximum of **29**, and
+only **2 of 14** documents exceed 20. So the cap is generous for the typical
+document and binds only on the outliers, which is what a cost ceiling should do.
+
+**The PSoC is one of those two**, at 22 candidates against a default of 20, so the
 two largest-area survivors displace two smaller regions and
 `figure_captions_excluded` reads `{"above_max": 2, "max_figure_captions": 20}`.
 That is the intended behaviour rather than a mis-set default: the ordering keeps
@@ -780,8 +825,38 @@ that the stub value reaches the emitted JSON keeps them honest afterwards.
   prefers OCR to VLMs for structured data, but it needs a Tesseract binary,
   which breaks the property that PyMuPDF is the only runtime dependency, and OCR
   still flattens table structure into prose.
-- **Vector figure detection.** Unreliable per the numbers above, and largely
-  unnecessary since vector figures already leak their text.
+- **Vector figure detection by clustering drawing operations.** Unreliable per the
+  numbers above, and largely unnecessary since vector figures already leak their
+  text.
+- **ML layout analysis (`pymupdf.layout`), for this release.** This is the
+  technically superior mechanism and it is rejected on cost, not on capability, so
+  the evidence is recorded rather than the verdict alone. The engine classifies
+  regions with DocLayNet labels -- `caption`, `picture`, `table`,
+  `section-header` -- and on these documents it works: it labels TI's
+  section-relative captions with no pattern at all, finds the PCN's raster table,
+  and finds a `picture` on PSoC page 32, **a page with zero raster images**. That
+  last one is the vector-figure blind spot nothing else in this design addresses.
+
+  Measured warm, after model load: 1.28 s/page over 5 pages, 0.89 s/page over 20,
+  extrapolating to **~119 s for the 134-page PSoC** against a current ~8 s build.
+  Roughly 15x, in the default path, for every document. It also requires the 49 MB
+  `[layout]` extra a plain `uv sync` deliberately excludes, brings the
+  process-global hook hazard documented in `core/engine.py`, and unlike
+  `get_image_info` is a model with an error rate rather than an exact enumeration.
+
+  **The project already ships this engine** -- `extract_table_markdown` runs
+  `layout_engine()` (`tools/bound.py:185`) and `mcp_server.py:51` pre-warms it --
+  which is exactly the shape that makes it affordable: one page, on demand, when
+  the agent asks. That, not a build-time sweep, is how figure captioning by layout
+  analysis should arrive if it does: an on-demand `describe_figure(page)` tool
+  mirroring `extract_table_markdown`, with its own spec. Deferred, not dismissed.
+
+- **Caption detection from PDF structure tags or a List of Figures.** Both would be
+  exact rather than heuristic, and neither exists in practice: of 14 documents,
+  **1** carries a structure tree (with zero `/Figure` elements) and **none** has a
+  List of Figures. Outline entries naming figures appear in exactly one document.
+  Datasheet publishers do not ship structure metadata, so there is nothing exact to
+  read and the pattern in section 2 is the best available source.
 - **Triaging which regions get a VLM caption**, by either of the two rules that
   looked workable. Comparing per-page caption and raster counts is section 4's
   forbidden association reached by arithmetic; thresholding page text does not
@@ -833,7 +908,9 @@ Synthetic PDFs, so assertions are exact and no fixture is required:
   within `0..1`. Assert by passing the emitted region to the real `inspect_page`:
   an unclipped one raises `ValueError`, so this test fails loudly on a regression
   rather than merely reporting an odd number. Also assert `page_area_pct` and the
-  emitted `bbox` describe the visible rectangle, not the placement.
+  emitted `bbox` describe the visible rectangle, not the placement. This case is
+  **real, not hypothetical** -- `ti-tlv9061` has 9 such placements -- so a
+  regression here breaks a shipping vendor's datasheet, not an imagined one.
 - **An image entirely off-page is dropped**, not emitted with a degenerate region
   that `inspect_page`'s `top < bottom` check would reject.
 - **A page whose rect origin is not `(0, 0)`** (a CropBox offset) normalizes
@@ -841,17 +918,29 @@ Synthetic PDFs, so assertions are exact and no fixture is required:
   crops the same rectangle. Synthetic -- every page in both fixtures starts at
   `(0, 0)`, so nothing else would catch an absolute-coordinate mistake.
 - **The split caption form**: a page whose text has `Figure 2` alone on a line and
-  `Block diagram` on the next yields one entry with `figure_number: 2` and
+  `Block diagram` on the next yields one entry with `figure_number: "2"` and
   `caption: "Figure 2 Block diagram"`, `caption_source: "text"`. This is the form
-  24 of the PSoC's captions actually take.
+  24 of the PSoC's captions take.
 - **The same-line form**, with mandatory punctuation: `Figure 3. Package outline`
-  yields that caption. Synthetic, since the form occurs in neither fixture.
-- **Prose is not a caption, three ways.** `as Figure 5 shows` mid-line, a line
-  *opening* `Figure 2 shows the major subsystems` (which the mandatory separator
-  excludes), and `See Figure 3` each yield **zero** entries. These are the 30
-  false positives a naive pattern produced, so they are the tests that matter most
-  in this section -- publishing prose as a caption puts a wrong figure name in the
-  artifact.
+  yields that caption. This is the corpus's most common form, 404 of 492.
+- **Section-relative numbering, in both forms.** `Figure 10-1. Reset Logic` yields
+  `figure_number: "10-1"`, and a bare `Figure 3-2` with its title on the next line
+  yields `"3-2"`. Include an en-dash variant (`Figure 10–1.`), since publishers use
+  both characters. Without these the pattern finds captions in 2 of 14 corpus
+  documents instead of 11, so this is the highest-value test in the section.
+- **`figure_number` is a string in the emitted JSON**, for plain numbers too --
+  assert `"2"`, not `2`. A consumer that branches on the type is the thing this
+  prevents, and a plain number is where an int would silently creep back in.
+- **`Fig.` is accepted wherever `Figure` is**, in both forms; the corpus's
+  same-line plain captions are all `Fig. 10. Enable and disable times`.
+- **Prose is not a caption, four ways.** `as Figure 5 shows` mid-line, a line
+  *opening* `Figure 2 shows the major subsystems`, `Figure 6-2 shows the structure
+  of the 32 general purpose registers` (the section-relative form of the same
+  trap), and `See Figure 3` each yield **zero** entries. The mandatory separator is
+  what excludes all four. Across the corpus this rule rejected 70 prose lines while
+  admitting 404 real same-line captions, so these are the tests that matter most in
+  this section -- publishing prose as a caption puts a wrong figure name in the
+  artifact, and widening the number pattern widened the prose surface with it.
 - **Caption detection runs on the column-aware extraction**, not `page.get_text()`:
   a two-column page whose raw text order would interleave the number and title
   still yields the correct pairing. Assert against `_extract_page_text` output.
@@ -970,10 +1059,15 @@ Synthetic PDFs, so assertions are exact and no fixture is required:
 - Any change to `inspect_page`, which already does what is needed and is reused
   as-is by the captioning pass. Its `0..1` validation is treated as the contract to
   satisfy, not a restriction to relax -- section 3 clips to fit it.
-- Caption forms beyond the two in section 2. `Table N`, `Diagram N`, non-English
-  labels, and vendor-specific numbering (`Figure 3-2`) are all real and all
-  uncalibrated on a two-document corpus. Emitting nothing is the safe answer;
-  widening the pattern needs a wider corpus first.
+- Caption forms beyond the two in section 2. Section-relative numbering
+  (`Figure 3-2`) has moved **into** scope on corpus evidence -- it was the single
+  defect the wider measurement found. What stays out: `Table N`, `Diagram N`, and
+  non-English labels. `Table N` is not a small omission -- **427 occurrences across
+  the corpus** -- but table structure is already served by `table_count` and the
+  continued-table enrichment, so a parallel label index would duplicate an existing
+  signal rather than fill a gap. Non-English labels remain uncalibrated: all 14
+  corpus documents are English, so widening there would repeat exactly the mistake
+  this revision corrected.
 - Correlating a caption entry with a raster entry on the same page (section 4).
 - Any new model configuration. Figure captions use the callable the caller
   already provides, on the same model as the ToC fallback and summaries.
