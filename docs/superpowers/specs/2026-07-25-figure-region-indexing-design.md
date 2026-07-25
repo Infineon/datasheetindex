@@ -614,6 +614,28 @@ A callable without `describe_image` -- including any third-party
 exactly as a callable without `structured_json` falls back to the free-text ToC
 prompt. This is additive and breaks no existing consumer.
 
+**The implementation is Responses-API shaped, and the internal protocol must
+widen.** The client calls `client.responses.create(model=, instructions=, input=)`
+(`client.py:90`, `client.py:153`) -- the Responses API, not Chat Completions. Image
+input there is a structured `input` list, not a string:
+
+```python
+input=[{"role": "user", "content": [
+    {"type": "input_text", "text": prompt},
+    {"type": "input_image", "image_url": f"data:{media_type};base64,{image_base64}"},
+]}]
+```
+
+Two consequences. `_ResponsesApi.create` declares `input: str` (`client.py:55`),
+so that annotation must widen to accept the list form -- `ty` runs over the whole
+repo and will reject the call otherwise. And the content-part names are
+Responses-API names: an implementer reaching for the far more commonly documented
+Chat Completions shape (`{"type": "image_url", "image_url": {"url": ...}}`) writes
+something that type-checks fine and fails at the gateway. The `media_type`
+parameter on `describe_image` exists to build that data URI, and `inspect_page`
+already returns both the base64 payload and its `mime_type`, so nothing needs to
+guess.
+
 **`inspect_page` is the renderer; do not write a second one.**
 `tools/vision.py:35` already takes `region` as the normalized 0.0-1.0 dict this
 spec emits and returns `[{"type": "image", "data": <base64>, "mime_type":
