@@ -320,6 +320,18 @@ The key is emitted on every build, with `above_max: 0` when nothing was dropped,
 matching `figures_excluded` -- a consumer reads the effective cap from the
 artifact rather than assuming this version's default.
 
+**It is validated as an integer `>= 0`, at every entry point.** A negative value
+reaching `candidates[:max_figure_captions]` does not cap anything -- it slices
+from the *end*, so `-1` captions all but the last candidate and any value more
+negative than the candidate count captions none, both of them silently and
+neither of them what the caller asked for. A cost ceiling that can be inverted by
+a sign is not a ceiling. So `build()`, `build_datasheet()` and `build_batch()`
+raise `ValueError` on a negative value, `tools/defs.py` carries
+`"minimum": 0` beside the `integer` type, and the CLI rejects it at parse time
+rather than passing it through. `0` is valid and means the deterministic index
+with no captioning -- the same result as `caption_figures=False`, reached by the
+cost knob instead of the switch.
+
 Neither fixture approaches the cap. It exists for the shape neither fixture has:
 a scanned document whose every page is one full-page image over an empty text
 layer, where the triage rule authorizes one VLM call per page inside a single
@@ -415,7 +427,17 @@ Three consequences of reusing it:
   error becomes a document with no captions, forever. So the build sets
   `llm_enrichment_incomplete` (that spec's field) when any caption call raises,
   and reuse is refused. A *successful* caption pass that legitimately produces no
-  captions -- no uncaptioned regions to name -- is complete, not incomplete.
+  captions -- no candidate regions to name -- is complete, not incomplete.
+
+**An empty response is a failure, not a caption.** A call can return `""`, or
+whitespace, or a lone newline without raising -- a truncated stream, a refusal, a
+model returning nothing for an unreadable render. Treated naively that either
+writes an empty string into `caption` or leaves it null while the artifact is
+marked complete, and the reuse design then caches that captionless artifact
+permanently. So the response is `strip()`ped, and an empty result takes exactly
+the path a raised call takes: `caption` stays null, a warning names the page and
+region, and `llm_enrichment_incomplete` is set. The distinction that matters is
+transient-versus-deterministic, and an empty response is transient.
 
 **`LlmCallable` cannot carry an image, so the protocol needs extending.** It is
 `__call__(system, user) -> str` (`client.py:19`) with no image parameter. Follow
@@ -465,7 +487,19 @@ PyMuPDF is not thread-safe for concurrent page work -- the parallel table scan
 already carries that scar, and measured *wrong counts* rather than merely slower
 ones. So every selected region is rendered first, serially, through
 `inspect_page`. The resulting base64 PNGs are then dispatched to the VLM through
-a small bounded thread pool, which is network I/O and safe to overlap.
+a thread pool of **4 workers**, which is network I/O and safe to overlap. Four
+rather than one-per-candidate: an unbounded pool at the default cap opens twenty
+simultaneous gateway connections, which is how a shared LiteLLM deployment starts
+rate-limiting, and the wall-clock gain past a handful of workers is small against
+that risk.
+
+**Results are applied in candidate order, never completion order.** Each caption
+is written back to the entry of the candidate that produced it, and the `figures`
+array keeps its deterministic page-then-position order regardless of which call
+returned first. This is not cosmetic: `2026-07-25-on-disk-artifact-reuse-design.md`
+fingerprints the artifact by hashing its bytes, so an array whose order followed
+completion would hash differently on every build and defeat reuse outright, while
+also making two builds of the same document gratuitously diff against each other.
 
 Eight candidates on the PCN, so its cost is trivial either way. At the default cap
 of 20, serial dispatch at typical multi-second VLM latency would put tens of
