@@ -194,6 +194,31 @@ re-pay the LLM cost on every request for exactly the documents the fallback cann
 help, which is the opposite of what reuse is for. The distinction is therefore
 `except` versus `else`, and it is the one thing an implementation must not blur.
 
+**The rule governs both caches, not just the sidecar.** The in-memory check
+(`bound.py:186-195`) returns `self._artifacts` on any options match and never
+consults the sidecar, so a rule applied only on disk is unreachable in the
+commonest retry there is: the same `DatasheetTools` instance, called again after a
+transient failure. That is the exact shape of the MCP path -- one instance per
+document, held across a session -- so the caption or fallback error would be
+returned instantly, forever, and the disk rule would never get a chance to run.
+`not self._artifacts.llm_enrichment_incomplete` therefore joins the in-memory gate.
+One predicate, checked in both places.
+
+Two consequences, both accepted:
+
+- **A retry is possible but not free.** Each call on a degraded instance pays a
+  full rebuild, where today it pays 0.00 s. That is the point for a transient
+  failure -- it self-heals on the next call and caches normally afterwards.
+- **A permanently degraded environment rebuilds every call.** With no credentials
+  configured, the flag never clears, so each `build_datasheet` costs 7-27 s instead
+  of being served from memory. This is the same cost profile the disk rule already
+  accepts for a fresh instance, and having the two caches agree is worth more than
+  saving the degenerate case. If it ever proves to matter, the fix is to treat
+  `toc_fallback_no_client` as non-retryable while keeping the raised causes
+  retryable -- the notes below already carry the distinction. Deliberately deferred:
+  it is an optimization, and splitting one predicate into two before there is
+  evidence is how the two caches start disagreeing again.
+
 The sidecar also carries `llm_enrichment_notes`, a list of short reason strings
 ("toc_fallback_no_client", "toc_fallback_raised", "figure_caption_raised"). Purely
 diagnostic -- validity keys on the boolean alone -- but it is what makes a sidecar
@@ -253,7 +278,10 @@ Anything else rebuilds. There is no repair path and no partial reuse.
 
 `build_datasheet(options)`:
 
-1. In-memory hit -> return it. Unchanged; still 0.00 s.
+1. In-memory hit -> return it. Still 0.00 s, but the gate gains one condition:
+   `not self._artifacts.llm_enrichment_incomplete`. See below -- leaving the
+   in-memory check unchanged would have made the sidecar rule unreachable in the
+   commonest retry.
 2. **Resolve the source to a local path**, then compute the fingerprint over
    that file. This step is not optional and the spec previously omitted it:
    `DatasheetTools.__init__` stores only the path string, and
@@ -271,10 +299,15 @@ Anything else rebuilds. There is no repair path and no partial reuse.
    path identity could never match.
 3. Sidecar valid -> read the JSON and text file and populate **every**
    `DatasheetArtifacts` field: `json_path`, `text_path`, `json_data`,
-   `text_content`, `toc_quality`, and `nodes`. All six are load-bearing --
+   `text_content`, `toc_quality`, `nodes`, `llm_enrichment_incomplete`, and
+   `llm_enrichment_notes`. The first six are load-bearing --
    `get_artifact_manifest` reads `json_data`, and `search_text` /
    `get_section_text` read `text_content`, so a partially populated instance
-   would fail later and at a distance. Return it.
+   would fail later and at a distance. The last two are `False` and `()` by
+   construction, since validity already requires the flag to be false; set them
+   from the sidecar anyway rather than hardcoding, so the reloaded object and the
+   record it came from cannot disagree, and so the in-memory gate in step 1 reads a
+   real value on a reload-then-reuse path. Return it.
 4. Otherwise -> build as today, then write the sidecar.
 
 Reuse is **default-on**; that is the point, since it is what lets
@@ -332,6 +365,19 @@ processes and across the parallel and sequential table-scan paths.
 
 ## Testing
 
+Two properties of the environment make a naively written hit test impossible to
+pass. Both are measured, not anticipated.
+
+**Every reuse-hit fixture must carry bookmarks.** A synthetic PDF built with
+`pymupdf.open()` and `new_page()` has no ToC, which scores **0.00** against a
+`TOC_FALLBACK_THRESHOLD` of `0.3` -- so the fallback is eligible, CI has no
+credentials, no client can be created, and `llm_enrichment_incomplete` is set.
+Every such document is therefore permanently uncacheable, and *every* hit test
+written on a bare synthetic PDF fails. Two `set_toc` entries on a three-page
+document score **0.62**, comfortably clear. So hit fixtures call `set_toc`, and the
+fixture helper should assert the resulting score is above the threshold rather than
+leaving a future contributor to rediscover this from a baffling failure.
+
 **Every test that expects a reuse *hit* must force the editability probe to
 `False`.** The suite runs from an editable checkout, where reuse is disabled by
 design, so a hit test written against the ambient environment cannot pass -- it
@@ -364,6 +410,13 @@ assert the rebuild came from the field under test.
   declines, and assert the second build reuses. This is the `except`-versus-`else`
   distinction; a test on only one side of it would let an implementation collapse
   the two and silently make every hard document uncacheable.
+- **Retry on the *same* instance rebuilds.** Call `build_datasheet` twice on one
+  `DatasheetTools`, failing the LLM call on the first and succeeding on the second,
+  and assert the second returns a complete artifact. Without the in-memory
+  condition this test fails while every disk test still passes, which is precisely
+  how the gap survived the last review -- so it belongs beside them permanently.
+- **A complete artifact still hits in memory at 0.00 s**, unchanged. The new
+  condition must not cost the common path its cache.
 - **Same-size corruption rebuilds.** Overwrite one byte of the text file in
   place, preserving its length, and assert a rebuild. This is the case a size
   check accepts and a hash rejects, so it is the test that justifies the hash.
@@ -389,7 +442,8 @@ assert the rebuild came from the field under test.
   about the sidecar. Cover the inverse as well: the *next* build finds no sidecar
   and rebuilds rather than erroring.
 - No regression: the two deliverables stay byte-identical to a pre-change
-  build, and the in-memory cache still returns without rebuilding.
+  build, and the in-memory cache still returns without rebuilding for a complete
+  artifact.
 
 Tests must not depend on the `[llm]` or `[layout]` extras, so a plain
 `uv sync && pytest` exercises all of the above.

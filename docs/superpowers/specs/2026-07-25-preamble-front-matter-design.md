@@ -86,11 +86,28 @@ truncating twice.
 has the result needs no formula at all: it is `len(text) - chars_shown`, and both
 are returned.
 
-Before the call, only the marker share is exact. The marker is
-`f"--- PAGE {n} ---"` (`core/textfile.py:224`), joined with a newline, so it is
-`14 + digits(n)` characters per page -- 13 for the literal plus the separator. For
-pages 1..P the total is `14 * P + sum(digits(n) for n in 1..P)`, which at the
-default `max_pages=2` is exactly 30.
+Before the call, only the marker share is exact, **and only once the assembly is
+pinned down** -- an off-by-one in the separator convention is exactly the kind of
+thing a "bound" hides. So the format is specified, not left to the implementation:
+
+- Parts are `[marker_1, text_1, marker_2, text_2, ...]` joined with a single `"\n"`,
+  identical to `generate_text` (`core/textfile.py:219-226`). There is no trailing
+  newline.
+- Page text is emitted **verbatim**, with no `rstrip`. The current
+  `generate_preamble` rstrips its truncated result (`core/preamble.py:39`); dropping
+  that is required for the formula to hold, and trailing whitespace before a
+  `--- PAGE ---` marker is invisible anyway.
+- A `NOTE` line is appended as `"\n" + note`, adding `1 + len(note)` each.
+
+Under that assembly, `len("--- PAGE {n} ---")` is `13 + digits(n)`, there are `2P`
+parts and therefore `2P - 1` separators, and the framing overhead for pages 1..P
+with no notes is exactly:
+
+```
+sum(13 + digits(n) for n in 1..P) + (2 * P - 1)
+```
+
+At the default `max_pages=2` that is `14 + 14 + 3` = **31**.
 
 The two `NOTE` lines embed page numbers and character counts, so their length
 depends on the same digit counts and cannot be stated as a constant. Roughly 120
@@ -306,6 +323,9 @@ that can quietly weaken existing tests.
   `datasheet-agent` was checked and does not (it appears there only in
   `extract_chamber.py`, unrelated, and in a docstring).
 - `preamble_pages` is a new top-level key in the ToC JSON. Purely additive.
+- **The emitted text is no longer rstripped** (`core/preamble.py:39` does today).
+  Trailing whitespace can now appear before a marker or at the very end. Invisible
+  in practice, and it is what makes the overhead formula exact.
 - **`max_chars` now bounds document text rather than the whole returned string**
   (section 2), so the string can exceed it by a bounded amount of framing. This is
   the one non-additive change in this spec, and it is why two existing tests are
@@ -326,10 +346,16 @@ that can quietly weaken existing tests.
 - A document that trips both caps carries both lines, character note first.
 - `max_chars` bounds `chars_shown`, not `len(text)`: assert `chars_shown` is within
   the cap while the returned string legitimately exceeds it.
-- The marker overhead matches the formula exactly -- `14 * P + sum of digits` -- so
-  assert `len(text) - chars_shown == 30` on a two-page document with no notes. Do
-  **not** assert an upper bound on the note lengths; they are estimated, not
-  bounded, and a test asserting otherwise would fail on a 4-digit page number.
+- The marker overhead matches the formula exactly: assert
+  `len(text) - chars_shown == 31` on a two-page document with no notes, and assert
+  the general formula on a document whose page numbers reach three digits, so a
+  `digits(n)` mistake cannot pass. Do **not** assert an upper bound on the note
+  lengths; they are estimated, not bounded, and a test asserting otherwise would
+  fail on a 4-digit page number.
+- Page text is not rstripped: a page whose extracted text ends in whitespace keeps
+  it, and `len(text) - chars_shown` still equals the formula. This is the
+  assumption the formula rests on, so it needs its own test rather than being
+  implied by the arithmetic one.
 - `max_pages` and `max_chars` are both honoured, including `max_pages` larger
   than the document -- where `pages_omitted` is 0 and no page note is emitted.
 - Signals, on synthetic pages so the assertions are exact: a bulleted feature
