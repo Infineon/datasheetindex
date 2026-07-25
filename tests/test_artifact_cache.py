@@ -1,19 +1,26 @@
 """Tests for the build-artifact cache primitives, sidecar and validity rule."""
 
+from __future__ import annotations
+
 import hashlib
 import json
 import os
 import threading
+from typing import cast
 
 import pytest
 
 from datasheetindex.core.artifact_cache import (
     SIDECAR_SUFFIX,
+    ArtifactRecord,
     atomic_write_text,
     is_editable_install,
+    read_sidecar,
+    remove_sidecar,
     sha256_file,
     sha256_text,
     sidecar_path,
+    write_sidecar,
 )
 
 
@@ -225,3 +232,111 @@ def test_is_editable_install_is_true_on_corrupt_metadata(monkeypatch):
 def test_sidecar_path_sits_beside_the_deliverables(tmp_path):
     assert SIDECAR_SUFFIX == ".build.json"
     assert sidecar_path(tmp_path, "ds") == tmp_path / "ds.build.json"
+
+
+def make_record(**overrides: object) -> ArtifactRecord:
+    """A complete record; override one field per invalidation test."""
+    defaults: dict[str, object] = {
+        "source_sha256": "a" * 64,
+        "source_size": 1024,
+        "build_options": {
+            "output_dir": "/tmp/out",
+            "output_stem": None,
+            "include_summaries": False,
+            "model": None,
+        },
+        "datasheetindex_version": "0.24.0",
+        "json_name": "ds.json",
+        "json_sha256": "b" * 64,
+        "text_name": "ds.txt",
+        "text_sha256": "c" * 64,
+        "toc_quality": {
+            "score": 0.62,
+            "entry_count": 2,
+            "max_depth": 1,
+            "page_coverage": 1.0,
+            "recommend_summaries": True,
+            "details": "2 entries",
+        },
+    }
+    defaults.update(overrides)
+    return ArtifactRecord(
+        source_sha256=str(defaults["source_sha256"]),
+        source_size=int(defaults["source_size"]),
+        build_options=dict(defaults["build_options"]),
+        datasheetindex_version=str(defaults["datasheetindex_version"]),
+        json_name=str(defaults["json_name"]),
+        json_sha256=str(defaults["json_sha256"]),
+        text_name=str(defaults["text_name"]),
+        text_sha256=str(defaults["text_sha256"]),
+        toc_quality=dict(defaults["toc_quality"]),
+        llm_enrichment_incomplete=bool(
+            defaults.get("llm_enrichment_incomplete", False)
+        ),
+        llm_enrichment_notes=tuple(
+            cast(tuple[str, ...] | None, defaults.get("llm_enrichment_notes")) or ()
+        ),
+    )
+
+
+def test_record_round_trips_through_json(tmp_path):
+    record = make_record(
+        llm_enrichment_incomplete=True,
+        llm_enrichment_notes=("toc_fallback_raised",),
+    )
+    path = tmp_path / f"ds{SIDECAR_SUFFIX}"
+
+    write_sidecar(path, record)
+
+    assert read_sidecar(path) == record
+
+
+def test_record_json_nests_artifacts_and_keeps_quality_details(tmp_path):
+    path = tmp_path / f"ds{SIDECAR_SUFFIX}"
+    write_sidecar(path, make_record())
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+
+    assert payload["artifacts"]["json"]["name"] == "ds.json"
+    assert payload["artifacts"]["text"]["sha256"] == "c" * 64
+    assert payload["toc_quality"]["details"] == "2 entries"
+    assert payload["llm_enrichment_notes"] == []
+
+
+def test_read_sidecar_returns_none_when_missing(tmp_path):
+    assert read_sidecar(tmp_path / f"absent{SIDECAR_SUFFIX}") is None
+
+
+def test_read_sidecar_returns_none_on_corrupt_json(tmp_path):
+    path = tmp_path / f"ds{SIDECAR_SUFFIX}"
+    path.write_text("{not json", encoding="utf-8")
+
+    assert read_sidecar(path) is None
+
+
+def test_read_sidecar_warns_on_bad_shape(tmp_path, caplog):
+    """A parseable file with the wrong shape means to_dict/from_dict diverged.
+
+    That is a bug, not a routine miss, so it is logged louder.
+    """
+    path = tmp_path / f"ds{SIDECAR_SUFFIX}"
+    path.write_text(json.dumps({"source_sha256": "a" * 64}), encoding="utf-8")
+
+    with caplog.at_level("WARNING"):
+        assert read_sidecar(path) is None
+
+    assert any(entry.levelname == "WARNING" for entry in caplog.records)
+
+
+def test_remove_sidecar_is_silent_when_absent(tmp_path):
+    remove_sidecar(tmp_path / f"absent{SIDECAR_SUFFIX}")
+    remove_sidecar(tmp_path / "no-such-dir" / f"ds{SIDECAR_SUFFIX}")
+
+
+def test_remove_sidecar_deletes(tmp_path):
+    path = tmp_path / f"ds{SIDECAR_SUFFIX}"
+    write_sidecar(path, make_record())
+
+    remove_sidecar(path)
+
+    assert not path.exists()

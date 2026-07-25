@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import os
+from dataclasses import dataclass
 from importlib.metadata import Distribution
 from pathlib import Path
 from uuid import uuid4
@@ -93,3 +94,108 @@ def is_editable_install() -> bool:
     except json.JSONDecodeError:
         return True
     return bool(dir_info.get("editable"))
+
+
+@dataclass(frozen=True)
+class ArtifactRecord:
+    """What the sidecar stores about one build.
+
+    Everything needed to decide whether the artifacts on disk are the ones a
+    fresh build would produce. Recorded rather than inferred from the
+    deliverables: ``TocNode.to_dict`` omits empty fields, and the emitted
+    ``toc_quality`` block drops ``details``, so the deliverables alone cannot
+    reconstruct the build.
+    """
+
+    source_sha256: str
+    source_size: int
+    build_options: dict[str, object]
+    datasheetindex_version: str
+    json_name: str
+    json_sha256: str
+    text_name: str
+    text_sha256: str
+    toc_quality: dict[str, object]
+    llm_enrichment_incomplete: bool = False
+    llm_enrichment_notes: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict:
+        return {
+            "source_sha256": self.source_sha256,
+            "source_size": self.source_size,
+            "build_options": dict(self.build_options),
+            "datasheetindex_version": self.datasheetindex_version,
+            "artifacts": {
+                "json": {"name": self.json_name, "sha256": self.json_sha256},
+                "text": {"name": self.text_name, "sha256": self.text_sha256},
+            },
+            "toc_quality": dict(self.toc_quality),
+            "llm_enrichment_incomplete": self.llm_enrichment_incomplete,
+            "llm_enrichment_notes": list(self.llm_enrichment_notes),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> ArtifactRecord:
+        """Rebuild from ``to_dict`` output.
+
+        Raises on a missing key rather than defaulting: a sidecar that does not
+        carry a fingerprint field cannot be validated against it, and guessing
+        would turn a bug into a false cache hit.
+        """
+        artifacts = data["artifacts"]
+        return cls(
+            source_sha256=data["source_sha256"],
+            source_size=data["source_size"],
+            build_options=dict(data["build_options"]),
+            datasheetindex_version=data["datasheetindex_version"],
+            json_name=artifacts["json"]["name"],
+            json_sha256=artifacts["json"]["sha256"],
+            text_name=artifacts["text"]["name"],
+            text_sha256=artifacts["text"]["sha256"],
+            toc_quality=dict(data["toc_quality"]),
+            llm_enrichment_incomplete=bool(data["llm_enrichment_incomplete"]),
+            llm_enrichment_notes=tuple(data["llm_enrichment_notes"]),
+        )
+
+
+def write_sidecar(path: Path, record: ArtifactRecord) -> None:
+    """Write the sidecar atomically. Raises; the caller decides how to degrade."""
+    atomic_write_text(path, json.dumps(record.to_dict(), indent=2, ensure_ascii=False))
+
+
+def read_sidecar(path: Path) -> ArtifactRecord | None:
+    """Load the sidecar, or None when it cannot be used.
+
+    A missing or corrupt sidecar is routine and logged at debug -- the failure
+    direction is a rebuild, which is safe. A parseable file with the wrong shape
+    is logged at warning, because it means ``to_dict`` and ``from_dict`` have
+    diverged, which is a bug.
+    """
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        logger.debug("No readable build sidecar at %s", path)
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        logger.debug("Build sidecar at %s is not valid JSON", path)
+        return None
+    try:
+        return ArtifactRecord.from_dict(payload)
+    except (KeyError, TypeError, ValueError):
+        logger.warning("Build sidecar at %s has an unexpected shape; rebuilding", path)
+        return None
+
+
+def remove_sidecar(path: Path) -> None:
+    """Delete the sidecar, best effort.
+
+    Called before the deliverables are rewritten, so a concurrent reader finds
+    no sidecar and rebuilds rather than validating new data against an old
+    record.
+    """
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        logger.debug("Could not remove build sidecar at %s", path)
