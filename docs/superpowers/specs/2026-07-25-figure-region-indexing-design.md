@@ -846,10 +846,25 @@ that the stub value reaches the emitted JSON keeps them honest afterwards.
 
   **The project already ships this engine** -- `extract_table_markdown` runs
   `layout_engine()` (`tools/bound.py:185`) and `mcp_server.py:51` pre-warms it --
-  which is exactly the shape that makes it affordable: one page, on demand, when
-  the agent asks. That, not a build-time sweep, is how figure captioning by layout
-  analysis should arrive if it does: an on-demand `describe_figure(page)` tool
-  mirroring `extract_table_markdown`, with its own spec. Deferred, not dismissed.
+  so an obvious move is a per-page `describe_figure(page)` tool in the same shape.
+  **Rejected, and the reasoning is worth keeping because the analogy is
+  seductive.** `extract_table_markdown` earns its cost by giving the agent
+  something it cannot produce itself: an exact table from the text layer, no vision
+  error, few tokens. Layout classification gives it something *weaker* than
+  looking -- the agent holding a page in mind already has `inspect_page`, and its
+  own vision beats a DocLayNet label. Worse, the tool serves the wrong axis:
+  discovery is a breadth question ("which of 134 pages hides something?") that a
+  per-page call cannot answer without sweeping every page, which is the 119 s cost
+  above. It helps only an agent that already suspects the page -- exactly the state
+  in which it needs no help.
+
+  What the engine uniquely adds over `get_image_info` is **vector** figure
+  detection, and this design already argued that is not the gap: "Why raster"
+  measures the PSoC pinout page at 1191 characters from 232 vector drawings.
+  Vector figures leak their text, so the agent is not blind there; it only lacks
+  layout. The genuinely invisible content is raster, and raster is enumerated
+  exactly and for free. So the case for layout analysis rests on solving a problem
+  this spec has already measured as absent.
 
 - **Caption detection from PDF structure tags or a List of Figures.** Both would be
   exact rather than heuristic, and neither exists in practice: of 14 documents,
