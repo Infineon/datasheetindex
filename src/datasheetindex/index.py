@@ -570,11 +570,22 @@ class DatasheetIndex:
             toc_quality.page_coverage * 100,
         )
 
+        # Reasons an eligible LLM step did not produce its result. Read by the
+        # artifact cache, which refuses to reuse a degraded build -- otherwise a
+        # single transient gateway error would cost this document its ToC for
+        # the life of the output directory.
+        enrichment_notes: list[str] = []
         active_llm_callable = llm_callable
         owns_llm_callable = False
         if active_llm_callable is None and toc_quality.score < TOC_FALLBACK_THRESHOLD:
             active_llm_callable = self._try_create_default_llm_client()
             owns_llm_callable = active_llm_callable is not None
+            if active_llm_callable is None:
+                logger.info(
+                    "ToC quality below threshold but no LLM client is available; "
+                    "these artifacts will not be cached for reuse"
+                )
+                enrichment_notes.append("toc_fallback_no_client")
 
         try:
             # 5. LLM fallback: regenerate ToC if quality is poor
@@ -623,6 +634,7 @@ class DatasheetIndex:
                         "LLM ToC fallback failed; using original ToC",
                         exc_info=True,
                     )
+                    enrichment_notes.append("toc_fallback_raised")
 
             # 6. LLM summaries: only when explicitly requested
             if active_llm_callable and include_summaries:
@@ -672,6 +684,8 @@ class DatasheetIndex:
                 text_content=text_content,
                 toc_quality=toc_quality,
                 nodes=nodes,
+                llm_enrichment_incomplete=bool(enrichment_notes),
+                llm_enrichment_notes=tuple(enrichment_notes),
             )
         finally:
             if owns_llm_callable:

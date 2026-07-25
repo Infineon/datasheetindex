@@ -11,7 +11,11 @@ import pymupdf
 import pytest
 
 from datasheetindex import index as index_module
-from datasheetindex.index import DatasheetIndex, _accept_llm_toc_candidate
+from datasheetindex.index import (
+    TOC_FALLBACK_THRESHOLD,
+    DatasheetIndex,
+    _accept_llm_toc_candidate,
+)
 from datasheetindex.models import TocNode, TocQuality
 
 DATA2PAGE_DIR = Path(__file__).resolve().parent.parent.parent / "data2page"
@@ -1193,3 +1197,100 @@ def test_a_failed_text_write_leaves_the_previous_generation_readable(
     assert first.text_path.read_text(encoding="utf-8") == first_text
     json.loads(first.json_path.read_text(encoding="utf-8"))
     assert not any(p.name.endswith(".tmp") for p in out.iterdir())
+
+
+def test_no_obtainable_client_marks_enrichment_incomplete(tmp_path, monkeypatch):
+    """An eligible fallback that never ran must not be cached as if complete."""
+    pdf_path = _simple_pdf(tmp_path, name="weak.pdf", pages=3, with_toc=False)
+    monkeypatch.setattr(
+        DatasheetIndex, "_try_create_default_llm_client", lambda _self: None
+    )
+
+    idx = DatasheetIndex(str(pdf_path))
+    try:
+        artifacts = idx.build(output_dir=str(tmp_path / "out"))
+    finally:
+        idx.close()
+
+    assert artifacts.toc_quality is not None
+    assert artifacts.toc_quality.score < TOC_FALLBACK_THRESHOLD
+    assert artifacts.llm_enrichment_incomplete is True
+    assert "toc_fallback_no_client" in artifacts.llm_enrichment_notes
+
+
+def test_a_raising_fallback_marks_enrichment_incomplete(tmp_path, monkeypatch):
+    """One bad network moment must not produce a permanently cacheable artifact."""
+    pdf_path = _simple_pdf(tmp_path, name="weak.pdf", pages=3, with_toc=False)
+
+    def dummy_callable(_system, _user):
+        return "unused"
+
+    def raising_fallback(_text, _pages, _callable):
+        raise RuntimeError("gateway timeout")
+
+    monkeypatch.setattr(
+        DatasheetIndex, "_try_create_default_llm_client", lambda _self: dummy_callable
+    )
+    monkeypatch.setattr(
+        "datasheetindex.llm.toc_fallback.generate_toc_from_text", raising_fallback
+    )
+
+    idx = DatasheetIndex(str(pdf_path))
+    try:
+        artifacts = idx.build(output_dir=str(tmp_path / "out"))
+    finally:
+        idx.close()
+
+    assert artifacts.llm_enrichment_incomplete is True
+    assert "toc_fallback_raised" in artifacts.llm_enrichment_notes
+    # The build still succeeded on the native ToC.
+    assert artifacts.json_path is not None
+    assert artifacts.json_path.exists()
+
+
+def test_a_rejected_fallback_candidate_is_complete(tmp_path, monkeypatch):
+    """except versus else: a candidate declined on the merits is a decision.
+
+    Marking it incomplete would re-pay the LLM cost on every request for
+    exactly the documents the fallback cannot help.
+    """
+    pdf_path = _simple_pdf(tmp_path, name="weak.pdf", pages=3, with_toc=False)
+
+    def dummy_callable(_system, _user):
+        return "unused"
+
+    monkeypatch.setattr(
+        DatasheetIndex, "_try_create_default_llm_client", lambda _self: dummy_callable
+    )
+    # One thin entry, which _accept_llm_toc_candidate declines.
+    monkeypatch.setattr(
+        "datasheetindex.llm.toc_fallback.generate_toc_from_text",
+        lambda _text, _pages, _callable: [
+            TocNode(title="Thin", level=1, start_page=1, end_page=1, node_id="0001")
+        ],
+    )
+
+    idx = DatasheetIndex(str(pdf_path))
+    try:
+        artifacts = idx.build(output_dir=str(tmp_path / "out"))
+    finally:
+        idx.close()
+
+    assert artifacts.llm_enrichment_incomplete is False
+    assert artifacts.llm_enrichment_notes == ()
+
+
+def test_a_good_toc_is_complete_without_any_llm(tmp_path):
+    """The common path must not be permanently uncacheable."""
+    pdf_path = _simple_pdf(tmp_path, pages=3)
+
+    idx = DatasheetIndex(str(pdf_path))
+    try:
+        artifacts = idx.build(output_dir=str(tmp_path / "out"))
+    finally:
+        idx.close()
+
+    assert artifacts.toc_quality is not None
+    assert artifacts.toc_quality.score >= TOC_FALLBACK_THRESHOLD
+    assert artifacts.llm_enrichment_incomplete is False
+    assert artifacts.llm_enrichment_notes == ()
