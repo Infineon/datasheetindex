@@ -187,6 +187,11 @@ class DatasheetTools:
             not force_rebuild
             and self._artifacts is not None
             and self._build_options == options
+            # A degraded artifact must not be served from memory either. The MCP
+            # path holds one instance per document across a session, so this is
+            # the commonest retry there is; without this condition the disk rule
+            # would never get a chance to run.
+            and not self._artifacts.llm_enrichment_incomplete
             and self._artifacts.json_path is not None
             and self._artifacts.json_path.exists()
             and self._artifacts.text_path is not None
