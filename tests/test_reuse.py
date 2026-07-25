@@ -1,5 +1,6 @@
 """Tests for on-disk and in-memory artifact reuse."""
 
+import asyncio
 import hashlib
 import json
 import os
@@ -12,6 +13,7 @@ from datasheetindex.core.artifact_cache import read_sidecar, sidecar_path, write
 from datasheetindex.index import TOC_FALLBACK_THRESHOLD, DatasheetIndex
 from datasheetindex.models import TocNode, TocQuality
 from datasheetindex.tools.bound import DatasheetTools, _BuildOptions
+from datasheetindex.tools.defs import create_datasheet_tool_defs
 
 
 @pytest.fixture
@@ -35,6 +37,46 @@ def toc_pdf(tmp_path):
         writer.write_text(page)
     doc.set_toc([[1, "Overview", 1], [1, "Electrical Characteristics", 2]])
     pdf_path = tmp_path / "ds.pdf"
+    doc.save(str(pdf_path))
+
+    nodes = build_tree(extract_toc(doc), len(doc))
+    score = assess_toc_quality(nodes, len(doc)).score
+    doc.close()
+    assert score >= TOC_FALLBACK_THRESHOLD, (
+        f"fixture ToC scores {score}, below the {TOC_FALLBACK_THRESHOLD} "
+        "threshold; it would be marked enrichment-incomplete and never reused"
+    )
+    return pdf_path
+
+
+@pytest.fixture
+def other_toc_pdf(tmp_path):
+    """A second document, unmistakably distinct from ``toc_pdf``.
+
+    Different page count, different ``set_toc`` entries, and different body
+    text, so an A -> B -> A -> B switch test can tell the two apart. Scored
+    against ``TOC_FALLBACK_THRESHOLD`` for the same reason ``toc_pdf`` is: a
+    bookmark-free PDF scores 0.00 and would be marked
+    llm_enrichment_incomplete, which makes it permanently uncacheable and the
+    switch-back would rebuild for that reason instead of the one under test.
+    """
+    from datasheetindex.core.quality import assess_toc_quality
+    from datasheetindex.core.structure import build_tree, extract_toc
+
+    doc = pymupdf.open()
+    for _ in range(5):
+        page = doc.new_page()
+        writer = pymupdf.TextWriter(page.rect)
+        writer.append((72, 72), "Unique marker Zephyr for the other datasheet")
+        writer.write_text(page)
+    doc.set_toc(
+        [
+            [1, "Introduction", 1],
+            [1, "Pin Configuration", 2],
+            [1, "Absolute Maximum Ratings", 4],
+        ]
+    )
+    pdf_path = tmp_path / "other.pdf"
     doc.save(str(pdf_path))
 
     nodes = build_tree(extract_toc(doc), len(doc))
@@ -737,3 +779,55 @@ def test_a_malformed_json_deliverable_triggers_deserialization_failed(
     assert "deserialization_failed" in caplog.text
     assert again.json_path is not None
     assert again.json_path.exists()
+
+
+def test_switching_back_to_a_prior_document_reuses_its_artifacts(
+    tmp_path, toc_pdf, other_toc_pdf, not_editable, build_spy
+):
+    """A -> B -> A -> B must cost two builds, not four.
+
+    This is the regression test behind the design document's rejection of
+    multi-slot document addressing on the MCP surface: a switch is cheap
+    because returning to a document reloads its sidecar instead of rebuilding
+    it, which is the whole reason a single bound-document protocol was kept.
+    Drives the real handler in ``tools/defs.py`` (not ``DatasheetTools``
+    directly), since that is where the switch/rebind logic lives -- the
+    switch-correctness tests in ``test_defs.py`` never revisit a document
+    built earlier in the same session, so nothing there would catch a
+    regression here.
+    """
+    handlers = {d.name: d for d in create_datasheet_tool_defs()}
+    out = tmp_path / "out"
+
+    def build(pdf_source):
+        result = asyncio.run(
+            handlers["build_datasheet"].handler(
+                {"pdf_source": pdf_source, "output_dir": str(out)}
+            )
+        )
+        assert result["is_error"] is False, result["content"][0]["text"]
+        return result
+
+    build(str(toc_pdf))  # A: cold build
+    build(str(other_toc_pdf))  # B: cold build
+    build(str(toc_pdf))  # A: must reuse, not rebuild
+    build(str(other_toc_pdf))  # B: must reuse, not rebuild
+
+    assert len(build_spy) == 2, "switching back stopped reusing a prior document"
+
+    section = asyncio.run(
+        handlers["get_section_text"].handler({"start_page": 1, "end_page": 1})
+    )
+    assert section["is_error"] is False
+    text = json.loads(section["content"][0]["text"])["text"]
+    assert "Zephyr" in text, "the final hop's queries did not return B's text"
+    assert "Body text for this page" not in text, "stale text from A leaked in"
+
+    assert sorted(p.name for p in out.iterdir()) == [
+        "ds.build.json",
+        "ds.json",
+        "ds.txt",
+        "other.build.json",
+        "other.json",
+        "other.txt",
+    ]
