@@ -523,8 +523,28 @@ boundary: constructing a client to answer "should I rebuild?", discarding it, an
 having `build()` immediately construct another would double connection setup on
 exactly the path already doing the most work.
 
-The in-memory gate probes under the same rules. It reaches the probe even less
-often, since it runs only when `_artifacts` is populated and pending is non-zero.
+**One probe per `build_datasheet` call, threaded through every stage.** The
+in-memory gate, the disk check and `build()` are three independent construction
+sites on one path: a populated `_artifacts` with pending captions, credentials
+now present, and a sidecar that also has pending captions walks memory -> disk ->
+rebuild and would construct a client at each step. The rules above make each
+*stage* correct in isolation and still allow three clients in a row.
+
+So capability is resolved by a single **per-call** lazy resolver, created at the
+top of `build_datasheet` and closed in a `finally` around the whole call. It holds
+one of three states -- not yet asked, resolved to a callable, resolved to `None`
+-- constructs at most once, and records whether it owns what it returns: a
+caller-supplied `llm_callable` is returned as-is and never closed, a self-created
+client is closed exactly once at the end unless it was handed to `build()`, which
+does not close what it does not own. Every stage asks the resolver instead of
+calling `_try_create_default_llm_client` itself.
+
+It is **per call, never an instance attribute.** Caching capability on the
+instance would hold a connection pool open for the object's lifetime and, worse,
+freeze the answer: credentials appearing between two calls on the same instance
+is precisely the case the in-memory rule exists to catch, and a memoized `None`
+would defeat it. Laziness is preserved either way -- a resolver nobody asks
+constructs nothing, so the common paths still probe zero times.
 
 **The deterministic index is never gated.** Regions and text-layer captions cost
 near zero inside the existing page pass and are always emitted, whatever the flag,
@@ -834,13 +854,17 @@ Synthetic PDFs, so assertions are exact and no fixture is required:
   would fix it.
 - **`figure_captions_pending` of zero reuses under both capability states**, so a
   fully captioned artifact is never rebuilt merely because the client went away.
-- **The in-memory cache obeys the same rule, on one instance.** Build keyless on a
-  single `DatasheetTools`, make vision capability appear, and call
-  `build_datasheet` again on that *same* instance: assert it rebuilds and captions
-  rather than returning `_artifacts`. Without this the sidecar logic is never
-  reached, and the test must not create a second instance -- doing so silently
-  tests the disk path instead. This is the direct analogue of the
-  retry-on-the-same-instance test 0.24.0 added for `llm_enrichment_incomplete`.
+- **The in-memory cache obeys the same rule, on one instance, with exactly one
+  probe.** Build keyless on a single `DatasheetTools`, make vision capability
+  appear, and call `build_datasheet` again on that *same* instance: assert it
+  rebuilds and captions rather than returning `_artifacts`. The test must not
+  create a second instance -- doing so silently tests the disk path instead. Then,
+  with the construction/close recorder attached, assert **exactly one construction
+  and exactly one close** across that call. This is the full memory -> disk ->
+  rebuild path, the only one that visits all three probe sites, so a resolver that
+  is merely per-stage rather than per-call fails here with three constructions and
+  nowhere else. It is also the direct analogue of the retry-on-the-same-instance
+  test 0.24.0 added for `llm_enrichment_incomplete`.
 - **`figure_captions_pending` counts only eligible candidates.** With no vision
   client: `caption_figures=False` yields 0, `max_figure_captions=0` yields 0, and
   22 candidates under a cap of 20 yields 20 rather than 22. Then assert the first
