@@ -75,21 +75,58 @@ The default is chosen from two documents and should be sanity-checked against a
 wider corpus before release. The direction is what matters: retaining a legal
 footer while dropping the specifications is worse than spending the tokens.
 
+**`max_chars` bounds document text, not the returned string.** Markers and any
+`NOTE` line are tool framing, and counting them against the budget would make the
+amount of *content* a caller receives depend on how long the framing happens to
+be. Worse, it is circular: the note names the truncation point, so its length is
+not known until after truncating, and reserving space for it would mean
+truncating twice.
+
+The overhead is bounded and computable in advance -- at most
+`max_pages * 17` characters of markers plus two `NOTE` lines of about 120
+characters each -- so a caller sizing a token budget can account for it. State the
+bound in the docstring.
+
+This changes an existing guarantee. `test_respects_max_chars` and
+`test_real_pdf_respects_max_chars` assert `len(preamble) <= max_chars` on the
+whole string, and they must be rewritten to assert it on the document-text
+portion, which `FrontMatter.chars_shown` reports directly. Rewriting a test to
+match a deliberate semantic change is legitimate; doing it without saying so is
+not, hence this paragraph and the Compatibility note below.
+
 ### 3. Truncation is marked
 
-When a cap does bite, append a line naming what was lost. The cut can fall
-mid-page, so the message must not assume a page boundary:
+When a cap bites, append a line naming what was lost. The two caps fail
+differently and cannot share a message, because the extractor's knowledge differs
+in each case.
+
+**`max_chars` bit.** All `max_pages` pages were extracted, so the total is known:
 
 ```
-=== NOTE: preamble truncated; N of M front-matter characters shown, ending
-mid-page on page P ===
+=== NOTE: preamble truncated at 5000 characters; 5000 of 7118 characters from
+pages 1-2 shown, ending mid-page on page 2 ===
 ```
 
-with the `mid-page on page P` clause dropped when the cut happens to coincide
-with a page boundary or when `max_pages` rather than `max_chars` was the binding
-limit. The `===` wrapping matches the framing `get_section_text` already uses and
-marks the line as tool output rather than document content, since real datasheets
-contain their own literal `NOTE:` lines.
+`M` is **characters on the pages read**, never "total front matter in the
+document" -- that would require knowing where front matter ends, which is exactly
+what cannot be determined. The `ending mid-page on page P` clause is dropped when
+the cut coincides with a page boundary.
+
+**`max_pages` bit.** The document has pages beyond the ones read, and whether they
+are front matter is unknown, so the message claims only the mechanical fact:
+
+```
+=== NOTE: preamble covers pages 1-2 of 134; later pages were not examined ===
+```
+
+It deliberately does not say "front matter continues on page 3" or count
+characters it never extracted. Reading one page past the limit merely to describe
+what was skipped would defeat the limit.
+
+Both caps can bite on one document, in which case both lines are emitted, the
+character note first. The `===` wrapping matches the framing `get_section_text`
+already uses and marks the line as tool output rather than document content, since
+real datasheets contain their own literal `NOTE:` lines.
 
 ### 4. Per-page signals
 
@@ -113,11 +150,47 @@ Measured discrimination:
 
 All three signals separate the two cases cleanly and independently.
 
-`legal_hits` should reuse the vocabulary already in `core/boilerplate.py`'s
-`legal` pattern (disclaimer, warranty, liability, trademark, ...) rather than
-inventing a second list. Note that `classify_title` itself is not reusable here:
-it classifies ToC section *titles* and needs a ToC, and the document this is
-most needed for has none.
+#### `legal_hits` needs a prose matcher, which the existing pattern is not
+
+`core/boilerplate.py`'s `legal` pattern cannot be used as it stands. It is
+anchored `^(...)$` (`boilerplate.py:57,71`), so it matches a whole title and
+nothing else: against page 1's footer sentence it scores **zero**, not the 4 hits
+this design's own table reports -- those were measured with an ad-hoc prose
+pattern. Reusing `classify_title` is doubly wrong here, since it also needs a ToC
+and the document that needs this most has none.
+
+Nor can a single vocabulary be compiled into both matchers unchanged. Several
+title branches *deliberately* require a qualifier -- `legal\s+(disclaimer|
+notices?|information)`, `important\s+(notices?|...)`, `product\s+liability` --
+because bare `information`, `notice`, and `liability` are common substantive
+section titles (`boilerplate.py:54-56` says so). In running prose the judgement
+inverts: a bare "liability" or "warranty" in a footer sentence *is* the signal.
+Forcing one list to serve both would either weaken the title matcher, which flags
+boilerplate in a published artifact, or under-count prose.
+
+So: share the vocabulary, keep two matchers, and let the difference between them
+be explicit rather than accidental.
+
+- `_LEGAL_VOCABULARY` -- one module-level constant, the terms and phrases that
+  signal legal boilerplate: `disclaimer`, `warranty`/`warranties`, `liability`,
+  `liable`, `trademark`, `copyright`, `patent`, `indemnif…`,
+  `terms and conditions`, `limitation(s) of liability`, `export control`,
+  `subject to change without notice`, `no license`, `as is`, `at your own risk`.
+- **Prose matcher** -- unanchored, case-insensitive, word-boundary alternation over
+  the whole vocabulary. `legal_hits` counts its matches in a page's text.
+- **Title matcher** -- the existing anchored pattern, rebuilt from the same
+  constant *minus* an explicit `_TITLE_UNSAFE` exclusion set (`liability`,
+  `liable`, `as is`, `no license`) and plus the qualifier-requiring branches it
+  already has.
+
+**This refactor must be behaviour-preserving for `classify_title`.** It is a
+new-feature spec touching tested classification code, so the bar is that the
+existing `classify_title` tests pass untouched, and a new test asserts the
+exclusion set explicitly: bare `liability` is a legal hit in prose and *not* a
+legal title. If the refactor cannot be made behaviour-preserving, add the prose
+matcher beside the title pattern with a comment explaining the asymmetry and
+accept the partial duplication -- a drifted signal count is a cheaper failure than
+a regressed boilerplate flag.
 
 ### 5. Unit density is deliberately omitted
 
@@ -173,12 +246,31 @@ class PreamblePage:
 class FrontMatter:
     text: str                     # page-marked, possibly NOTE-suffixed
     pages: list[PreamblePage]
-    truncated: bool
+    chars_shown: int              # document characters in text, framing excluded
+    chars_extracted: int          # document characters on the pages read
+    pages_read: int
+    total_pages: int
+
+    @property
+    def char_truncated(self) -> bool:
+        return self.chars_shown < self.chars_extracted
+
+    @property
+    def pages_omitted(self) -> int:
+        return self.total_pages - self.pages_read
 
 def build_front_matter(
     doc, *, max_pages: int = 2, max_chars: int = 5000
 ) -> FrontMatter: ...
 ```
+
+**There is no single `truncated` flag.** An earlier draft had one, and it could
+not be given an honest meaning: the two caps are independent, so one boolean must
+either conflate them -- `truncated=True` telling a caller nothing about whether it
+should raise `max_chars`, raise `max_pages`, or both -- or silently privilege one.
+The four counts above are what the notes are rendered from, so the structured
+fields and the prose cannot disagree, and `char_truncated` / `pages_omitted` give a
+caller the two decisions separately.
 
 Both new parameters are **keyword-only**. Every existing caller already passes
 `max_chars` by keyword or omits it, so nothing breaks.
@@ -202,21 +294,38 @@ that can quietly weaken existing tests.
   `datasheet-agent` was checked and does not (it appears there only in
   `extract_chamber.py`, unrelated, and in a docstring).
 - `preamble_pages` is a new top-level key in the ToC JSON. Purely additive.
+- **`max_chars` now bounds document text rather than the whole returned string**
+  (section 2), so the string can exceed it by a bounded amount of framing. This is
+  the one non-additive change in this spec, and it is why two existing tests are
+  rewritten. A caller sizing a token budget should subtract the stated overhead.
 
 ## Testing
 
 - Page markers appear once per page read, in order, matching the text file's
   format.
 - A front matter that fits the budget is emitted whole with no `NOTE` line.
-- A front matter exceeding the budget is truncated on a line boundary *and*
-  carries the `NOTE` line naming what was dropped.
+- A front matter exceeding `max_chars` is truncated on a line boundary and carries
+  the character note, whose `N` and `M` equal `chars_shown` and `chars_extracted`.
+  Assert the numbers, not just the presence of the line, so the prose cannot drift
+  from the fields.
+- A document with pages beyond `max_pages` carries the page note naming
+  `pages_read` and `total_pages`, and **does not** carry the character note when
+  the text fit. The two notes are independent.
+- A document that trips both caps carries both lines, character note first.
+- `max_chars` bounds `chars_shown`, not `len(text)`: assert `chars_shown` is within
+  the cap while the returned string legitimately exceeds it by the marker and note
+  overhead, and assert that overhead is within the stated bound.
 - `max_pages` and `max_chars` are both honoured, including `max_pages` larger
-  than the document.
+  than the document -- where `pages_omitted` is 0 and no page note is emitted.
 - Signals, on synthetic pages so the assertions are exact: a bulleted feature
   page scores high bullets, zero legal hits, and a `Features` heading; a legal
   cover page scores zero bullets and non-zero legal hits.
-- `legal_hits` uses the same vocabulary as `boilerplate.classify_title`, asserted
-  against a shared constant rather than a duplicated list.
+- `legal_hits` counts matches of the prose matcher built from `_LEGAL_VOCABULARY`,
+  asserted against that constant rather than a duplicated list.
+- **A legal footer sentence scores non-zero `legal_hits`.** This is the test that
+  the anchored title pattern would fail, so it pins the prose matcher's existence.
+- Bare `liability` is a prose hit and not a legal *title*, pinning `_TITLE_UNSAFE`.
+- Every existing `classify_title` test passes unmodified after the refactor.
 - A one-page document yields one `preamble_pages` entry and does not error.
 - The seven repointed stubs in `tests/test_index.py` still stub what `index.py`
   actually calls -- assert the stub value reaches the emitted JSON, so a stub

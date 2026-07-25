@@ -162,11 +162,50 @@ is the die size table" cannot find it without inspecting pages one by one. An
 optional pass renders each uncaptioned region and asks a VLM for one line,
 stored as `caption` with `caption_source: "llm"`.
 
-**The same model as the ToC fallback and summaries, and no new model knob.**
+#### The flag is `caption_figures`, and captioning requires it
+
+Captioning must **not** be triggered by a callable merely happening to support
+vision. `DatasheetIndex.build()` creates a default client on its own whenever ToC
+quality is below threshold (`index.py:565-567`), and that client is
+vision-capable, so vision-capability alone as the gate would make every weak-ToC
+build silently start issuing VLM calls. The gate is therefore
+`caption_figures=True` **and** a vision-capable callable; either alone yields no
+captions.
+
+`caption_figures: bool = False` is plumbed exactly as `include_summaries` is,
+which is the existing precedent for an opt-in LLM cost:
+
+| site | change |
+|---|---|
+| `index.py` `build()` | new keyword parameter, defaults `False` |
+| `tools/bound.py` `build_datasheet()` | new parameter; raises `ValueError` when set with `model=None`, mirroring the `include_summaries` guard at `bound.py:166` |
+| `tools/bound.py` `_BuildOptions` | new field -- so it keys the in-memory cache and the sidecar's `build_options` |
+| `tools/defs.py` | `"caption_figures": {"type": "boolean"}` in the input schema, `args.get("caption_figures", False)` at the call site, and an `IMPORTANT - caption_figures` paragraph in the tool description warning that it costs one VLM call per uncaptioned region |
+| `batch.py` `build_batch()` | new keyword parameter, passed through |
+| `cli.py` | `--caption-figures`, with the same "requires `--model`" check as `--include-summaries` |
+
+**It belongs in the disk-cache key.** `2026-07-25-on-disk-artifact-reuse-design.md`
+records the resolved `build_options` in the sidecar, and adding the field to
+`_BuildOptions` puts it there by construction. Without that, a captioned artifact
+would be served to a caller who did not ask for captions and, worse, an
+uncaptioned one to a caller who did.
+
+**The deterministic index is not flag-gated.** Regions and text-layer captions
+cost near zero inside the existing page pass and are always emitted; only the VLM
+pass is opt-in. So an agent always learns a figure is *there*, and pays only for
+learning what it is.
+
+**`min_area_pct` stays out of the cache key**, consistent with section 3: it is
+not plumbed through `build()`, so it cannot vary between two builds of the same
+document by the same version. A change to its default ships with a release, and
+the sidecar already keys on the exact version.
+
+#### The same model as the ToC fallback and summaries, and no new model knob
+
 `"gpt-4.1"` is already the default in `create_llm_client` (`llm/client.py:250`)
 and what `index.py:671` uses for the automatic fallback, and it is
-vision-capable. The flag mirrors `include_summaries`; the model comes from the
-callable the caller already supplies.
+vision-capable. `caption_figures` gates *whether* captioning runs; the model
+comes from the callable the caller already supplies.
 
 Two consequences of reusing it:
 
@@ -233,6 +272,43 @@ avoidable: `generate_text` already iterates every page with the page object
 loaded, so the enumeration belongs in that existing pass at near-zero marginal
 cost rather than in a second sweep.
 
+That pass also already holds everything the entries need: the page rect for
+normalizing `region`, the extracted text for `page_text_chars` and for
+`Figure N` captions.
+
+**`generate_text` keeps its signature; a new function returns both.** It is
+`generate_text(doc) -> str` (`core/textfile.py:213`) with one production caller
+but fourteen call sites in `tests/`, so widening its return type would be a
+gratuitous break. Same shape as the preamble spec's `build_front_matter` /
+`generate_preamble` pair:
+
+```python
+@dataclass(frozen=True)
+class PageScan:
+    text: str                              # byte-identical to generate_text today
+    figures: list[dict[str, object]]
+    excluded_below_min_area: int
+
+def scan_pages(doc, *, min_area_pct: float = 1.0) -> PageScan: ...
+
+def generate_text(doc) -> str:
+    """Retained wrapper; the page-matched text file alone."""
+    return scan_pages(doc).text
+```
+
+`index.py` switches to `scan_pages` and emits `figures` and `figures_excluded`
+from the result. `min_area_pct` is keyword-only and reaches its module default
+here, per section 3.
+
+**Implementation note, the same hazard the preamble spec carries.**
+`tests/test_index.py` monkeypatches `datasheetindex.index.generate_text` with
+`lambda _doc: "--- PAGE 1 ---\n..."` in seven places (lines 269, 365, 478, 552,
+602, 687, 733). Once `index.py` calls `scan_pages`, those stubs patch a function
+that is no longer called. This one fails *loudly* rather than silently -- the real
+`scan_pages` runs against the synthetic document and the assertions see unstubbed
+text -- but they must still be repointed to return a `PageScan`, and the assertion
+that the stub value reaches the emitted JSON keeps them honest afterwards.
+
 ## Rejected
 
 - **Verbalizing raster tables to markdown.** Directly solves the PCN and is
@@ -252,7 +328,10 @@ cost rather than in a second sweep.
 ## Compatibility
 
 `figures` and `figures_excluded` are new top-level keys in the ToC JSON. Purely
-additive; no existing key changes. A document with no qualifying raster images
+additive; no existing key changes. `caption_figures` is a new keyword parameter
+defaulting to `False` on `build()`, `build_datasheet()`, and `build_batch()`, and
+an optional property in the tool schema, so every existing caller and every
+existing tool invocation behaves exactly as today. A document with no qualifying raster images
 and no figure captions emits an empty `figures` array rather than omitting the
 key, so a consumer can distinguish "none found" from "this artifact predates the
 feature" by the key's presence.
@@ -275,10 +354,22 @@ Synthetic PDFs, so assertions are exact and no fixture is required:
 - Images below `min_area_pct` are excluded and counted, and the count is
   non-zero in the emitted JSON.
 - A document with neither yields an empty array, not a missing key.
-- **A callable without `describe_image` yields no captions and does not error.**
-  Pass a plain `(system, user) -> str` stub and assert the deterministic index is
-  complete with every `caption` null. This is the compatibility guarantee for
-  consumers injecting their own callable.
+- `generate_text(doc)` returns exactly `scan_pages(doc).text`, so the retained
+  wrapper cannot drift from the function it delegates to.
+- The seven repointed `generate_text` stubs in `tests/test_index.py` return a
+  `PageScan` and their text still reaches the emitted artifacts.
+- **`caption_figures` defaults False, and a vision-capable callable alone does
+  not caption.** Pass a stub exposing `describe_image` without setting the flag
+  and assert every `caption` is null and `describe_image` was never called. This
+  is the test for the weak-ToC build that creates its own vision-capable client.
+- `caption_figures=True` with `model=None` raises on `DatasheetTools`, mirroring
+  the `include_summaries` guard.
+- **Two builds differing only in `caption_figures` do not share a cache entry**,
+  on the in-memory cache and on the sidecar once artifact reuse lands.
+- **A callable without `describe_image` yields no captions and does not error**
+  with `caption_figures=True`. Pass a plain `(system, user) -> str` stub and
+  assert the deterministic index is complete with every `caption` null. This is
+  the compatibility guarantee for consumers injecting their own callable.
 - **A `describe_image` that raises leaves the build successful**, with `caption`
   null and a warning logged -- the text-only-model case.
 - The captioning pass calls `inspect_page` with the emitted `region` unmodified,

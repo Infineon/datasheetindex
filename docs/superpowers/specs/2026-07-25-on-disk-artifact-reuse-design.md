@@ -82,6 +82,12 @@ of how a build works, so it is testable without a PDF.
 
 `models.py` gains `TocNode.from_dict()` and `TocQuality.from_dict()`.
 
+`DatasheetArtifacts` gains one field, `llm_enrichment_skipped: bool = False`. Only
+`build()` knows whether an eligible LLM step was skipped, and only
+`build_datasheet` writes the sidecar, so the fact has to travel between them. It
+defaults `False` and no existing consumer reads it, so the addition is
+compatible; see "`model` is not the whole LLM state" below for why it is needed.
+
 ### The sidecar
 
 `<output_dir>/<stem>.build.json`, written alongside the two deliverables.
@@ -98,10 +104,11 @@ Contents:
 |---|---|
 | `source_sha256` | identity of the PDF's bytes |
 | `source_size` | fast pre-check before hashing |
-| `build_options` | resolved `output_dir`, `output_stem`, `include_summaries`, `model` |
+| `build_options` | resolved `output_dir`, `output_stem`, `include_summaries`, `model` (and `caption_figures` once the figure spec lands -- it is a `_BuildOptions` field, so it arrives here by construction) |
 | `datasheetindex_version` | from `_version.package_version()` |
 | `artifacts` | JSON and text filenames, and the **sha256** of each |
 | `toc_quality` | the complete `TocQuality`, `details` included |
+| `llm_enrichment_skipped` | true when LLM work this build was *eligible* for did not run for want of a client (below) |
 
 **Content hash, not path plus mtime.** Three reasons. The JSON's existing
 `source` field holds a bare basename, so path identity cannot distinguish two
@@ -131,7 +138,53 @@ edit is plausible. Hashing both artifacts costs nothing beside the 2.6 MB PDF
 hash already being paid, and it is also the mechanism that makes concurrent
 reuse safe (see below).
 
-### Version equality is necessary but not sufficient
+### `model` is not the whole LLM state
+
+`build_options.model` records what the caller asked for, and that is not the same
+as what the build was able to do. With `model=None`, `DatasheetIndex.build()`
+still creates a client of its own when ToC quality is below threshold
+(`index.py:565-567`, via `_try_create_default_llm_client`), and that call returns
+`None` when credentials are absent. So the LLM path depends on ambient
+environment state that no recorded option captures:
+
+1. Build with no credentials configured. ToC quality is 0.3, fallback is eligible,
+   no client can be created, the native weak ToC is emitted.
+2. Credentials appear -- `.env` written, gateway key exported, the process
+   restarted inside a configured environment.
+3. Every recorded field still matches: same bytes, same options (`model=None`),
+   same version. The degraded artifact is reused, and the LLM fallback that a
+   fresh build would now run never runs again.
+
+The artifact is not corrupt, but it is worse than what the current environment can
+produce, and nothing would ever dislodge it short of deleting the directory.
+
+**The sidecar therefore records what the build actually did, not just what it was
+asked to do:** a single boolean, `llm_enrichment_skipped`, true when LLM work the
+build was eligible for did not happen because no callable was available. On the
+`build_datasheet` path -- the only path that writes a sidecar -- that means exactly
+one case, since `bound.py:166` already rejects `include_summaries` without a
+`model`: ToC quality below `TOC_FALLBACK_THRESHOLD` with no callable obtainable.
+
+Reuse is refused when the flag is true. The artifact is self-described as
+degraded, so a rebuild is given the chance to do better.
+
+Recorded rather than derived from the stored `toc_quality.score`, for the reason
+the two rules above already give: `to_dict` omitting empty fields and `details`
+not being serialized both showed that inferring build history from the deliverable
+does not work. Here it fails in a specific way -- a fallback that *ran* and was
+rejected also leaves the final score below threshold, so a derived rule could not
+tell "no client" from "client ran, candidate rejected" and would rebuild the
+PCN-shaped document on every request, re-paying the LLM cost that reuse exists to
+avoid.
+
+Two directions this deliberately does **not** treat as invalidating:
+
+- **A fallback that ran and was rejected, or ran and was accepted.** LLM output is
+  not deterministic, so a rebuild would not reproduce it; serving the stored one is
+  the stable answer, and stability is what makes an artifact citable across
+  requests.
+- **Credentials disappearing after a successful LLM build.** Reuse then serves an
+  artifact better than a fresh build could produce. That is a gift, not a defect.
 
 Exact version equality prevents serving artifacts built before a release that
 changed their content, as 0.17.3 did for `table_count` semantics and 0.18.0 did
@@ -159,6 +212,7 @@ Reuse only when *all* hold:
 - `datasheetindex_version` equals the running version exactly;
 - `source_sha256` matches the resolved PDF;
 - `build_options` match;
+- `llm_enrichment_skipped` is false;
 - both artifacts load, and the **sha256 of the bytes actually read** equals the
   recorded hash.
 
@@ -247,6 +301,15 @@ processes and across the parallel and sequential table-scan paths.
 
 ## Testing
 
+**Every test that expects a reuse *hit* must force the editability probe to
+`False`.** The suite runs from an editable checkout, where reuse is disabled by
+design, so a hit test written against the ambient environment cannot pass -- it
+would report the editable-install rule rather than the behaviour it names. A
+single fixture stubbing the probe is the right shape, applied to each hit test.
+Invalidation tests need no stub: they expect a rebuild either way, and one that
+passed for the wrong reason would be worthless, so they should stub it too and
+assert the rebuild came from the field under test.
+
 - `to_dict` -> `from_dict` round-trips every field, including those omitted
   when empty, and including a node tree with children.
 - Reuse hit: two fresh `DatasheetTools` over one PDF; the second leaves the
@@ -255,6 +318,11 @@ processes and across the parallel and sequential table-scan paths.
 - Invalidation, one test per fingerprint field: changed PDF bytes, changed
   build options, changed version, missing artifact file, truncated artifact
   file. Each must rebuild.
+- **`llm_enrichment_skipped=true` rebuilds** even when every other field matches,
+  and a build whose ToC quality is above threshold records it `false` so the
+  common path is not permanently uncacheable. Drive this through the flag on the
+  sidecar rather than by manipulating credentials, so the test states the rule and
+  needs no environment.
 - **Same-size corruption rebuilds.** Overwrite one byte of the text file in
   place, preserving its length, and assert a rebuild. This is the case a size
   check accepts and a hash rejects, so it is the test that justifies the hash.
@@ -269,9 +337,16 @@ processes and across the parallel and sequential table-scan paths.
 - A URL source is resolved before fingerprinting: serve a PDF from a local HTTP
   server, build twice with fresh instances, and assert the second reuses. This
   pins the resolve-then-hash ordering, which is the step whose omission would
-  make URL sources silently uncacheable.
+  make URL sources silently uncacheable. Being a hit test, it needs the
+  editability stub above.
 - `force_rebuild=True` rebuilds despite a valid sidecar.
-- An unwritable output directory does not fail an otherwise successful build.
+- **A failing sidecar write does not fail the build.** Inject the failure at the
+  sidecar writer -- monkeypatch it to raise -- and assert both deliverables are
+  present and correct and the returned artifacts are complete. Not by making the
+  output directory unwritable: that fails the deliverable writes too, so the build
+  raises for a different reason and the test would pass while proving nothing
+  about the sidecar. Cover the inverse as well: the *next* build finds no sidecar
+  and rebuilds rather than erroring.
 - No regression: the two deliverables stay byte-identical to a pre-change
   build, and the in-memory cache still returns without rebuilding.
 
@@ -297,6 +372,12 @@ Tests must not depend on the `[llm]` or `[layout]` extras, so a plain
   until it reopens.
 - **No reuse under an editable install**, so a source checkout behaves exactly
   as it does today and contributors see their edits take effect.
+- **A weak-ToC document built with no LLM available is never reused**, so it
+  rebuilds on every request until credentials are configured. That is the
+  degenerate environment -- `datasheet-agent` runs with the gateway configured, so
+  its weak-ToC documents (the PCN among them) record the flag `false` and cache
+  normally -- and paying the rebuild is the price of not pinning a degraded
+  artifact in place forever.
 - The output directory becomes a cache rather than a scratch space. Deleting it
   remains safe at all times, and is the recovery action for any suspected
   staleness.
