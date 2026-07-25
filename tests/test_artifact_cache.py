@@ -182,10 +182,46 @@ def test_is_editable_install_reads_direct_url_metadata(monkeypatch):
     )
     assert is_editable_install() is True
 
+    # A non-editable directory install still carries dir_info -- editable is
+    # absent/false, but the install came from a directory just the same, so
+    # this must also disable reuse.
     monkeypatch.setattr(
         "datasheetindex.core.artifact_cache.Distribution.from_name",
         lambda _name: FakeDistribution(json.dumps({"dir_info": {"editable": False}})),
     )
+    assert is_editable_install() is True
+
+
+def test_is_editable_install_is_true_for_a_non_editable_directory_install(
+    monkeypatch,
+):
+    """``pip install .`` writes ``dir_info: {}`` with no ``editable`` key.
+
+    A contributor iterating with a plain (non-editable) directory install and
+    no version bump between installs must not be served pre-edit artifacts --
+    the same failure the editable check exists to prevent, one workflow over.
+    """
+    monkeypatch.setattr(
+        "datasheetindex.core.artifact_cache.Distribution.from_name",
+        lambda _name: FakeDistribution(json.dumps({"dir_info": {}})),
+    )
+
+    assert is_editable_install() is True
+
+
+def test_is_editable_install_is_false_for_a_local_archive_install(monkeypatch):
+    """``pip install ./dist/foo.whl`` writes a ``url`` with no ``dir_info`` key.
+
+    That install is immutable, exactly like an index-installed wheel, so it
+    must stay reusable.
+    """
+    monkeypatch.setattr(
+        "datasheetindex.core.artifact_cache.Distribution.from_name",
+        lambda _name: FakeDistribution(
+            json.dumps({"url": "file:///tmp/dist/foo-1.0-py3-none-any.whl"})
+        ),
+    )
+
     assert is_editable_install() is False
 
 

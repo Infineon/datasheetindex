@@ -669,9 +669,12 @@ class DatasheetIndex:
             text_path = out / f"{pdf_name}.txt"
 
             # Atomic: temp then os.replace, so a crashed or failing build leaves
-            # the previous generation intact rather than a truncated file. This
-            # is also what lets a reader validate a pair of deliverables and get
-            # a coherent answer instead of a mixed generation.
+            # the previous generation intact rather than a truncated file. It
+            # does not by itself guarantee a coherent pair -- the JSON write
+            # can succeed and the text write then fail or race a reader. What
+            # closes that gap is the sidecar's hash-after-read validation in
+            # tools/bound.py, which rejects a pair whose bytes do not match
+            # what it recorded.
             atomic_write_text(
                 json_path, json.dumps(json_data, indent=2, ensure_ascii=False)
             )

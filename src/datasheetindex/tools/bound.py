@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -65,13 +65,15 @@ class _BuildOptions:
         Recorded rather than inferred: ``TocNode.to_dict()`` omits empty fields,
         so an absent ``summary`` cannot be told apart from
         ``include_summaries=True`` that produced nothing.
+
+        Built with ``dataclasses.asdict`` rather than a hand-written map so a
+        field added to this dataclass is included automatically -- a
+        hand-written map can silently omit a new field from the cache key,
+        which would let an artifact built one way be served for a request
+        that asked for another. A future field that is not JSON-safe now
+        fails loudly at ``json.dumps`` instead of silently at the cache key.
         """
-        return {
-            "output_dir": self.output_dir,
-            "output_stem": self.output_stem,
-            "include_summaries": self.include_summaries,
-            "model": self.model,
-        }
+        return asdict(self)
 
 
 _NO_TOC_HINT = (
@@ -245,6 +247,25 @@ class DatasheetTools:
         # and must match both artifact hashes.
         remove_sidecar(sidecar)
 
+        # Fingerprint the source BEFORE the build reads it, not after: a build
+        # can take several seconds (enrich_with_table_counts re-opens the path
+        # from disk in its own scan workers), and hashing post-build would
+        # record whatever replaced the file during that window rather than
+        # what PyMuPDF actually built from. Best effort -- a fingerprinting
+        # problem here must skip the sidecar, never fail the build.
+        source_sha256: str | None = None
+        source_size: int | None = None
+        try:
+            source_path = Path(self._index._resolve_pdf_source())
+            source_sha256 = sha256_file(source_path)
+            source_size = source_path.stat().st_size
+        except Exception:
+            logger.debug(
+                "Could not fingerprint the source before the build; the "
+                "sidecar write will be skipped",
+                exc_info=True,
+            )
+
         llm_callable = None
         try:
             if model is not None:
@@ -261,7 +282,9 @@ class DatasheetTools:
         finally:
             close_llm_client(llm_callable)
 
-        self._write_build_sidecar(sidecar, options, artifacts)
+        self._write_build_sidecar(
+            sidecar, options, artifacts, source_sha256, source_size
+        )
 
         self._artifacts = artifacts
         self._build_options = options
@@ -365,6 +388,8 @@ class DatasheetTools:
         sidecar: Path,
         options: _BuildOptions,
         artifacts: DatasheetArtifacts,
+        source_sha256: str | None,
+        source_size: int | None,
     ) -> None:
         """Record this build's fingerprint. Best effort.
 
@@ -373,17 +398,41 @@ class DatasheetTools:
         ``defs.py`` where cleanup failure is logged rather than allowed to
         discard a good result.
 
-        Hashes are taken from the files as written rather than from the
-        in-memory values, so the record cannot disagree with what is on disk.
+        The two deliverables' hashes ARE taken from the files as written
+        rather than from in-memory values, so the record cannot disagree with
+        what is on disk -- that reasoning holds because they do not exist
+        until the build writes them. It does NOT extend to the source: that
+        file exists before and throughout the build, so hashing it here,
+        after ``self._index.build()`` has already returned, would fingerprint
+        whatever is on disk *now*, which is not necessarily what PyMuPDF
+        actually read if the source was replaced in place while the build was
+        running. ``source_sha256``/``source_size`` are therefore passed in,
+        captured by the caller before the build started. As a second guard,
+        the source is re-hashed here and compared against that pre-build
+        value; a mismatch means the source changed during the build, and the
+        sidecar write is skipped rather than recording the wrong generation.
         """
+        if source_sha256 is None or source_size is None:
+            logger.debug(
+                "No pre-build source fingerprint available; skipping the sidecar write"
+            )
+            return
         try:
             if artifacts.json_path is None or artifacts.text_path is None:
                 return
             source_path = Path(self._index._resolve_pdf_source())
+            if sha256_file(source_path) != source_sha256:
+                logger.warning(
+                    "Source %s changed while the build was running; skipping "
+                    "the sidecar write so a mismatched generation is never "
+                    "recorded",
+                    source_path,
+                )
+                return
             quality = artifacts.toc_quality
             record = ArtifactRecord(
-                source_sha256=sha256_file(source_path),
-                source_size=source_path.stat().st_size,
+                source_sha256=source_sha256,
+                source_size=source_size,
                 build_options=options.to_dict(),
                 datasheetindex_version=package_version(),
                 json_name=artifacts.json_path.name,

@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+from dataclasses import fields
 
 import pymupdf
 import pytest
@@ -10,7 +11,7 @@ import pytest
 from datasheetindex.core.artifact_cache import read_sidecar, sidecar_path, write_sidecar
 from datasheetindex.index import TOC_FALLBACK_THRESHOLD, DatasheetIndex
 from datasheetindex.models import TocNode, TocQuality
-from datasheetindex.tools.bound import DatasheetTools
+from datasheetindex.tools.bound import DatasheetTools, _BuildOptions
 
 
 @pytest.fixture
@@ -178,6 +179,67 @@ def test_a_build_writes_a_sidecar_beside_the_deliverables(tmp_path, toc_pdf):
     assert "details" not in artifacts.json_data["toc_quality"]
 
 
+def test_a_source_swapped_mid_build_writes_no_sidecar(
+    tmp_path, toc_pdf, build_spy, monkeypatch, caplog
+):
+    """Hashing the source after the build would record the wrong generation.
+
+    Simulates a fetcher replacing the PDF in place while a build is running by
+    wrapping ``DatasheetIndex.build`` itself: the wrapped call still returns
+    real artifacts (PyMuPDF already had the original bytes open), but by the
+    time it returns, the source file on disk is a different generation. If
+    the source were fingerprinted after the build, the sidecar would record
+    the new bytes' hash while describing the old bytes' artifacts, and every
+    later request would compare the new bytes against themselves and match
+    forever.
+    """
+    out = tmp_path / "out"
+    original = DatasheetIndex.build
+    swapped_bytes = toc_pdf.read_bytes() + b"%swapped-revision\n"
+
+    def swapping_build(self, *args, **kwargs):
+        result = original(self, *args, **kwargs)
+        toc_pdf.write_bytes(swapped_bytes)
+        return result
+
+    monkeypatch.setattr(DatasheetIndex, "build", swapping_build)
+
+    with caplog.at_level("WARNING", logger="datasheetindex.tools.bound"):
+        with DatasheetTools(str(toc_pdf)) as tools:
+            artifacts = tools.build_datasheet(output_dir=str(out))
+
+    assert len(build_spy) == 1, "the swap should not itself trigger a rebuild"
+    assert artifacts.json_path is not None
+    assert artifacts.text_path is not None
+    assert artifacts.json_path.exists()
+    assert artifacts.text_path.exists()
+    assert not sidecar_path(out, artifacts.json_path.stem).exists()
+    assert "changed while the build was running" in caplog.text
+
+
+def test_a_normal_build_records_the_sources_own_hash(tmp_path, toc_pdf):
+    """The ordinary path still records the pre-build source fingerprint."""
+    out = tmp_path / "out"
+    with DatasheetTools(str(toc_pdf)) as tools:
+        artifacts = tools.build_datasheet(output_dir=str(out))
+
+    assert artifacts.json_path is not None
+    sidecar = sidecar_path(out, artifacts.json_path.stem)
+    record = read_sidecar(sidecar)
+    assert record is not None
+    assert record.source_sha256 == hashlib.sha256(toc_pdf.read_bytes()).hexdigest()
+
+
+def test_build_options_to_dict_covers_every_dataclass_field():
+    """A hand-written map could silently omit a future field from the cache
+    key; ``asdict`` cannot -- pin that the two stay in lockstep."""
+    options = _BuildOptions(
+        output_dir="out", output_stem=None, include_summaries=False, model=None
+    )
+
+    assert set(options.to_dict()) == {f.name for f in fields(_BuildOptions)}
+
+
 def test_a_failing_sidecar_write_does_not_fail_the_build(
     tmp_path, toc_pdf, monkeypatch
 ):
@@ -291,23 +353,36 @@ def test_a_second_fresh_instance_reuses_the_artifacts(
 
 
 def test_reused_quality_carries_details_the_deliverable_drops(
-    tmp_path, toc_pdf, not_editable
+    tmp_path, toc_pdf, not_editable, build_spy
 ):
-    """The reason TocQuality is stored whole rather than recomputed."""
+    """The reason TocQuality is stored whole rather than recomputed.
+
+    ``build_spy`` pins that the second build actually came from disk: without
+    it, deleting ``_reuse_from_disk`` entirely still leaves this test passing,
+    since a fresh rebuild of the same PDF also produces matching `details`.
+    """
     out = tmp_path / "out"
     with DatasheetTools(str(toc_pdf)) as tools:
         first = tools.build_datasheet(output_dir=str(out))
     with DatasheetTools(str(toc_pdf)) as tools:
         second = tools.build_datasheet(output_dir=str(out))
 
+    assert len(build_spy) == 1, "the second call rebuilt instead of reusing"
     assert first.toc_quality is not None
     assert second.toc_quality is not None
     assert second.toc_quality.details == first.toc_quality.details
     assert second.toc_quality.details != ""
 
 
-def test_reuse_populates_every_field_the_tools_read(tmp_path, toc_pdf, not_editable):
-    """A partially populated instance would fail later and at a distance."""
+def test_reuse_populates_every_field_the_tools_read(
+    tmp_path, toc_pdf, not_editable, build_spy
+):
+    """A partially populated instance would fail later and at a distance.
+
+    ``build_spy`` pins that the second call is a disk reuse: without it, a
+    fresh rebuild also populates every field the tools read, and this test
+    would pass just as well with ``_reuse_from_disk`` deleted outright.
+    """
     out = tmp_path / "out"
     with DatasheetTools(str(toc_pdf)) as tools:
         tools.build_datasheet(output_dir=str(out))
@@ -318,6 +393,7 @@ def test_reuse_populates_every_field_the_tools_read(tmp_path, toc_pdf, not_edita
         matches = tools.search_text("datasheet")
         section = tools.get_section_text(1, 2)
 
+    assert len(build_spy) == 1, "the second call rebuilt instead of reusing"
     assert manifest["total_pages"] == 3
     assert len(matches) > 0
     assert "datasheet" in section

@@ -71,17 +71,26 @@ def atomic_write_text(path: Path, content: str) -> None:
 
 
 def is_editable_install() -> bool:
-    """True when this package is editable or is an uninstalled source tree.
+    """True when this package was installed from a directory, or is an
+    uninstalled source tree.
 
-    Reuse is disabled for both. ``package_version()`` returns the real version
-    under an editable install, so a source edit without a version bump would
-    otherwise serve pre-edit artifacts, and ``0+unknown == 0+unknown`` would
-    match anyway -- exact version equality could never have forced a rebuild on
-    its own.
+    Reuse is disabled for both. The signal is the *presence* of a
+    ``dir_info`` key in ``direct_url.json``, not its ``editable`` flag: a
+    non-editable directory install (``pip install .``, ``uv pip install .``)
+    also writes ``dir_info``, with ``editable`` absent or false, and checking
+    only ``editable`` would leave reuse on for it. ``package_version()``
+    returns the real version under that kind of install too, so a source edit
+    with no version bump would otherwise serve pre-edit artifacts to a
+    contributor iterating that way -- the exact failure the editable check
+    exists to prevent, one workflow over. ``0+unknown == 0+unknown`` would
+    match anyway with no distribution at all, so exact version equality could
+    never have forced a rebuild on its own.
 
     Note the asymmetry: **no** ``direct_url.json`` means an index-installed
     wheel, which is immutable, so version equality suffices and reuse is on.
-    No distribution *at all* means a source tree, where it is not.
+    A ``direct_url.json`` with a ``url`` but no ``dir_info`` key is a local
+    archive install (``pip install ./dist/foo.whl``), also immutable, also
+    reusable. No distribution *at all* means a source tree, where it is not.
     """
     try:
         raw = Distribution.from_name("datasheetindex").read_text("direct_url.json")
@@ -90,10 +99,10 @@ def is_editable_install() -> bool:
     if raw is None:
         return False
     try:
-        dir_info = json.loads(raw).get("dir_info") or {}
+        payload = json.loads(raw)
     except json.JSONDecodeError:
         return True
-    return bool(dir_info.get("editable"))
+    return "dir_info" in payload
 
 
 @dataclass(frozen=True)
