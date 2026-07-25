@@ -41,6 +41,14 @@ line-length = 88
 target-version = "py313"
 src = ["src", "tests"]
 
+[tool.ruff.format]
+# ruff 0.16 formats Python code blocks inside Markdown by default. The snippets
+# in docs/ are illustrative, not runnable -- hand-aligned trailing comments and
+# `...` elisions standing in for omitted code -- so formatting them degrades the
+# prose. The ruff-format pre-commit hook only passes python/pyi/jupyter, so this
+# keeps a bare `ruff format .` consistent with what the hook actually enforces.
+exclude = ["*.md"]
+
 [tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
