@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import threading
 
 import pytest
 
@@ -43,9 +44,12 @@ def test_sha256_file_reads_in_chunks(tmp_path):
 
 
 def test_sha256_text_is_utf8():
-    expected = hashlib.sha256(b"naive resume 5 uA").hexdigest()
+    """A multi-byte codepoint, so a single-byte codec would give a different digest."""
+    payload = "5 µA"  # MICRO SIGN, as datasheet units are written
+    expected = hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
-    assert sha256_text("naive resume 5 uA") == expected
+    assert sha256_text(payload) == expected
+    assert sha256_text(payload) != hashlib.sha256(payload.encode("latin-1")).hexdigest()
 
 
 def test_atomic_write_text_creates_file(tmp_path):
@@ -93,6 +97,40 @@ def test_atomic_write_text_removes_its_temp_file_on_failure(tmp_path, monkeypatc
         atomic_write_text(target, "content")
 
     assert list(tmp_path.iterdir()) == []
+
+
+def test_atomic_write_text_overwrites_existing_file(tmp_path):
+    """Happy-path overwrite of an existing destination."""
+    target = tmp_path / "out.txt"
+    atomic_write_text(target, "first write")
+    atomic_write_text(target, "second write")
+
+    assert target.read_text(encoding="utf-8") == "second write"
+    assert list(tmp_path.iterdir()) == [target]
+
+
+def test_atomic_write_text_concurrent_writers(tmp_path):
+    """Two concurrent writers to one destination both complete without truncation."""
+    target = tmp_path / "out.txt"
+    barrier = threading.Barrier(2)
+    results = {}
+
+    def writer(writer_id, payload):
+        barrier.wait()
+        atomic_write_text(target, payload)
+        results[writer_id] = payload
+
+    thread1 = threading.Thread(target=writer, args=(1, "payload from thread 1"))
+    thread2 = threading.Thread(target=writer, args=(2, "payload from thread 2"))
+
+    thread1.start()
+    thread2.start()
+    thread1.join()
+    thread2.join()
+
+    final_content = target.read_text(encoding="utf-8")
+    assert final_content in (results[1], results[2])
+    assert list(tmp_path.iterdir()) == [target]
 
 
 def test_is_editable_install_reads_direct_url_metadata(monkeypatch):

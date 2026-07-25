@@ -13,6 +13,7 @@ import logging
 import os
 from importlib.metadata import Distribution
 from pathlib import Path
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +55,12 @@ def atomic_write_text(path: Path, content: str) -> None:
 
     A crash or failure leaves the previous generation intact instead of a
     truncated file. The temp file shares the destination's directory so the
-    replace stays on one filesystem.
+    replace stays on one filesystem. The temp name is unique per writing thread
+    so concurrent writers to the same destination do not share a temp path and
+    truncate each other's content.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    temp_path = path.with_name(f"{path.name}.{os.getpid()}.{uuid4().hex}.tmp")
     try:
         temp_path.write_text(content, encoding="utf-8")
         os.replace(temp_path, path)
