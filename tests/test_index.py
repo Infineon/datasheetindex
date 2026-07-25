@@ -1253,6 +1253,12 @@ def test_a_rejected_fallback_candidate_is_complete(tmp_path, monkeypatch):
 
     Marking it incomplete would re-pay the LLM cost on every request for
     exactly the documents the fallback cannot help.
+
+    The rejection is driven by stubbing _accept_llm_toc_candidate rather than
+    by constructing a candidate the real heuristic happens to decline. With no
+    baseline ToC to protect, that heuristic accepts even a single thin node
+    (see test_accept_llm_toc_candidate_accepts_thin_candidate_without_baseline),
+    so a fixture-based rejection would silently test acceptance instead.
     """
     pdf_path = _simple_pdf(tmp_path, name="weak.pdf", pages=3, with_toc=False)
 
@@ -1262,12 +1268,17 @@ def test_a_rejected_fallback_candidate_is_complete(tmp_path, monkeypatch):
     monkeypatch.setattr(
         DatasheetIndex, "_try_create_default_llm_client", lambda _self: dummy_callable
     )
-    # One thin entry, which _accept_llm_toc_candidate declines.
     monkeypatch.setattr(
         "datasheetindex.llm.toc_fallback.generate_toc_from_text",
         lambda _text, _pages, _callable: [
-            TocNode(title="Thin", level=1, start_page=1, end_page=1, node_id="0001")
+            TocNode(
+                title="Candidate", level=1, start_page=1, end_page=3, node_id="0001"
+            )
         ],
+    )
+    monkeypatch.setattr(
+        "datasheetindex.index._accept_llm_toc_candidate",
+        lambda _baseline, _candidate, *, total_pages: (False, "declined for this test"),
     )
 
     idx = DatasheetIndex(str(pdf_path))
@@ -1276,6 +1287,8 @@ def test_a_rejected_fallback_candidate_is_complete(tmp_path, monkeypatch):
     finally:
         idx.close()
 
+    # The else branch ran: the candidate was discarded, so its node is absent.
+    assert all(node.title != "Candidate" for node in artifacts.nodes)
     assert artifacts.llm_enrichment_incomplete is False
     assert artifacts.llm_enrichment_notes == ()
 
