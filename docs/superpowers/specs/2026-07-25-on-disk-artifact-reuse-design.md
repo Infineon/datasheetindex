@@ -181,7 +181,7 @@ Anything else rebuilds. There is no repair path and no partial reuse.
 
    Consequence for URL sources: the download is paid on every request, hit or
    miss, so the saving there is 7-27 s down to *download time*, not down to
-   4.9 ms. Still worth having, and content identity is what makes a URL source
+   5.2 ms. Still worth having, and content identity is what makes a URL source
    cacheable at all, since it downloads to a fresh temp filename each run and
    path identity could never match.
 3. Sidecar valid -> read the JSON and text file and populate **every**
