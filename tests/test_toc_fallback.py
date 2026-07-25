@@ -71,6 +71,52 @@ def test_split_repeats_page_marker_when_chunk_starts_mid_page():
     assert "b" * 400 in chunks[1]
 
 
+def test_split_never_prepends_a_marker_before_the_first_page():
+    """Text ahead of page 1 has no page, and must not be given one.
+
+    The carry-over must invent nothing: attributing preamble text to a page it
+    did not come from is worse than leaving it unanchored, because the model
+    would then cite a page the text never occupied.
+    """
+    text = "preamble " * 40 + "\n--- PAGE 1 ---\n" + "a" * 300
+
+    chunks = _split_into_chunks(text, max_chars=350)
+
+    assert len(chunks) == 2
+    assert _page_markers(chunks[0]) == set()
+    assert chunks[1].startswith("--- PAGE 1 ---")
+
+
+def test_split_carries_the_current_page_not_an_earlier_one():
+    """With consecutive markers, the body belongs to the *last* page seen."""
+    text = "--- PAGE 1 ---\n--- PAGE 2 ---\n" + "b" * 400
+
+    chunks = _split_into_chunks(text, max_chars=30)
+
+    assert len(chunks) == 2
+    assert chunks[1].startswith("--- PAGE 2 ---")
+    assert "b" * 400 in chunks[1]
+    # The repeat spans chunks; it must not double up inside one.
+    assert chunks[1].count("--- PAGE 2 ---") == 1
+
+
+def test_split_keeps_a_marker_that_is_the_final_part():
+    """A document ending on a marker must not lose it."""
+    text = "--- PAGE 1 ---\n" + "a" * 400 + "\n--- PAGE 2 ---"
+
+    chunks = _split_into_chunks(text, max_chars=450)
+
+    assert _page_markers("".join(chunks)) == {1, 2}
+
+
+def test_split_tolerates_text_with_no_markers():
+    """Nothing to anchor to is not an error; it yields no attested pages."""
+    chunks = _split_into_chunks("a" * 300 + "\n" + "b" * 300, max_chars=250)
+
+    assert chunks
+    assert _page_markers("".join(chunks)) == set()
+
+
 def test_page_markers_reads_the_page_numbers_present():
     text = "--- PAGE 3 ---\nbody\n--- PAGE 4 ---\nmore\n"
 

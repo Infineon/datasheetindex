@@ -1016,8 +1016,12 @@ datasheetindex/
 │   ├── defs.py            # create_datasheet_tool_defs (framework-neutral tool defs)
 │   └── registry.py        # Claude Agent SDK adapter (re-exports DatasheetTools)
 ├── llm/
+│   ├── client.py          # Optional LLM client (free-text + structured_json)
 │   ├── toc_fallback.py    # PageIndex-style LLM ToC generation
-│   └── summarizer.py      # Optional section summaries
+│   │                      #   Page numbers validated against chunk markers
+│   ├── summarizer.py      # Optional section summaries
+│   └── untrusted.py       # Framing for document text sent to an LLM
+│                          #   (PDF text is untrusted input, not instructions)
 ├── index.py               # Main DatasheetIndex class
 └── models.py              # Data models
 ```
