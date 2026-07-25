@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 import threading
-from typing import cast
+from dataclasses import replace
 
 import pytest
 
@@ -234,23 +234,29 @@ def test_sidecar_path_sits_beside_the_deliverables(tmp_path):
     assert sidecar_path(tmp_path, "ds") == tmp_path / "ds.build.json"
 
 
-def make_record(**overrides: object) -> ArtifactRecord:
-    """A complete record; override one field per invalidation test."""
-    defaults: dict[str, object] = {
-        "source_sha256": "a" * 64,
-        "source_size": 1024,
-        "build_options": {
+def make_record(**overrides) -> ArtifactRecord:
+    """A complete record; override one field per invalidation test.
+
+    Overrides are applied with dataclasses.replace rather than coerced, so a
+    wrongly-typed override surfaces instead of being silently converted --
+    bool("False") is True, which would invert the flag that governs whether a
+    cached artifact may be reused at all.
+    """
+    base = ArtifactRecord(
+        source_sha256="a" * 64,
+        source_size=1024,
+        build_options={
             "output_dir": "/tmp/out",
             "output_stem": None,
             "include_summaries": False,
             "model": None,
         },
-        "datasheetindex_version": "0.24.0",
-        "json_name": "ds.json",
-        "json_sha256": "b" * 64,
-        "text_name": "ds.txt",
-        "text_sha256": "c" * 64,
-        "toc_quality": {
+        datasheetindex_version="0.24.0",
+        json_name="ds.json",
+        json_sha256="b" * 64,
+        text_name="ds.txt",
+        text_sha256="c" * 64,
+        toc_quality={
             "score": 0.62,
             "entry_count": 2,
             "max_depth": 1,
@@ -258,25 +264,8 @@ def make_record(**overrides: object) -> ArtifactRecord:
             "recommend_summaries": True,
             "details": "2 entries",
         },
-    }
-    defaults.update(overrides)
-    return ArtifactRecord(
-        source_sha256=str(defaults["source_sha256"]),
-        source_size=int(defaults["source_size"]),
-        build_options=dict(defaults["build_options"]),
-        datasheetindex_version=str(defaults["datasheetindex_version"]),
-        json_name=str(defaults["json_name"]),
-        json_sha256=str(defaults["json_sha256"]),
-        text_name=str(defaults["text_name"]),
-        text_sha256=str(defaults["text_sha256"]),
-        toc_quality=dict(defaults["toc_quality"]),
-        llm_enrichment_incomplete=bool(
-            defaults.get("llm_enrichment_incomplete", False)
-        ),
-        llm_enrichment_notes=tuple(
-            cast(tuple[str, ...] | None, defaults.get("llm_enrichment_notes")) or ()
-        ),
     )
+    return replace(base, **overrides) if overrides else base
 
 
 def test_record_round_trips_through_json(tmp_path):
