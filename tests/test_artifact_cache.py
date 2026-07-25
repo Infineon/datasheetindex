@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import threading
 
 import pytest
@@ -109,16 +110,47 @@ def test_atomic_write_text_overwrites_existing_file(tmp_path):
     assert list(tmp_path.iterdir()) == [target]
 
 
+def test_atomic_write_text_uses_a_unique_temp_path_per_write(tmp_path, monkeypatch):
+    """Two writers must never derive the same temp name.
+
+    A shared temp name lets one writer's partial content be replaced into
+    place by another, and leaves the loser's os.replace with nothing to move.
+    Asserted without threads so it fails deterministically, which a race
+    cannot promise.
+    """
+    target = tmp_path / "out.txt"
+    seen: list[str] = []
+    real_replace = os.replace
+
+    def recording_replace(src, dst):
+        seen.append(str(src))
+        real_replace(src, dst)
+
+    patch_target = "datasheetindex.core.artifact_cache.os.replace"
+    monkeypatch.setattr(patch_target, recording_replace)
+
+    atomic_write_text(target, "first")
+    atomic_write_text(target, "second")
+
+    assert len(seen) == 2
+    assert seen[0] != seen[1], "both writes used the same temp path"
+    assert target.read_text(encoding="utf-8") == "second"
+
+
 def test_atomic_write_text_concurrent_writers(tmp_path):
-    """Two concurrent writers to one destination both complete without truncation."""
+    """Two concurrent writers both complete, and neither corrupts the result."""
     target = tmp_path / "out.txt"
     barrier = threading.Barrier(2)
     results = {}
+    errors: list[BaseException] = []
 
     def writer(writer_id, payload):
-        barrier.wait()
-        atomic_write_text(target, payload)
-        results[writer_id] = payload
+        try:
+            barrier.wait()
+            atomic_write_text(target, payload)
+            results[writer_id] = payload
+        except BaseException as exc:
+            errors.append(exc)
 
     thread1 = threading.Thread(target=writer, args=(1, "payload from thread 1"))
     thread2 = threading.Thread(target=writer, args=(2, "payload from thread 2"))
@@ -128,6 +160,7 @@ def test_atomic_write_text_concurrent_writers(tmp_path):
     thread1.join()
     thread2.join()
 
+    assert errors == [], f"a writer thread raised: {errors}"
     final_content = target.read_text(encoding="utf-8")
     assert final_content in (results[1], results[2])
     assert list(tmp_path.iterdir()) == [target]
