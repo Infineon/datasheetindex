@@ -6,6 +6,7 @@ import pytest
 
 from datasheetindex.core.textfile import extract_section_text
 from datasheetindex.llm.summarizer import add_summaries
+from datasheetindex.llm.untrusted import DATA_ONLY_INSTRUCTION
 from datasheetindex.models import TocNode
 
 SAMPLE_TEXT = (
@@ -70,6 +71,26 @@ def test_extract_section_text_last_page():
 def test_extract_section_text_not_found():
     """Missing page marker should return empty string."""
     assert extract_section_text(SAMPLE_TEXT, 99, 99) == ""
+
+
+def test_add_summaries_frames_section_text_as_data():
+    """A summary lands in the ToC JSON an agent reads, so its input is framed.
+
+    Without framing, an instruction printed in a datasheet section propagates
+    through ``node.summary`` into the consuming agent's context as trusted text.
+    """
+    captured: dict[str, str] = {}
+
+    def mock_llm(system: str, user: str) -> str:
+        captured["system"] = system
+        captured["user"] = user
+        return "A summary."
+
+    add_summaries(_make_nodes(), SAMPLE_TEXT, mock_llm)
+
+    assert "<document_text>" in captured["user"]
+    assert "</document_text>" in captured["user"]
+    assert DATA_ONLY_INSTRUCTION in captured["system"]
 
 
 def test_add_summaries_mock():

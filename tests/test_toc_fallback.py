@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
@@ -10,11 +11,14 @@ from datasheetindex.core.quality import assess_toc_quality
 from datasheetindex.llm.client import StructuredLlmResult
 from datasheetindex.llm.toc_fallback import (
     MAX_PREVIOUS_CONTEXT_CHARS,
+    _drop_unsupported_entries,
     _format_previous_entries,
+    _page_markers,
     _parse_json_response,
     _split_into_chunks,
     generate_toc_from_text,
 )
+from datasheetindex.llm.untrusted import DATA_ONLY_INSTRUCTION
 
 # --- Unit tests ---
 
@@ -45,6 +49,51 @@ def test_split_into_chunks_multiple():
 def test_split_empty_text():
     """Empty text should produce no chunks."""
     assert _split_into_chunks("", max_chars=1000) == []
+
+
+def test_split_repeats_page_marker_when_chunk_starts_mid_page():
+    """A chunk starting inside a page must carry that page's marker.
+
+    The split falls between a marker and its body, so without the carry-over
+    the chunk opens with orphan text and the model has no page to anchor it
+    to -- and marker validation would then drop the whole chunk's entries.
+    """
+    text = "--- PAGE 1 ---\n" + "a" * 400 + "\n--- PAGE 2 ---\n" + "b" * 400 + "\n"
+
+    chunks = _split_into_chunks(text, max_chars=450)
+
+    assert len(chunks) == 2
+    assert chunks[1].startswith("--- PAGE 2 ---")
+    assert "b" * 400 in chunks[1]
+
+
+def test_page_markers_reads_the_page_numbers_present():
+    text = "--- PAGE 3 ---\nbody\n--- PAGE 4 ---\nmore\n"
+
+    assert _page_markers(text) == {3, 4}
+
+
+def test_drop_unsupported_entries_removes_pages_absent_from_the_chunk():
+    """A start_page the chunk cannot support is a hallucination, not a hint."""
+    chunk = "--- PAGE 3 ---\nbody\n--- PAGE 4 ---\nmore\n"
+    entries = [
+        {"level": 1, "title": "Real", "start_page": 3},
+        {"level": 1, "title": "Ghost", "start_page": 9999},
+    ]
+
+    kept = _drop_unsupported_entries(entries, chunk)
+
+    assert [entry["title"] for entry in kept] == ["Real"]
+
+
+def test_drop_unsupported_entries_keeps_every_supported_page():
+    chunk = "--- PAGE 3 ---\nbody\n--- PAGE 4 ---\nmore\n"
+    entries = [
+        {"level": 1, "title": "Third", "start_page": 3},
+        {"level": 2, "title": "Fourth", "start_page": 4},
+    ]
+
+    assert _drop_unsupported_entries(entries, chunk) == entries
 
 
 def test_parse_json_response_clean():
@@ -119,6 +168,87 @@ def test_generate_toc_from_text_mock():
     assert nodes[0].node_id == "0001"
 
 
+def _last_page_of(chunk: str) -> int:
+    """Highest ``--- PAGE N ---`` marker in the text a mock LLM was handed.
+
+    Mocks must answer with a page their own chunk supports; a fixed page number
+    is an unsupported answer once chunk arithmetic shifts.
+    """
+    return max(int(n) for n in re.findall(r"--- PAGE (\d+) ---", chunk))
+
+
+def test_generate_toc_drops_hallucinated_page_without_corrupting_siblings():
+    """An out-of-range start_page must not reach the tree.
+
+    ``compute_end_pages`` derives a node's end from its next sibling's start,
+    so a single hallucinated page silently stretches the preceding section
+    across the whole document.
+    """
+    canned = json.dumps(
+        [
+            {"level": 1, "title": "Overview", "start_page": 1},
+            {"level": 1, "title": "Ghost", "start_page": 9999},
+        ]
+    )
+
+    def mock_llm(system: str, user: str) -> str:
+        return canned
+
+    text = "--- PAGE 1 ---\nOverview\n--- PAGE 2 ---\nMore\n"
+
+    nodes = generate_toc_from_text(text, total_pages=2, llm_callable=mock_llm)
+
+    assert [node.title for node in nodes] == ["Overview"]
+    assert nodes[0].end_page == 2
+
+
+def test_generate_toc_frames_document_text_as_data():
+    """Datasheet text is untrusted input; it must reach the model framed."""
+    captured: dict[str, str] = {}
+
+    def mock_llm(system: str, user: str) -> str:
+        captured["system"] = system
+        captured["user"] = user
+        return json.dumps([{"level": 1, "title": "Overview", "start_page": 1}])
+
+    generate_toc_from_text(
+        "--- PAGE 1 ---\nOverview\n", total_pages=1, llm_callable=mock_llm
+    )
+
+    assert "<document_text>" in captured["user"]
+    assert "</document_text>" in captured["user"]
+    assert "Overview" in captured["user"]
+    assert DATA_ONLY_INSTRUCTION in captured["system"]
+
+
+def test_generate_toc_structured_path_hardens_its_system_prompt():
+    class _StructuredMockLlm:
+        def __init__(self) -> None:
+            self.system = ""
+            self.user = ""
+
+        def __call__(self, system: str, user: str) -> str:
+            raise AssertionError("free-text path should not be used")
+
+        def structured_json(
+            self, system: str, user: str, **_kwargs
+        ) -> StructuredLlmResult:
+            self.system = system
+            self.user = user
+            payload = {"entries": [{"level": 1, "title": "Overview", "start_page": 1}]}
+            return StructuredLlmResult(
+                output_text=json.dumps(payload), status="completed"
+            )
+
+    llm = _StructuredMockLlm()
+    generate_toc_from_text(
+        "--- PAGE 1 ---\nOverview\n", total_pages=1, llm_callable=llm
+    )
+
+    assert DATA_ONLY_INSTRUCTION in llm.system
+    assert "<document_text>" in llm.user
+
+
 def test_generate_toc_multi_chunk_mock():
     """Multi-chunk text should accumulate entries from both calls."""
     call_count = [0]
@@ -127,7 +257,9 @@ def test_generate_toc_multi_chunk_mock():
         call_count[0] += 1
         if call_count[0] == 1:
             return json.dumps([{"level": 1, "title": "Part A", "start_page": 1}])
-        return json.dumps([{"level": 1, "title": "Part B", "start_page": 50}])
+        return json.dumps(
+            [{"level": 1, "title": "Part B", "start_page": _last_page_of(user)}]
+        )
 
     # Build text large enough to split into 2 chunks
     pages = []
@@ -153,7 +285,7 @@ def test_generate_toc_from_text_structured_mock():
             raise AssertionError("legacy text path should not be used")
 
         def structured_json(
-            self, _system: str, _user: str, **_kwargs
+            self, _system: str, user: str, **_kwargs
         ) -> StructuredLlmResult:
             self.call_count += 1
             if self.call_count == 1:
@@ -164,7 +296,11 @@ def test_generate_toc_from_text_structured_mock():
                 payload = {
                     "entries": [
                         {"level": 1, "title": "Part A", "start_page": 1},
-                        {"level": 1, "title": "Part B", "start_page": 50},
+                        {
+                            "level": 1,
+                            "title": "Part B",
+                            "start_page": _last_page_of(user),
+                        },
                     ]
                 }
             return StructuredLlmResult(
@@ -204,7 +340,7 @@ def test_generate_toc_from_text_structured_truncated_chunk_keeps_other_chunks():
             raise AssertionError("free-text path should not be used")
 
         def structured_json(
-            self, _system: str, _user: str, **_kwargs
+            self, _system: str, user: str, **_kwargs
         ) -> StructuredLlmResult:
             self.call_count += 1
             if self.call_count == 2:
@@ -218,7 +354,7 @@ def test_generate_toc_from_text_structured_truncated_chunk_keeps_other_chunks():
                     {
                         "level": 1,
                         "title": f"Part {self.call_count}",
-                        "start_page": self.call_count * 10,
+                        "start_page": _last_page_of(user),
                     }
                 ]
             }

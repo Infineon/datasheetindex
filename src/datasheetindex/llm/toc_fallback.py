@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, cast
 
 from datasheetindex.core.structure import build_tree
 from datasheetindex.llm.client import get_structured_output_client
+from datasheetindex.llm.untrusted import DATA_ONLY_INSTRUCTION, wrap_document_text
 from datasheetindex.models import TocNode
 
 if TYPE_CHECKING:
@@ -24,6 +25,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_PAGE_MARKER_RE = re.compile(r"(--- PAGE \d+ ---)")
+_PAGE_NUMBER_RE = re.compile(r"--- PAGE (\d+) ---")
+
 CHUNK_SIZE = 15000
 INTER_CHUNK_DELAY = 1.0  # seconds between LLM calls to avoid rate limits
 MAX_PREVIOUS_CONTEXT_CHARS = 4000
@@ -33,7 +37,8 @@ SYSTEM_PROMPT = (
     "You are an expert at identifying the hierarchical structure of "
     "technical datasheets. Extract sections from the provided text and "
     "return a JSON array. Each entry must have: level (int, 1=top), "
-    "title (str, original wording), start_page (int, from PAGE markers)."
+    "title (str, original wording), start_page (int, from PAGE markers). "
+    + DATA_ONLY_INSTRUCTION
 )
 
 INIT_USER_PROMPT = (
@@ -59,7 +64,7 @@ STRUCTURED_SYSTEM_PROMPT = (
     "technical datasheets. Extract sections from the provided text and "
     "return a JSON object with an `entries` array. Each entry must have: "
     "level (int, 1=top), title (str, original wording), "
-    "start_page (int, from PAGE markers)."
+    "start_page (int, from PAGE markers). " + DATA_ONLY_INSTRUCTION
 )
 
 STRUCTURED_INIT_USER_PROMPT = (
@@ -198,13 +203,14 @@ def _collect_entries(
     all_entries: list[dict[str, int | str]] = []
 
     for i, chunk in enumerate(chunks):
+        framed = wrap_document_text(chunk)
         if i == 0:
-            user_msg = extractor.init_prompt.format(text=chunk)
+            user_msg = extractor.init_prompt.format(text=framed)
         else:
             time.sleep(INTER_CHUNK_DELAY)
             user_msg = extractor.continue_prompt.format(
                 previous=_format_previous_entries(all_entries),
-                text=chunk,
+                text=framed,
             )
 
         try:
@@ -221,6 +227,7 @@ def _collect_entries(
                 return []
             continue
 
+        entries = _drop_unsupported_entries(entries, chunk)
         all_entries.extend(_dedupe_entries(all_entries, entries))
 
     return all_entries
@@ -231,17 +238,25 @@ def _split_into_chunks(text: str, max_chars: int) -> list[str]:
 
     Each chunk stays under ``max_chars`` while respecting page boundaries.
     """
-    page_pattern = re.compile(r"(--- PAGE \d+ ---)")
-    parts = page_pattern.split(text)
+    parts = _PAGE_MARKER_RE.split(text)
 
     chunks: list[str] = []
     current = ""
+    last_marker = ""
 
     for part in parts:
+        if _PAGE_MARKER_RE.fullmatch(part):
+            last_marker = part
         if len(current) + len(part) > max_chars and current:
             chunks.append(current)
-            # Start new chunk; if previous ended mid-page, include marker
-            current = part
+            # A split between a marker and its body would leave the new chunk
+            # opening on orphan text, with no page for the model to cite and
+            # nothing for _drop_unsupported_entries to accept. Repeat the
+            # marker so every chunk is anchored to the page it starts in.
+            if last_marker and not part.startswith(last_marker):
+                current = last_marker + "\n" + part
+            else:
+                current = part
         else:
             current += part
 
@@ -249,6 +264,44 @@ def _split_into_chunks(text: str, max_chars: int) -> list[str]:
         chunks.append(current)
 
     return chunks
+
+
+def _page_markers(text: str) -> set[int]:
+    """Page numbers the ``--- PAGE N ---`` markers in ``text`` actually attest."""
+    return {int(n) for n in _PAGE_NUMBER_RE.findall(text)}
+
+
+def _drop_unsupported_entries(entries: list[dict], chunk: str) -> list[dict]:
+    """Discard entries whose ``start_page`` the chunk cannot attest.
+
+    The prompt asks the model for pages supported by the chunk it was given;
+    this enforces it. A page outside the chunk's markers is a fabrication, and
+    it is not harmless: ``compute_end_pages`` derives each node's end from its
+    next sibling's start, so one bad page stretches the section before it
+    across the rest of the document.
+
+    Dropped rather than clamped -- a wrong page that looks plausible is worse
+    than a missing section, which ``index._accept_llm_toc_candidate`` can still
+    weigh when it decides whether to take the candidate at all.
+    """
+    supported = _page_markers(chunk)
+    kept = [entry for entry in entries if entry["start_page"] in supported]
+
+    dropped = len(entries) - len(kept)
+    if dropped:
+        logger.warning(
+            "Dropped %d ToC %s citing pages absent from their chunk (markers %s)",
+            dropped,
+            "entry" if dropped == 1 else "entries",
+            _describe_markers(supported),
+        )
+    return kept
+
+
+def _describe_markers(markers: set[int]) -> str:
+    if not markers:
+        return "none"
+    return f"{min(markers)}-{max(markers)}"
 
 
 def _parse_json_response(raw: str) -> list[dict]:
