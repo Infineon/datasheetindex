@@ -14,6 +14,7 @@ top-level :mod:`datasheetindex` package.
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,8 +23,12 @@ from typing import TYPE_CHECKING
 from datasheetindex._version import package_version
 from datasheetindex.core.artifact_cache import (
     ArtifactRecord,
+    is_editable_install,
+    read_sidecar,
     remove_sidecar,
+    reuse_blocker,
     sha256_file,
+    sha256_text,
     sidecar_path,
     write_sidecar,
 )
@@ -38,7 +43,7 @@ from datasheetindex.core.textfile import TextSearchMatch, extract_section_text
 from datasheetindex.core.textfile import search_text as search_text_content
 from datasheetindex.index import DatasheetIndex
 from datasheetindex.llm.client import close_llm_client
-from datasheetindex.models import DatasheetArtifacts
+from datasheetindex.models import DatasheetArtifacts, TocNode, TocQuality
 from datasheetindex.tools.vision import Detail, inspect_page
 
 if TYPE_CHECKING:
@@ -228,6 +233,13 @@ class DatasheetTools:
         stem = self._index.artifact_stem(output_stem)
         sidecar = sidecar_path(resolved_output_dir, stem)
 
+        if not force_rebuild:
+            reused = self._reuse_from_disk(sidecar, options)
+            if reused is not None:
+                self._artifacts = reused
+                self._build_options = options
+                return reused
+
         # Invalidate, write data, publish. Removing the sidecar first means a
         # concurrent reader either finds no sidecar and rebuilds, or finds one
         # and must match both artifact hashes.
@@ -254,6 +266,99 @@ class DatasheetTools:
         self._artifacts = artifacts
         self._build_options = options
         return artifacts
+
+    def _reuse_from_disk(
+        self, sidecar: Path, options: _BuildOptions
+    ) -> DatasheetArtifacts | None:
+        """Return artifacts loaded from disk, or None to rebuild.
+
+        Every failure degrades to a rebuild, so the caller needs no error
+        handling. Artifact content is validated by hashing the bytes actually
+        read: hashing after the read rather than stat-ing before it closes the
+        mixed-generation window entirely instead of narrowing it, so a pair
+        straddling a concurrent write, or left mixed by a crash between the two
+        writes, fails and rebuilds.
+
+        Every rejection goes through one log line with a stable token, so a test
+        can assert *which* check rejected a record rather than only that a
+        rebuild happened.
+        """
+        if is_editable_install():
+            logger.debug("Not reusing on-disk artifacts: %s", "editable_install")
+            return None
+
+        record = read_sidecar(sidecar)
+        if record is None:
+            logger.debug("Not reusing on-disk artifacts: %s", "no_sidecar")
+            return None
+
+        # Resolve first: a fresh instance holding a URL has nothing on disk to
+        # hash yet, and a local path may still need the WSL/Windows translation.
+        # Hash the resolved file.
+        try:
+            source_path = self._index._resolve_pdf_source()
+        except Exception:
+            logger.debug(
+                "Not reusing on-disk artifacts: %s",
+                "source_unresolvable",
+                exc_info=True,
+            )
+            return None
+
+        try:
+            blocker = reuse_blocker(
+                record,
+                source_path=source_path,
+                build_options=options.to_dict(),
+                running_version=package_version(),
+            )
+        except OSError:
+            logger.debug("Not reusing on-disk artifacts: %s", "source_unreadable")
+            return None
+        if blocker is not None:
+            logger.debug("Not reusing on-disk artifacts: %s", blocker)
+            return None
+
+        directory = Path(options.output_dir)
+        json_path = directory / record.json_name
+        text_path = directory / record.text_name
+        try:
+            json_text = json_path.read_text(encoding="utf-8")
+            text_content = text_path.read_text(encoding="utf-8")
+        except OSError:
+            logger.debug("Not reusing on-disk artifacts: %s", "artifact_unreadable")
+            return None
+
+        if sha256_text(json_text) != record.json_sha256:
+            logger.debug("Not reusing on-disk artifacts: %s", "json_hash_mismatch")
+            return None
+        if sha256_text(text_content) != record.text_sha256:
+            logger.debug("Not reusing on-disk artifacts: %s", "text_hash_mismatch")
+            return None
+
+        try:
+            json_data = json.loads(json_text)
+            nodes = [TocNode.from_dict(entry) for entry in json_data["toc"]]
+            toc_quality = TocQuality.from_dict(record.toc_quality)
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            logger.warning(
+                "Not reusing on-disk artifacts: %s",
+                "deserialization_failed",
+                exc_info=True,
+            )
+            return None
+
+        logger.info("Reusing valid on-disk artifacts from %s", json_path)
+        return DatasheetArtifacts(
+            json_path=json_path,
+            text_path=text_path,
+            json_data=json_data,
+            text_content=text_content,
+            toc_quality=toc_quality,
+            nodes=nodes,
+            llm_enrichment_incomplete=record.llm_enrichment_incomplete,
+            llm_enrichment_notes=record.llm_enrichment_notes,
+        )
 
     def _write_build_sidecar(
         self,

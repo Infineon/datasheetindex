@@ -1,6 +1,8 @@
 """Tests for on-disk and in-memory artifact reuse."""
 
 import hashlib
+import json
+import os
 
 import pymupdf
 import pytest
@@ -257,3 +259,279 @@ def test_the_sidecar_is_removed_before_the_deliverables_are_rewritten(
 
     assert seen_during_build == [False], "the stale sidecar outlived the data"
     assert sidecar.exists()
+
+
+def test_a_second_fresh_instance_reuses_the_artifacts(
+    tmp_path, toc_pdf, build_spy, not_editable
+):
+    """The check that established the problem, inverted."""
+    out = tmp_path / "out"
+    with DatasheetTools(str(toc_pdf)) as tools:
+        first = tools.build_datasheet(output_dir=str(out))
+    assert first.json_path is not None
+    assert first.text_path is not None
+    os.utime(first.json_path, (0, 0))
+    os.utime(first.text_path, (0, 0))
+
+    with DatasheetTools(str(toc_pdf)) as tools:
+        second = tools.build_datasheet(output_dir=str(out))
+
+    assert len(build_spy) == 1, "the second instance rebuilt"
+    assert first.json_path.stat().st_mtime == 0, "the JSON was rewritten"
+    assert first.text_path.stat().st_mtime == 0, "the text file was rewritten"
+    assert second.json_data == first.json_data
+    assert second.text_content == first.text_content
+    assert second.toc_quality == first.toc_quality
+    assert [n.title for n in second.nodes] == [n.title for n in first.nodes]
+    assert second.nodes[0].table_count == first.nodes[0].table_count
+    assert second.json_path == first.json_path
+    assert second.text_path == first.text_path
+    assert second.llm_enrichment_incomplete is False
+    assert second.llm_enrichment_notes == ()
+
+
+def test_reused_quality_carries_details_the_deliverable_drops(
+    tmp_path, toc_pdf, not_editable
+):
+    """The reason TocQuality is stored whole rather than recomputed."""
+    out = tmp_path / "out"
+    with DatasheetTools(str(toc_pdf)) as tools:
+        first = tools.build_datasheet(output_dir=str(out))
+    with DatasheetTools(str(toc_pdf)) as tools:
+        second = tools.build_datasheet(output_dir=str(out))
+
+    assert first.toc_quality is not None
+    assert second.toc_quality is not None
+    assert second.toc_quality.details == first.toc_quality.details
+    assert second.toc_quality.details != ""
+
+
+def test_reuse_populates_every_field_the_tools_read(tmp_path, toc_pdf, not_editable):
+    """A partially populated instance would fail later and at a distance."""
+    out = tmp_path / "out"
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=str(out))
+
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=str(out))
+        manifest = tools.get_artifact_manifest()
+        matches = tools.search_text("datasheet")
+        section = tools.get_section_text(1, 2)
+
+    assert manifest["total_pages"] == 3
+    assert len(matches) > 0
+    assert "datasheet" in section
+
+
+@pytest.mark.parametrize(
+    "mutate,token",
+    [
+        ("source_bytes", "source_content_changed"),
+        ("build_options", "build_options_changed"),
+        ("version", "version_changed"),
+        ("missing_artifact", "artifact_unreadable"),
+        ("truncated_artifact", "text_hash_mismatch"),
+        ("same_size_text_edit", "text_hash_mismatch"),
+        ("mixed_generation", "json_hash_mismatch"),
+        ("incomplete_flag", "llm_enrichment_incomplete"),
+        ("corrupt_sidecar", "no_sidecar"),
+    ],
+)
+def test_invalidation_rebuilds_for_the_right_reason(
+    tmp_path, toc_pdf, build_spy, not_editable, monkeypatch, caplog, mutate, token
+):
+    """One case per fingerprint field, each asserting which check rejected it."""
+    out = tmp_path / "out"
+    with DatasheetTools(str(toc_pdf)) as tools:
+        first = tools.build_datasheet(output_dir=str(out))
+    assert first.json_path is not None
+    assert first.text_path is not None
+    sidecar = sidecar_path(out, first.json_path.stem)
+
+    if mutate == "source_bytes":
+        # A same-size interior flip, not an append: appending changes the file
+        # size too, which trips reuse_blocker's cheaper source_size_changed
+        # check first and never reaches the content-hash comparison this case
+        # names. Flipping a byte in the middle of the embedded font stream
+        # (verified against this fixture) still leaves the PDF openable, so
+        # the rebuild this test also performs does not itself raise.
+        data = bytearray(toc_pdf.read_bytes())
+        mid = len(data) // 2
+        data[mid] ^= 0xFF
+        toc_pdf.write_bytes(bytes(data))
+    elif mutate == "build_options":
+        # Tamper the stored record directly rather than passing a different
+        # output_stem through kwargs: output_stem is also what names the
+        # sidecar file, so changing it via kwargs makes the second build look
+        # for a sidecar that was never written (no_sidecar) instead of
+        # exercising the build_options comparison this case names.
+        record = json.loads(sidecar.read_text(encoding="utf-8"))
+        record["build_options"]["output_stem"] = "renamed-in-record"
+        sidecar.write_text(
+            json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+    elif mutate == "version":
+        monkeypatch.setattr(
+            "datasheetindex.tools.bound.package_version", lambda: "0.0.1-other"
+        )
+    elif mutate == "missing_artifact":
+        first.text_path.unlink()
+    elif mutate == "truncated_artifact":
+        first.text_path.write_text("truncated", encoding="utf-8")
+    elif mutate == "same_size_text_edit":
+        content = first.text_path.read_text(encoding="utf-8")
+        flipped = ("X" if content[0] != "X" else "Y") + content[1:]
+        assert len(flipped) == len(content)
+        first.text_path.write_text(flipped, encoding="utf-8")
+    elif mutate == "mixed_generation":
+        payload = json.loads(first.json_path.read_text(encoding="utf-8"))
+        payload["total_pages"] = 999
+        first.json_path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+    elif mutate == "incomplete_flag":
+        record = json.loads(sidecar.read_text(encoding="utf-8"))
+        record["llm_enrichment_incomplete"] = True
+        record["llm_enrichment_notes"] = ["toc_fallback_raised"]
+        sidecar.write_text(
+            json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+    elif mutate == "corrupt_sidecar":
+        sidecar.write_text("{not json", encoding="utf-8")
+
+    with caplog.at_level("DEBUG", logger="datasheetindex.tools.bound"):
+        with DatasheetTools(str(toc_pdf)) as tools:
+            again = tools.build_datasheet(output_dir=str(out))
+
+    assert len(build_spy) == 2, f"{mutate} did not force a rebuild"
+    assert token in caplog.text, f"{mutate} rebuilt, but not for {token}"
+    assert again.json_path is not None
+    assert again.json_path.exists()
+    if mutate == "mixed_generation":
+        assert again.json_data["total_pages"] == 3, "served a mixed generation"
+
+
+def test_an_editable_install_never_reuses(tmp_path, toc_pdf, build_spy, monkeypatch):
+    """State the rule; do not merely observe that this checkout is editable."""
+    monkeypatch.setattr("datasheetindex.tools.bound.is_editable_install", lambda: True)
+    out = tmp_path / "out"
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=str(out))
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=str(out))
+
+    assert len(build_spy) == 2
+
+
+def test_force_rebuild_bypasses_a_valid_sidecar_and_rewrites_it(
+    tmp_path, toc_pdf, build_spy, not_editable
+):
+    out = tmp_path / "out"
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=str(out))
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=str(out), force_rebuild=True)
+
+    assert len(build_spy) == 2
+
+    # The rewritten sidecar must still be valid, or force_rebuild would
+    # permanently disable reuse for that document.
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=str(out))
+    assert len(build_spy) == 2
+
+
+def test_a_rejected_fallback_candidate_is_reused(
+    tmp_path, toc_pdf, build_spy, not_editable, monkeypatch
+):
+    """except versus else, at the cache boundary.
+
+    A candidate declined on the merits leaves the flag false, so its artifact
+    must cache -- otherwise every document the fallback cannot help would
+    re-pay the LLM cost on every request.
+    """
+
+    def dummy_callable(_system, _user):
+        return "unused"
+
+    monkeypatch.setattr(
+        DatasheetIndex, "_try_create_default_llm_client", lambda _self: dummy_callable
+    )
+    monkeypatch.setattr(
+        "datasheetindex.llm.toc_fallback.generate_toc_from_text",
+        lambda _text, _pages, _callable: [
+            TocNode(title="Thin", level=1, start_page=1, end_page=3, node_id="0001")
+        ],
+    )
+    _force_weak_quality(monkeypatch)
+    out = tmp_path / "out"
+
+    with DatasheetTools(str(toc_pdf)) as tools:
+        first = tools.build_datasheet(output_dir=str(out))
+    assert first.llm_enrichment_incomplete is False
+
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=str(out))
+
+    assert len(build_spy) == 1, "a rejected candidate made the document uncacheable"
+
+
+def test_a_url_source_is_resolved_before_fingerprinting(
+    tmp_path, toc_pdf, build_spy, not_editable, monkeypatch
+):
+    """Content identity is the only thing that can make a URL cacheable.
+
+    Each download lands on a fresh temp filename, so path identity could never
+    match. This pins the resolve-then-hash ordering, whose omission would make
+    URL sources silently uncacheable.
+    """
+    from tests.conftest import FakeResponse
+
+    payload = toc_pdf.read_bytes()
+
+    # Patched where the existing URL tests patch it (tests/test_index.py:135),
+    # so this follows the precedent that already works rather than reaching for
+    # the private ssl-fallback wrapper.
+    def fake_urlopen(_url, timeout=None, **_kwargs):
+        return FakeResponse(payload)
+
+    monkeypatch.setattr("datasheetindex.index.urllib.request.urlopen", fake_urlopen)
+    out = tmp_path / "out"
+
+    with DatasheetTools("https://example.com/test.pdf") as tools:
+        first = tools.build_datasheet(output_dir=str(out))
+    with DatasheetTools("https://example.com/test.pdf") as tools:
+        second = tools.build_datasheet(output_dir=str(out))
+
+    assert len(build_spy) == 1, "the URL source rebuilt despite identical bytes"
+    assert second.json_data == first.json_data
+
+
+def test_a_disappearing_source_during_reuse_check_rebuilds(
+    tmp_path, toc_pdf, build_spy, not_editable, monkeypatch, caplog
+):
+    """reuse_blocker's sha256_file call is not guarded by its own try/except.
+
+    If the source vanishes between reuse_blocker's stat() and its sha256_file()
+    call, sha256_file raises FileNotFoundError. That must not escape
+    _reuse_from_disk -- every failure here degrades to a rebuild.
+    """
+    out = tmp_path / "out"
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=str(out))
+
+    def raising_reuse_blocker(*_args, **_kwargs):
+        raise FileNotFoundError("source vanished")
+
+    monkeypatch.setattr(
+        "datasheetindex.tools.bound.reuse_blocker", raising_reuse_blocker
+    )
+
+    with caplog.at_level("DEBUG", logger="datasheetindex.tools.bound"):
+        with DatasheetTools(str(toc_pdf)) as tools:
+            again = tools.build_datasheet(output_dir=str(out))
+
+    assert len(build_spy) == 2
+    assert "source_unreadable" in caplog.text
+    assert again.json_path is not None
+    assert again.json_path.exists()
