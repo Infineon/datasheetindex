@@ -7,6 +7,7 @@ import urllib.error
 from pathlib import Path
 from typing import Any
 
+import pymupdf
 import pytest
 
 from datasheetindex import index as index_module
@@ -1081,3 +1082,114 @@ def test_posix_paths_rejects_bare_roots(monkeypatch):
     assert (
         list(index_module._posix_paths_for_windows("\\\\wsl.localhost\\Ubuntu\\")) == []
     )
+
+
+def _simple_pdf(tmp_path, name="ds.pdf", pages=2, with_toc=True):
+    doc = pymupdf.open()
+    for _ in range(pages):
+        page = doc.new_page()
+        writer = pymupdf.TextWriter(page.rect)
+        writer.append((72, 72), "Body text for this page of the datasheet")
+        writer.write_text(page)
+    if with_toc:
+        doc.set_toc([[1, "Overview", 1], [1, "Electrical Characteristics", 2]])
+    pdf_path = tmp_path / name
+    doc.save(str(pdf_path))
+    doc.close()
+    return pdf_path
+
+
+def test_artifact_stem_matches_the_written_filenames(tmp_path):
+    """build_datasheet uses this to find the sidecar; it must not drift."""
+    pdf_path = _simple_pdf(tmp_path, name="My Datasheet.pdf")
+
+    idx = DatasheetIndex(str(pdf_path))
+    try:
+        stem = idx.artifact_stem(None)
+        artifacts = idx.build(output_dir=str(tmp_path / "out"))
+        override = idx.artifact_stem("custom stem")
+        overridden = idx.build(
+            output_dir=str(tmp_path / "out2"), output_stem="custom stem"
+        )
+    finally:
+        idx.close()
+
+    assert artifacts.json_path is not None
+    assert artifacts.text_path is not None
+    assert overridden.json_path is not None
+    assert overridden.text_path is not None
+    assert artifacts.json_path.name == f"{stem}.json"
+    assert artifacts.text_path.name == f"{stem}.txt"
+    assert overridden.json_path.name == f"{override}.json"
+    assert overridden.text_path.name == f"{override}.txt"
+
+
+def test_deliverables_match_the_returned_values_byte_for_byte(tmp_path):
+    """Atomic writes must not change a single byte of either deliverable."""
+    pdf_path = _simple_pdf(tmp_path)
+
+    idx = DatasheetIndex(str(pdf_path))
+    try:
+        artifacts = idx.build(output_dir=str(tmp_path / "out"))
+    finally:
+        idx.close()
+
+    assert artifacts.json_path is not None
+    assert artifacts.text_path is not None
+    expected_json = json.dumps(artifacts.json_data, indent=2, ensure_ascii=False)
+    assert artifacts.json_path.read_text(encoding="utf-8") == expected_json
+    assert artifacts.text_path.read_text(encoding="utf-8") == artifacts.text_content
+    # The sidecar's TocQuality carries `details`; the deliverable must not.
+    assert "details" not in artifacts.json_data["toc_quality"]
+    assert sorted(artifacts.json_data["toc_quality"]) == [
+        "entry_count",
+        "max_depth",
+        "page_coverage",
+        "recommend_summaries",
+        "score",
+    ]
+
+
+def test_no_temp_files_are_left_in_the_output_directory(tmp_path):
+    pdf_path = _simple_pdf(tmp_path)
+    out = tmp_path / "out"
+
+    idx = DatasheetIndex(str(pdf_path))
+    try:
+        idx.build(output_dir=str(out))
+    finally:
+        idx.close()
+
+    assert sorted(p.name for p in out.iterdir()) == ["ds.json", "ds.txt"]
+
+
+def test_a_failed_text_write_leaves_the_previous_generation_readable(
+    tmp_path, monkeypatch
+):
+    """The reason for atomic writes: no truncated deliverable on disk."""
+    pdf_path = _simple_pdf(tmp_path)
+    out = tmp_path / "out"
+
+    idx = DatasheetIndex(str(pdf_path))
+    try:
+        first = idx.build(output_dir=str(out))
+        assert first.text_path is not None
+        assert first.json_path is not None
+        first_text = first.text_path.read_text(encoding="utf-8")
+        real_write = index_module.atomic_write_text
+
+        def failing_write(path, content):
+            if path.suffix == ".txt":
+                raise OSError("disk full")
+            real_write(path, content)
+
+        monkeypatch.setattr(index_module, "atomic_write_text", failing_write)
+
+        with pytest.raises(OSError):
+            idx.build(output_dir=str(out))
+    finally:
+        idx.close()
+
+    assert first.text_path.read_text(encoding="utf-8") == first_text
+    json.loads(first.json_path.read_text(encoding="utf-8"))
+    assert not any(p.name.endswith(".tmp") for p in out.iterdir())

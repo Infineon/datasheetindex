@@ -25,6 +25,7 @@ from datasheetindex.core.annotations import (
     enrich_with_cross_references,
     enrich_with_footnote_markers,
 )
+from datasheetindex.core.artifact_cache import atomic_write_text
 from datasheetindex.core.preamble import generate_preamble
 from datasheetindex.core.quality import assess_toc_quality
 from datasheetindex.core.structure import (
@@ -493,6 +494,17 @@ class DatasheetIndex:
         stem = Path(self._source_file_name()).stem or "datasheet"
         return _sanitize_filename_part(stem)
 
+    def artifact_stem(self, output_stem: str | None) -> str:
+        """The stem used for ``<stem>.json``, ``<stem>.txt`` and the sidecar.
+
+        ``build()`` and ``DatasheetTools.build_datasheet`` must agree on this
+        exactly, or the sidecar would be looked for beside files it does not
+        describe. One derivation, two callers.
+        """
+        if output_stem is not None:
+            return _sanitize_filename_part(output_stem) or "datasheet"
+        return self._output_stem()
+
     def _cleanup_temp_pdf(self) -> None:
         if self._temp_pdf_path is not None:
             self._temp_pdf_path.unlink(missing_ok=True)
@@ -528,9 +540,7 @@ class DatasheetIndex:
         total_pages = len(doc)
         logger.info("PDF opened (%d pages) in %.1fs", total_pages, t_doc - t_start)
 
-        pdf_name = self._output_stem()
-        if output_stem is not None:
-            pdf_name = _sanitize_filename_part(output_stem) or "datasheet"
+        pdf_name = self.artifact_stem(output_stem)
 
         # 1. Generate page-matched text
         text_content = generate_text(doc)
@@ -646,11 +656,14 @@ class DatasheetIndex:
             json_path = out / f"{pdf_name}.json"
             text_path = out / f"{pdf_name}.txt"
 
-            json_path.write_text(
-                json.dumps(json_data, indent=2, ensure_ascii=False),
-                encoding="utf-8",
+            # Atomic: temp then os.replace, so a crashed or failing build leaves
+            # the previous generation intact rather than a truncated file. This
+            # is also what lets a reader validate a pair of deliverables and get
+            # a coherent answer instead of a mixed generation.
+            atomic_write_text(
+                json_path, json.dumps(json_data, indent=2, ensure_ascii=False)
             )
-            text_path.write_text(text_content, encoding="utf-8")
+            atomic_write_text(text_path, text_content)
 
             return DatasheetArtifacts(
                 json_path=json_path,
