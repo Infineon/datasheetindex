@@ -10,7 +10,6 @@ import pytest
 
 DATA2PAGE_DIR = Path(__file__).resolve().parent.parent.parent / "data2page"
 TLE9350_PATH = DATA2PAGE_DIR / "Infineon-TLE9350BSJ-DataSheet-v01_00-EN.pdf"
-TLE9371_PATH = DATA2PAGE_DIR / "infineon-tle9371vle-datasheet-en.pdf"
 
 
 class DummyDoc:

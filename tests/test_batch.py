@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import pymupdf
 import pytest
 
 from datasheetindex.batch import BatchResult, build_batch
@@ -9,7 +10,18 @@ from datasheetindex.models import DatasheetArtifacts
 
 DATA2PAGE_DIR = Path(__file__).resolve().parent.parent.parent / "data2page"
 TLE9350_PATH = DATA2PAGE_DIR / "Infineon-TLE9350BSJ-DataSheet-v01_00-EN.pdf"
-TLE9371_PATH = DATA2PAGE_DIR / "infineon-tle9371vle-datasheet-en.pdf"
+
+
+def _make_pdf(path: Path, text: str) -> Path:
+    """Write a one-page PDF carrying a line of text."""
+    doc = pymupdf.open()
+    page = doc.new_page()
+    writer = pymupdf.TextWriter(page.rect)
+    writer.append((72, 72), text)
+    writer.write_text(page)
+    doc.save(str(path))
+    doc.close()
+    return path
 
 
 def test_empty_list(tmp_path):
@@ -61,16 +73,38 @@ def test_all_failures(tmp_path):
     assert result.failure_count == 3
 
 
-@pytest.mark.real_pdf
 def test_multiple_pdfs(tmp_path):
-    if not TLE9350_PATH.exists() or not TLE9371_PATH.exists():
-        pytest.skip("Test PDFs not found")
-    result = build_batch(
-        [str(TLE9350_PATH), str(TLE9371_PATH)],
-        output_dir=str(tmp_path),
-    )
+    """Two documents build in one batch, against real DatasheetIndex instances.
+
+    Synthetic rather than real datasheets on purpose. Batch is content-agnostic
+    -- it loops, allocates output stems, and closes each document -- so nothing
+    here needs a vendor PDF's quirks, and requiring two of them is what made
+    this test skip on every machine and in CI alike: `data2page` carries one
+    datasheet, so the second `.exists()` never held and the whole multi-document
+    path went permanently uncovered while reading as coverage.
+
+    This is also the only test that drives two *real* builds through
+    `build_batch`. `test_duplicate_stems_get_unique_output_names` asserts the
+    same counts but monkeypatches `DatasheetIndex` away, so it never exercises
+    real construction, build, and the per-document `close()` in the loop's
+    `finally`.
+    """
+    pdf_a = _make_pdf(tmp_path / "alpha.pdf", "Supply voltage 4.5V to 5.5V")
+    pdf_b = _make_pdf(tmp_path / "bravo.pdf", "Operating temperature -40C to 125C")
+    output_dir = tmp_path / "out"
+
+    result = build_batch([str(pdf_a), str(pdf_b)], output_dir=str(output_dir))
+
     assert result.success_count == 2
     assert result.failure_count == 0
+    assert result.total == 2
+    # Distinct stems must produce distinct artifacts -- the counts alone would
+    # pass even if both documents wrote over one output name.
+    stems = sorted(a.json_path.stem for a in result.succeeded if a.json_path)
+    assert stems == ["alpha", "bravo"]
+    for artifact in result.succeeded:
+        assert artifact.json_path is not None and artifact.json_path.exists()
+        assert artifact.text_path is not None and artifact.text_path.exists()
 
 
 def test_batch_result_properties():
