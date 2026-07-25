@@ -162,8 +162,58 @@ is the die size table" cannot find it without inspecting pages one by one. An
 optional pass renders each uncaptioned region and asks a VLM for one line,
 stored as `caption` with `caption_source: "llm"`.
 
-The shape mirrors the existing `include_summaries`: a flag plus a model, off by
-default, and the deterministic index is fully functional without it.
+**The same model as the ToC fallback and summaries, and no new model knob.**
+`"gpt-4.1"` is already the default in `create_llm_client` (`llm/client.py:250`)
+and what `index.py:671` uses for the automatic fallback, and it is
+vision-capable. The flag mirrors `include_summaries`; the model comes from the
+callable the caller already supplies.
+
+Two consequences of reusing it:
+
+- **`"gpt-4.1"` is currently a duplicated literal**, in `client.py:250` and
+  `index.py:671`. A third copy for figure captions would make drift a matter of
+  time, so this work should collapse the default to one shared constant rather
+  than add to it.
+- **Vision capability is not guaranteed.** A caller may configure any model
+  name, and a text-only one will fail at the gateway. A caption failure must
+  therefore leave `caption` null, log at warning, and leave the deterministic
+  index untouched -- the same posture as a failed summary or a failed sidecar
+  write, never a failed build.
+
+**`LlmCallable` cannot carry an image, so the protocol needs extending.** It is
+`__call__(system, user) -> str` (`client.py:19`) with no image parameter. Follow
+the precedent set for structured output in 0.19.0: an *optional* protocol
+extension detected by duck-typing, not a change to the base protocol.
+
+```python
+class VisionLlmCallable(Protocol):
+    """Optional image-input interface for figure captioning."""
+
+    def describe_image(
+        self, system: str, image_base64: str, *, media_type: str = "image/png"
+    ) -> str: ...
+
+def get_vision_client(llm_callable: object | None) -> VisionLlmCallable | None:
+    """Return the vision interface when the callable exposes one."""
+    describe_image = getattr(llm_callable, "describe_image", None)
+    if callable(describe_image):
+        return cast(VisionLlmCallable, llm_callable)
+    return None
+```
+
+A callable without `describe_image` -- including any third-party
+`(system, user) -> str` a consumer injects today -- simply yields no captions,
+exactly as a callable without `structured_json` falls back to the free-text ToC
+prompt. This is additive and breaks no existing consumer.
+
+**`inspect_page` is the renderer; do not write a second one.**
+`tools/vision.py:35` already takes `region` as the normalized 0.0-1.0 dict this
+spec emits and returns `[{"type": "image", "data": <base64>, "mime_type":
+"image/png"}]`. So the `region` field serves two consumers through one
+coordinate contract: the agent inspecting a figure, and this captioning pass
+rendering it. That is also why the round-trip test against the real
+`inspect_page` matters -- it now guards an internal caller as well as an
+external one.
 
 **The prompt must ask for a description and forbid transcription.** Something
 of the form: name the kind of content (table, schematic, plot, photo) and its
@@ -225,7 +275,16 @@ Synthetic PDFs, so assertions are exact and no fixture is required:
 - Images below `min_area_pct` are excluded and counted, and the count is
   non-zero in the emitted JSON.
 - A document with neither yields an empty array, not a missing key.
-- Everything above runs with no LLM under a plain `uv sync`; the VLM caption
+- **A callable without `describe_image` yields no captions and does not error.**
+  Pass a plain `(system, user) -> str` stub and assert the deterministic index is
+  complete with every `caption` null. This is the compatibility guarantee for
+  consumers injecting their own callable.
+- **A `describe_image` that raises leaves the build successful**, with `caption`
+  null and a warning logged -- the text-only-model case.
+- The captioning pass calls `inspect_page` with the emitted `region` unmodified,
+  asserted with a recording stub, so an internal caller cannot start
+  transforming coordinates the agent is told to use verbatim.
+- Everything above runs with no LLM under a plain `uv sync`; the live VLM caption
   test skips without credentials, following `tests/test_summarizer.py`.
 
 ## Out of scope
@@ -233,7 +292,10 @@ Synthetic PDFs, so assertions are exact and no fixture is required:
 - Transcribing or extracting any figure content (above).
 - Vector figure detection (above).
 - Merging captions with regions (above).
-- Any change to `inspect_page`, which already does what is needed.
+- Any change to `inspect_page`, which already does what is needed and is reused
+  as-is by the captioning pass.
+- Any new model configuration. Figure captions use the callable the caller
+  already provides, on the same model as the ToC fallback and summaries.
 - Figure indexing for the page-matched text file. The text file mirrors what is
   extractable; a raster region has nothing to contribute to it, and the ToC JSON
   is where structural metadata belongs.
