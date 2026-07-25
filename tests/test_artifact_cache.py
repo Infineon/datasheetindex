@@ -45,7 +45,7 @@ def test_sha256_file_reads_in_chunks(tmp_path):
 
 def test_sha256_text_is_utf8():
     """A multi-byte codepoint, so a single-byte codec would give a different digest."""
-    payload = "5 µA"  # MICRO SIGN, as datasheet units are written
+    payload = "5 \u00b5A"  # U+00B5 MICRO SIGN, as datasheet units are written
     expected = hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     assert sha256_text(payload) == expected
