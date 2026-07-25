@@ -14,9 +14,19 @@ top-level :mod:`datasheetindex` package.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+from datasheetindex._version import package_version
+from datasheetindex.core.artifact_cache import (
+    ArtifactRecord,
+    remove_sidecar,
+    sha256_file,
+    sidecar_path,
+    write_sidecar,
+)
 from datasheetindex.core.engine import layout_engine
 from datasheetindex.core.locate import TextLocation
 from datasheetindex.core.locate import locate_text as locate_text_core
@@ -34,6 +44,8 @@ from datasheetindex.tools.vision import Detail, inspect_page
 if TYPE_CHECKING:
     import pymupdf
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class _BuildOptions:
@@ -41,6 +53,20 @@ class _BuildOptions:
     output_stem: str | None
     include_summaries: bool
     model: str | None
+
+    def to_dict(self) -> dict[str, object]:
+        """The cache key, as recorded in the sidecar.
+
+        Recorded rather than inferred: ``TocNode.to_dict()`` omits empty fields,
+        so an absent ``summary`` cannot be told apart from
+        ``include_summaries=True`` that produced nothing.
+        """
+        return {
+            "output_dir": self.output_dir,
+            "output_stem": self.output_stem,
+            "include_summaries": self.include_summaries,
+            "model": self.model,
+        }
 
 
 _NO_TOC_HINT = (
@@ -199,6 +225,14 @@ class DatasheetTools:
         ):
             return self._artifacts
 
+        stem = self._index.artifact_stem(output_stem)
+        sidecar = sidecar_path(resolved_output_dir, stem)
+
+        # Invalidate, write data, publish. Removing the sidecar first means a
+        # concurrent reader either finds no sidecar and rebuilds, or finds one
+        # and must match both artifact hashes.
+        remove_sidecar(sidecar)
+
         llm_callable = None
         try:
             if model is not None:
@@ -215,9 +249,53 @@ class DatasheetTools:
         finally:
             close_llm_client(llm_callable)
 
+        self._write_build_sidecar(sidecar, options, artifacts)
+
         self._artifacts = artifacts
         self._build_options = options
         return artifacts
+
+    def _write_build_sidecar(
+        self,
+        sidecar: Path,
+        options: _BuildOptions,
+        artifacts: DatasheetArtifacts,
+    ) -> None:
+        """Record this build's fingerprint. Best effort.
+
+        A sidecar write failure must not fail the build: the artifacts are
+        correct and caching is infrastructure, mirroring ``_safe_close`` in
+        ``defs.py`` where cleanup failure is logged rather than allowed to
+        discard a good result.
+
+        Hashes are taken from the files as written rather than from the
+        in-memory values, so the record cannot disagree with what is on disk.
+        """
+        try:
+            if artifacts.json_path is None or artifacts.text_path is None:
+                return
+            source_path = Path(self._index._resolve_pdf_source())
+            quality = artifacts.toc_quality
+            record = ArtifactRecord(
+                source_sha256=sha256_file(source_path),
+                source_size=source_path.stat().st_size,
+                build_options=options.to_dict(),
+                datasheetindex_version=package_version(),
+                json_name=artifacts.json_path.name,
+                json_sha256=sha256_file(artifacts.json_path),
+                text_name=artifacts.text_path.name,
+                text_sha256=sha256_file(artifacts.text_path),
+                toc_quality=quality.to_dict() if quality is not None else {},
+                llm_enrichment_incomplete=artifacts.llm_enrichment_incomplete,
+                llm_enrichment_notes=artifacts.llm_enrichment_notes,
+            )
+            write_sidecar(sidecar, record)
+        except Exception:
+            logger.warning(
+                "Could not write the build sidecar; the artifacts are valid but "
+                "will be rebuilt next time",
+                exc_info=True,
+            )
 
     def get_artifact_manifest(self) -> dict[str, object]:
         """Return a compact summary of the currently built artifacts.
