@@ -628,13 +628,42 @@ input=[{"role": "user", "content": [
 
 Two consequences. `_ResponsesApi.create` declares `input: str` (`client.py:55`),
 so that annotation must widen to accept the list form -- `ty` runs over the whole
-repo and will reject the call otherwise. And the content-part names are
-Responses-API names: an implementer reaching for the far more commonly documented
-Chat Completions shape (`{"type": "image_url", "image_url": {"url": ...}}`) writes
-something that type-checks fine and fails at the gateway. The `media_type`
-parameter on `describe_image` exists to build that data URI, and `inspect_page`
-already returns both the base64 payload and its `mime_type`, so nothing needs to
-guess.
+repo and will reject the call otherwise. And the content-part shapes differ
+between the two APIs in a way that type-checks either way: on the Responses API
+`image_url` is a **plain string**, while the far more commonly documented Chat
+Completions form nests it (`{"type": "image_url", "image_url": {"url": ...}}`).
+Copying the Chat Completions snippet produces valid Python that fails at the
+gateway. The `media_type` parameter on `describe_image` exists to build the data
+URI, and `inspect_page` already returns both the base64 payload and its
+`mime_type`, so nothing needs to guess.
+
+**Send `detail: "low"`, and it is a design choice rather than a tuning knob.**
+`detail` is a sibling key on the `input_image` part -- `low`, `high`, `auto`
+(the default), or `original`. Low detail resizes the image to 512x512 and costs a
+flat, documented 85 tokens under the tile-based tokenization, against an
+`auto`/`high` cost that scales with the region's pixel dimensions. Two reasons
+beyond price:
+
+- **It makes the cap's cost calculable.** A flat per-image token count means
+  `max_figure_captions` translates directly into a bounded spend the tool
+  description can state honestly, rather than a number that varies by however
+  large the vendor's images happen to be.
+- **It structurally enforces the no-transcription guard.** The prompt below
+  forbids transcribing values, but a prompt is a request. At 512x512 a dense
+  table's cell values are physically unreadable, so the model cannot fabricate
+  rows from detail it never received. `research.md`'s warning about VLMs
+  hallucinating table rows is answered by the input, not only by the wording.
+
+**The risk this carries, and how to settle it.** The PCN's Product Attributes
+table renders its own title *inside* the image -- that is why it has no text-layer
+caption -- and a title legible at 1656px wide may not survive downscaling to 512.
+If low detail cannot name the subject, the caption degrades to "a table" and the
+motivating case is only half solved. So implementation must validate `low`
+against **PCN page 5 specifically** before settling, and escalate to `high` with
+the measured cost recorded here if it cannot. `client.responses.input_tokens.count`
+prices an image input without paying for generation, so both options can be
+measured before choosing. Confirm the 85-token figure for the configured model
+the same way rather than assuming it.
 
 **`inspect_page` is the renderer; do not write a second one.**
 `tools/vision.py:35` already takes `region` as the normalized 0.0-1.0 dict this
