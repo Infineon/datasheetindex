@@ -17,7 +17,9 @@ if TYPE_CHECKING:
 #: Placements smaller than this share of the page are excluded. Measured across
 #: a 14-document corpus: 73 of 168 placements fall below it, 61 below 0.5%, and
 #: 4 of 14 documents repeat one image XObject across pages (a vendor logo). Set
-#: low on purpose -- excluding real content is the expensive error.
+#: low on purpose -- excluding real content is the expensive error. The logos
+#: that survive the threshold are not paid for twice: the captioning pass
+#: groups placements by ``xref`` and describes each picture once.
 DEFAULT_MIN_AREA_PCT = 1.0
 
 #: Figure numbers are plain (``12``) or section-relative (``10-1``), with either
@@ -60,7 +62,13 @@ def raster_regions(
     entries: list[dict[str, object]] = []
     excluded = 0
 
-    for info in page.get_image_info():
+    # ``xrefs=True`` is what makes two placements of one image recognizable as
+    # the same picture, which is how the captioning pass avoids paying the VLM
+    # once per page for a logo in a header. Measured free: on the 294-page
+    # ATmega328P and the 99-page TLV9061 the flag is within noise of the
+    # default (0.93s vs 1.26s, 1.51s vs 1.66s), so there is no fast path worth
+    # keeping for builds that will not caption.
+    for info in page.get_image_info(xrefs=True):
         visible = pymupdf.Rect(info["bbox"]) & rect
         if visible.is_empty:
             continue
@@ -80,6 +88,13 @@ def raster_regions(
                 },
                 "bbox": [visible.x0, visible.y0, visible.x1, visible.y1],
                 "pixels": [info.get("width", 0), info.get("height", 0)],
+                # The image XObject this placement draws. Two entries sharing
+                # an xref are the same picture drawn twice -- a header logo,
+                # typically -- and the captioning pass describes such a group
+                # once. 0 means the document did not report one; it must never
+                # be treated as an identity, or every unidentified region in a
+                # document would collapse into a single figure.
+                "xref": info.get("xref", 0),
                 "page_area_pct": round(area_pct, 2),
                 "page_text_chars": page_text_chars,
                 "caption": None,

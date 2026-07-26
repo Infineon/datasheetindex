@@ -55,14 +55,28 @@ def _content_pixmap(color=(10, 20, 30)):
     return pix
 
 
+def _distinct_pixmap(index):
+    """A content pixmap no other index produces.
+
+    Load-bearing, not cosmetic. PyMuPDF folds identical image bytes into a
+    single XObject, so reusing one pixmap builds a document of N placements of
+    ONE picture -- which the captioning pass now describes once. A fixture
+    meant to exercise N candidates has to contain N different pictures, or it
+    silently becomes a test of the dedup path instead.
+    """
+    return _content_pixmap(color=(10 + index * 9, 20, 30))
+
+
 def _doc_with_images(count, *, pages=1):
     doc = pymupdf.open()
-    pix = _content_pixmap()
-    for _ in range(pages):
+    for page_index in range(pages):
         page = doc.new_page(width=595, height=842)
         for i in range(count):
             top = 50 + i * 30
-            page.insert_image(pymupdf.Rect(50, top, 500, top + 25), pixmap=pix)
+            page.insert_image(
+                pymupdf.Rect(50, top, 500, top + 25),
+                pixmap=_distinct_pixmap(page_index * count + i),
+            )
     return doc
 
 
@@ -70,13 +84,16 @@ def _doc_with_one_shrinking_image_per_page(pages):
     """One image per page, strictly decreasing in area down the document.
 
     Distinct widths make each rendered region distinct bytes, so a fake vision
-    client can tell which candidate an image belongs to.
+    client can tell which candidate an image belongs to -- and distinct pixmaps
+    make each page a distinct picture, so the pass treats them as three
+    candidates rather than one repeated three times.
     """
     doc = pymupdf.open()
-    pix = _content_pixmap()
     for index in range(pages):
         page = doc.new_page(width=595, height=842)
-        page.insert_image(pymupdf.Rect(50, 50, 550 - index * 60, 400), pixmap=pix)
+        page.insert_image(
+            pymupdf.Rect(50, 50, 550 - index * 60, 400), pixmap=_distinct_pixmap(index)
+        )
     return doc
 
 
@@ -160,11 +177,12 @@ def test_a_region_on_a_captioned_page_is_still_captioned():
 def test_cap_keeps_the_largest_regions_and_discloses_the_rest():
     doc = pymupdf.open()
     page = doc.new_page(width=595, height=842)
-    pix = _content_pixmap(color=(1, 2, 3))
-    # Three regions of strictly decreasing area.
-    page.insert_image(pymupdf.Rect(50, 50, 550, 400), pixmap=pix)
-    page.insert_image(pymupdf.Rect(50, 420, 400, 600), pixmap=pix)
-    page.insert_image(pymupdf.Rect(50, 620, 250, 700), pixmap=pix)
+    # Three regions of strictly decreasing area, and three distinct pictures --
+    # one pixmap placed three times is one picture, which the cap now counts
+    # once (see test_the_cap_counts_distinct_images_not_placements).
+    page.insert_image(pymupdf.Rect(50, 50, 550, 400), pixmap=_distinct_pixmap(0))
+    page.insert_image(pymupdf.Rect(50, 420, 400, 600), pixmap=_distinct_pixmap(1))
+    page.insert_image(pymupdf.Rect(50, 620, 250, 700), pixmap=_distinct_pixmap(2))
     figures = _figures(doc)
     vision = RecordingVision()
     outcome = caption_figures_in_place(
@@ -370,12 +388,13 @@ def test_the_figures_array_is_not_reordered():
     # Sorting candidates by area must not reach the caller's list: the ToC JSON
     # publishes figures in document order.
     doc = pymupdf.open()
-    pix = _content_pixmap()
     for index in range(3):
         page = doc.new_page(width=595, height=842)
         # Area grows with the page number, so candidate order is the reverse of
         # document order.
-        page.insert_image(pymupdf.Rect(50, 50, 200 + index * 150, 400), pixmap=pix)
+        page.insert_image(
+            pymupdf.Rect(50, 50, 200 + index * 150, 400), pixmap=_distinct_pixmap(index)
+        )
     figures = _figures(doc)
     before = [f["page"] for f in figures]
     caption_figures_in_place(
@@ -454,3 +473,135 @@ def test_a_near_blank_region_with_real_content_is_still_dispatched():
     assert outcome.blank == 0
     assert outcome.captioned == 1
     assert raster[0]["caption_source"] == "llm"
+
+
+def _doc_with_one_image_repeated(*, pages):
+    """One image XObject drawn once per page -- a header logo, in effect.
+
+    PyMuPDF folds identical bytes into a single XObject, so this is what a
+    repeated vendor logo looks like on disk: N placements, one picture.
+    """
+    doc = pymupdf.open()
+    pix = _content_pixmap()
+    for _ in range(pages):
+        page = doc.new_page(width=595, height=842)
+        page.insert_image(pymupdf.Rect(50, 50, 550, 400), pixmap=pix)
+    return doc
+
+
+def test_one_image_placed_many_times_costs_one_call():
+    """Measured on a real corpus: 9 of 86 caption candidates (10%) are repeats.
+
+    On onsemi's PCNs every candidate above the area threshold is the same
+    header logo, so before this the document spent its whole caption budget
+    describing one picture four times.
+    """
+    doc = _doc_with_one_image_repeated(pages=4)
+    figures = _figures(doc)
+    vision = RecordingVision()
+    outcome = caption_figures_in_place(
+        doc, figures, vision_client=vision, max_figure_captions=20
+    )
+    doc.close()
+
+    raster = [f for f in figures if f["kind"] == "raster"]
+    assert len(raster) == 4
+    assert len(vision.calls) == 1
+    assert outcome == CaptionOutcome(
+        captioned=1, pending=0, excluded_above_max=0, failed=False, shared=3
+    )
+    # Every placement still carries the caption: the index must not go quiet
+    # about pages 2-4 just because the picture was described once.
+    for entry in raster:
+        assert entry["caption"] == "a table of device attributes"
+        assert entry["caption_source"] == "llm"
+
+
+def test_the_cap_counts_distinct_images_not_placements():
+    """The point of the dedup: repeats stop crowding out real content."""
+    doc = _doc_with_one_image_repeated(pages=3)
+    page = doc.new_page(width=595, height=842)
+    page.insert_image(
+        pymupdf.Rect(50, 450, 500, 700), pixmap=_content_pixmap((9, 9, 9))
+    )
+    figures = _figures(doc)
+    vision = RecordingVision()
+    outcome = caption_figures_in_place(
+        doc, figures, vision_client=vision, max_figure_captions=2
+    )
+    doc.close()
+
+    # Two distinct pictures, four placements, a cap of 2 -- and the second
+    # picture is reached, which it never would be if placements were counted.
+    assert len(vision.calls) == 2
+    assert outcome.captioned == 2
+    assert outcome.shared == 2
+    assert outcome.excluded_above_max == 0
+    assert all(f["caption"] for f in figures if f["kind"] == "raster")
+
+
+def test_excluded_above_max_counts_placements_denied_a_caption():
+    """The artifact's `above_max` answers "how many entries lack a caption".
+
+    Counting distinct images instead would under-report it: one dropped
+    picture placed three times leaves three entries uncaptioned, and the
+    consumer of `figure_captions_excluded` is looking at entries.
+    """
+    doc = _doc_with_one_image_repeated(pages=3)
+    page = doc.new_page(width=595, height=842)
+    # Strictly larger, so it sorts ahead and the repeated image is what the
+    # cap of 1 drops.
+    page.insert_image(pymupdf.Rect(20, 20, 575, 800), pixmap=_content_pixmap((9, 9, 9)))
+    figures = _figures(doc)
+    vision = RecordingVision()
+    outcome = caption_figures_in_place(
+        doc, figures, vision_client=vision, max_figure_captions=1
+    )
+    doc.close()
+
+    assert len(vision.calls) == 1
+    assert outcome.captioned == 1
+    assert outcome.shared == 0
+    assert outcome.excluded_above_max == 3
+
+
+def test_entries_without_a_known_xref_never_group():
+    """An unknown identity is not a shared identity.
+
+    Artifacts built before the xref field, and any hand-built entry, carry no
+    usable identity. Treating those as equal would hand one caption to every
+    unrelated figure in the document -- silently wrong, and wrong in the
+    direction that produces confident nonsense.
+    """
+    doc = _doc_with_images(2)
+    figures = _figures(doc)
+    for entry in figures:
+        if entry["kind"] == "raster":
+            entry["xref"] = 0
+    vision = RecordingVision()
+    outcome = caption_figures_in_place(
+        doc, figures, vision_client=vision, max_figure_captions=20
+    )
+    doc.close()
+
+    assert len(vision.calls) == 2
+    assert outcome.captioned == 2
+    assert outcome.shared == 0
+
+
+def test_eligible_count_counts_distinct_images():
+    """Gate and pass must agree, or a client is built for work that never runs.
+
+    ``index.build`` asks this to decide whether constructing a vision client
+    can pay for itself. If it counted placements while the pass counts
+    pictures, the two definitions would drift apart in exactly the case this
+    dedup creates.
+    """
+    from datasheetindex.llm.figure_captions import eligible_caption_count
+
+    doc = _doc_with_one_image_repeated(pages=4)
+    figures = _figures(doc)
+    doc.close()
+
+    assert eligible_caption_count(figures, 20) == 1
+    assert eligible_caption_count(figures, 0) == 0

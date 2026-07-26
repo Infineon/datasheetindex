@@ -305,7 +305,8 @@ A document with a usable ToC has no `hint` key.
 Alongside `toc`, the ToC JSON carries `figures` -- a page-then-position list
 of every raster image placement (`kind: "raster"`, with `region` normalized
 to the `inspect_page(region=...)` coordinate contract, `bbox` in raw PDF
-points, `pixels`, and `page_area_pct`) and every `Figure N` / `Fig. N`
+points, `pixels`, `page_area_pct`, and `xref` -- the image XObject drawn,
+which two placements of the same picture share) and every `Figure N` / `Fig. N`
 caption the text layer names (`kind: "caption"`, with a string
 `figure_number` -- `"10-1"` as readily as `"12"`). The two kinds are reported
 as separate entries, never merged, even when a raster region and a caption
@@ -321,7 +322,11 @@ vision-capable client is available -- supplied explicitly, or self-created
 the same way the ToC fallback is -- every raster region above the area
 threshold gets a short VLM description (`caption_source: "llm"`), largest
 regions first, up to the cap; `figure_captions_excluded` discloses what the
-cap dropped. The caption names the kind of content (table, schematic, plot,
+cap dropped. Placements sharing an `xref` are one picture: the largest is
+described, every placement receives the answer, and the cap counts pictures,
+not placements. A header logo repeated on four pages is therefore one call
+with four identical captions, not four calls -- measured at 33% of the calls
+on a seven-document PCN corpus and 10% across nineteen documents. The caption names the kind of content (table, schematic, plot,
 photo, block diagram, pinout) and then, immediately, its most identifying
 labels -- for a table, its row labels first and then its column headings; for
 a plot, its axes and plotted quantity -- under 60 words, and it never

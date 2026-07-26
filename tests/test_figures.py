@@ -207,3 +207,49 @@ def test_bare_figure_number_as_the_last_line_yields_nothing():
 
 def test_page_with_no_captions_yields_nothing():
     assert caption_entries(1, "Absolute Maximum Ratings\nVCC 5.5 V") == []
+
+
+def _doc_with_repeated_image(placements: int) -> pymupdf.Document:
+    """One image XObject placed once per page, `placements` pages.
+
+    PyMuPDF folds identical image bytes into a single XObject, which is also
+    what a real vendor logo in a page header looks like on disk.
+    """
+    doc = pymupdf.open()
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 40, 20))
+    pix.set_rect(pix.irect, (255, 0, 0))
+    for _ in range(placements):
+        page = doc.new_page(width=595, height=842)
+        page.insert_image(pymupdf.Rect(100, 100, 400, 400), pixmap=pix)
+    return doc
+
+
+def test_repeated_placements_of_one_image_share_an_xref():
+    """The identity that lets the captioning pass avoid paying twice.
+
+    Without it, a logo in a page header is a fresh figure on every page: N
+    placements, N VLM calls, N identical captions.
+    """
+    doc = _doc_with_repeated_image(3)
+    xrefs = [raster_regions(page)[0][0]["xref"] for page in doc]
+    doc.close()
+
+    assert all(isinstance(x, int) and x > 0 for x in xrefs)
+    assert len(set(xrefs)) == 1
+
+
+def test_distinct_images_do_not_share_an_xref():
+    """The other half of the identity: different pictures stay different."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=595, height=842)
+    for index, colour in enumerate([(255, 0, 0), (0, 255, 0)]):
+        pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 40, 20))
+        pix.set_rect(pix.irect, colour)
+        page.insert_image(
+            pymupdf.Rect(100, 100 + index * 310, 400, 400 + index * 310), pixmap=pix
+        )
+    entries, _ = raster_regions(page)
+    doc.close()
+
+    assert len(entries) == 2
+    assert entries[0]["xref"] != entries[1]["xref"]

@@ -124,18 +124,70 @@ def _raster_candidates(figures: list[dict[str, object]]) -> list[dict[str, objec
     return candidates
 
 
+def _image_identity(entry: dict[str, object]) -> int | None:
+    """The XObject this placement draws, or ``None`` when unknown.
+
+    ``None`` is not a shared identity. A missing or zero ``xref`` -- an
+    artifact built before the field existed, or a hand-built entry -- means the
+    document never told us what this region is, and grouping unknowns together
+    would hand one picture's caption to every unidentified figure in the
+    document. ``bool`` is excluded because it is an ``int`` subclass and
+    ``True`` would otherwise read as xref 1.
+    """
+    xref = entry.get("xref")
+    if isinstance(xref, bool) or not isinstance(xref, int) or xref <= 0:
+        return None
+    return xref
+
+
+def _image_groups(figures: list[dict[str, object]]) -> list[list[dict[str, object]]]:
+    """Raster placements grouped by picture, largest picture first.
+
+    A PDF draws a repeated logo as one image XObject placed once per page, so
+    the placements are N entries showing the same picture. Describing that
+    picture once and sharing the answer is exact, not an approximation: an
+    XObject's content cannot vary between placements, only its scale.
+
+    Each group is ordered with its largest placement first -- that is the
+    representative the pass renders, giving the vision model the most legible
+    copy -- and the groups themselves follow that representative's candidate
+    order, so the cap keeps the most substantive *pictures*. Both orders come
+    from a single pass over the already-sorted candidate list, which is what
+    keeps the result byte-stable across builds; artifact reuse fingerprints
+    these captions, so an order that varied between runs would defeat it.
+    """
+    groups: list[list[dict[str, object]]] = []
+    by_xref: dict[int, list[dict[str, object]]] = {}
+
+    for entry in _raster_candidates(figures):
+        xref = _image_identity(entry)
+        if xref is None:
+            groups.append([entry])
+            continue
+        group = by_xref.get(xref)
+        if group is None:
+            group = []
+            by_xref[xref] = group
+            groups.append(group)
+        group.append(entry)
+
+    return groups
+
+
 def eligible_caption_count(
     figures: list[dict[str, object]],
     max_figure_captions: int = DEFAULT_MAX_FIGURE_CAPTIONS,
 ) -> int:
-    """How many regions ``caption_figures_in_place`` would attempt to caption.
+    """How many VLM calls ``caption_figures_in_place`` would attempt.
 
     Exists so a caller deciding whether constructing a vision client can pay
     for itself asks the captioning pass what a candidate is instead of keeping
     a second copy of that definition -- a copy that could drift and silently
-    stop a client from ever being built.
+    stop a client from ever being built. Counts distinct pictures, matching
+    what the pass actually dispatches: a document whose only regions are four
+    placements of one logo is one call's worth of work, not four.
     """
-    return min(len(_raster_candidates(figures)), max(0, max_figure_captions))
+    return min(len(_image_groups(figures)), max(0, max_figure_captions))
 
 
 @dataclass(frozen=True)
@@ -156,6 +208,17 @@ class CaptionOutcome:
     poisoning bug class ``failed`` exists to avoid. Not ``pending`` either --
     a vision client *was* available; there was simply nothing captionable to
     hand it.
+
+    **The units differ between fields, deliberately.** ``captioned``,
+    ``pending`` and ``blank`` count *pictures* -- one per distinct image
+    XObject, so each is one VLM call made, skipped or owed. ``shared`` and
+    ``excluded_above_max`` count *entries*: ``shared`` is how many extra
+    placements received a caption their picture had already earned, and
+    ``excluded_above_max`` is how many entries the cap left with no caption at
+    all. The second pair is in entries because that is what their consumers
+    see -- ``excluded_above_max`` is published as
+    ``figure_captions_excluded.above_max`` in the artifact, where the question
+    being answered is "how many figure entries here lack a caption".
     """
 
     captioned: int
@@ -163,6 +226,7 @@ class CaptionOutcome:
     excluded_above_max: int
     failed: bool
     blank: int = 0
+    shared: int = 0
 
 
 def caption_figures_in_place(
@@ -172,11 +236,17 @@ def caption_figures_in_place(
     vision_client: VisionLlmCallable | None,
     max_figure_captions: int = DEFAULT_MAX_FIGURE_CAPTIONS,
 ) -> CaptionOutcome:
-    """Caption eligible raster regions, mutating ``figures`` in place."""
-    candidates = _raster_candidates(figures)
+    """Caption eligible raster regions, mutating ``figures`` in place.
 
-    eligible = candidates[: max(0, max_figure_captions)]
-    excluded_above_max = len(candidates) - len(eligible)
+    The unit of work is a *picture*, not a placement: repeated placements of
+    one image XObject are described once and every placement receives the
+    answer (see ``_image_groups``). The cap therefore bounds VLM calls, which
+    is what it has always claimed to bound.
+    """
+    groups = _image_groups(figures)
+
+    eligible = groups[: max(0, max_figure_captions)]
+    excluded_above_max = sum(len(group) for group in groups[len(eligible) :])
 
     if not eligible:
         return CaptionOutcome(0, 0, excluded_above_max, False)
@@ -185,10 +255,13 @@ def caption_figures_in_place(
         return CaptionOutcome(0, len(eligible), excluded_above_max, False)
 
     # Render serially: PyMuPDF is not thread-safe for concurrent page work.
-    rendered: list[tuple[dict[str, object], str]] = []
+    # One render per group, of its largest placement -- the most legible copy
+    # of the picture, and the only one the model ever sees.
+    rendered: list[tuple[list[dict[str, object]], str]] = []
     failed = False
     blank = 0
-    for entry in eligible:
+    for group in eligible:
+        entry = group[0]
         try:
             blocks = inspect_page(
                 doc,
@@ -215,11 +288,12 @@ def caption_figures_in_place(
                 entry["page"],
             )
             continue
-        rendered.append((entry, image_base64))
+        rendered.append((group, image_base64))
 
     # Dispatch concurrently: network I/O, safe to overlap.
-    def describe(payload: tuple[dict[str, object], str]) -> str | None:
-        entry, image_base64 = payload
+    def describe(payload: tuple[list[dict[str, object]], str]) -> str | None:
+        entry = payload[0][0]
+        image_base64 = payload[1]
         try:
             reply = vision_client.describe_image(CAPTION_SYSTEM_PROMPT, image_base64)
         except Exception:
@@ -236,12 +310,18 @@ def caption_figures_in_place(
         replies = list(pool.map(describe, rendered))
 
     captioned = 0
-    for (entry, _), reply in zip(rendered, replies, strict=True):
+    shared = 0
+    for (group, _), reply in zip(rendered, replies, strict=True):
         if reply is None:
             failed = True
             continue
-        entry["caption"] = reply
-        entry["caption_source"] = "llm"
+        # Every placement of the picture, not just the one rendered. Leaving
+        # the others null would make pages 2-N of a repeated figure look like
+        # pages with an uncaptionable region on them.
+        for placement in group:
+            placement["caption"] = reply
+            placement["caption_source"] = "llm"
         captioned += 1
+        shared += len(group) - 1
 
-    return CaptionOutcome(captioned, 0, excluded_above_max, failed, blank)
+    return CaptionOutcome(captioned, 0, excluded_above_max, failed, blank, shared)

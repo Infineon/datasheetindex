@@ -241,7 +241,9 @@ would.
   consumers that need absolute geometry. `page_text_chars` is denormalized
   onto the entry as the "is the agent blind here" signal: a large
   `page_area_pct` beside a small `page_text_chars` marks a page whose
-  substance a picture is withholding from the text layer.
+  substance a picture is withholding from the text layer. `xref` names the
+  image XObject the placement draws, which is what makes two entries
+  recognizable as the same picture -- see the captioning dedup below.
 - **`"caption"`** -- a `Figure N` / `Fig. N` mention recognized in the
   column-aware page text, in either of two forms (same-line with a mandatory
   `.`/`:` separator, or split across two lines), including section-relative
@@ -257,6 +259,20 @@ the kind of content and then, immediately, its most identifying labels: for a
 table, its row labels first and then its column headings; for a plot, its
 axes and plotted quantity. Row-labels-first is deliberate, not stylistic --
 see the measurement below.
+
+**The unit of captioning is a picture, not a placement.** Placements sharing
+an `xref` are grouped (`llm/figure_captions.py:_image_groups`); the largest is
+rendered and described, every placement in the group receives that caption,
+and `max_figure_captions` bounds groups. This is exact, not a heuristic: a PDF
+XObject's content cannot vary between placements, only its scale, so one
+description cannot be wrong for another placement of it. Without the grouping
+a vendor logo in a page header is a fresh figure on every page -- on onsemi's
+four-page product-change notices it was the *only* region above the area
+threshold, so the document spent its entire caption budget describing one logo
+four times, in four slightly different wordings. An `xref` of 0 or missing is
+**not** an identity and never groups; treating unknown as equal would give one
+picture's caption to every unidentified figure in a document, which is the
+failure mode that produces confident nonsense rather than a visible error.
 
 **The agent is handed a digest, not the array.** `build_datasheet`'s manifest
 (`tools/bound.py:get_artifact_manifest`) carries a bounded `figures` block --
