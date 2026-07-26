@@ -9,6 +9,13 @@ from typing import TYPE_CHECKING, TypedDict
 if TYPE_CHECKING:
     import pymupdf
 
+# `_normalize_title` is imported across modules despite its underscore, and
+# deliberately not re-exported under a public name: `boilerplate.py` is
+# byte-identical to the 0.25.0 file, which is worth more than the name. It
+# already does exactly this job -- strip a leading section number or
+# chapter/appendix prefix, drop trailing punctuation, lowercase -- and
+# duplicating its regex here would leave two patterns to keep in agreement.
+from datasheetindex.core.boilerplate import _normalize_title
 from datasheetindex.core.textfile import _extract_page_text
 
 #: Pages read from the front of the document.
@@ -29,7 +36,10 @@ _BULLET_RE = re.compile(
 )
 
 # A heading, matched as a whole line so that "Features of the analog subsystem"
-# does not count.
+# does not count -- but through `_normalize_title`, so a leading section number
+# does not hide it either. TI numbers its front matter, and all seven TI
+# datasheets in the corpus write "1 Features"; compared verbatim, every one of
+# them reported no features heading.
 _FEATURES_HEADINGS = frozenset({"features", "general description"})
 
 
@@ -169,8 +179,7 @@ def _page_signals(text: str) -> _PageSignals:
     return {
         "bullets": sum(1 for line in lines if _BULLET_RE.match(line)),
         "has_features_heading": any(
-            line.strip().rstrip(":").strip().lower() in _FEATURES_HEADINGS
-            for line in lines
+            _normalize_title(line) in _FEATURES_HEADINGS for line in lines
         ),
     }
 

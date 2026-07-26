@@ -385,10 +385,33 @@ def test_a_lone_dash_on_its_own_line_counts_as_a_bullet():
 def test_features_heading_matches_a_whole_line_only():
     assert _page_signals("Features\n")["has_features_heading"] is True
     assert _page_signals("General Description:\n")["has_features_heading"] is True
+    assert _page_signals("General description\n")["has_features_heading"] is True
     assert (
         _page_signals("Features of the analog subsystem\n")["has_features_heading"]
         is False
     )
+
+
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        # TI numbers its front-matter headings; all seven TI datasheets in the
+        # corpus write "1 Features", and the whole-line comparison rejected
+        # every one of them.
+        ("1 Features", True),
+        ("2 Features", True),
+        ("1.1 Features", True),
+        ("Features", True),
+        ("1 General Description", True),
+        # Nexperia's form, verbatim from the 74HC595: a period and two spaces.
+        ("1.  General description", True),
+        # A numbered heading whose title is not a heading is still not one.
+        ("Features of the analog subsystem", False),
+        ("5 Features of the analog subsystem", False),
+    ],
+)
+def test_features_heading_ignores_a_leading_section_number(line, expected):
+    assert _page_signals(line + "\n")["has_features_heading"] is expected
 
 
 def test_build_front_matter_populates_signals_per_page():
