@@ -267,6 +267,69 @@ not even be readable from where the agent runs, so a digest is the difference
 between the agent knowing a page holds a figure and never learning the figure
 index exists.
 
+#### Decisions already settled by measurement
+
+Every number below comes from a **14-document, 998-page, 5-vendor corpus** (TI,
+Infineon, Microchip, Nexperia, Diodes) measured 2026-07-25, plus a live run
+against an OpenAI-compatible gateway. They are recorded because each is a
+decision a future reader would otherwise redo.
+
+- **`pymupdf.layout` was evaluated for figure discovery and rejected on cost.**
+  Warm, after model load: 1.28 s/page over 5 pages, 0.89 s/page over 20 --
+  extrapolating to **~119 s for the 134-page PSoC 6 against a ~8 s build**,
+  roughly 15x, in the default path, for every document. It also requires the
+  ~49 MB `[layout]` extra a plain `uv sync` excludes, brings the process-global
+  hook hazard documented in `core/engine.py`, and unlike `get_image_info()` it is
+  a model with an error rate rather than an exact enumeration. `get_image_info()`
+  is exact and free.
+- **A per-page `describe_figure(page)` tool was proposed and rejected, and the
+  analogy that motivates it is seductive.** `extract_table_markdown` earns its
+  layout-engine cost by giving the agent something it *cannot* produce itself: an
+  exact table from the text layer, no vision error, few tokens. Layout
+  classification gives it something *weaker* than looking -- an agent already
+  holding a page has `inspect_page`, and its own vision beats a DocLayNet label.
+  It also serves the wrong axis: discovery is a breadth question ("which of 134
+  pages hides something?") that a per-page call cannot answer without sweeping
+  every page, which is the 119 s above.
+- **The caption pattern's mandatory separator is load-bearing.** Requiring
+  punctuation after the figure number is what divides **404 real captions from 70
+  prose lines** across 998 pages, with no scoring and no heuristics. Without it,
+  "Figure 6-2 shows the structure..." parses as a caption. Do not relax it.
+- **Section-relative numbering is the common case, not an edge case.**
+  `Figure 12` alone matched captions in only **2 of 14** documents; widening to
+  `(\d+(?:[-–]\d+)?)` to admit `Figure 10-1` reached **11 of 14**. The same-line
+  section-relative form is the corpus's most frequent, 404 of 492 caption lines,
+  present in 9 of 14 documents. This is why `figure_number` is always a string.
+- **`min_area_pct = 1.0` is not defensive dead code.** It excludes **73 of 168
+  placements (43%)** across the corpus and changes the output in 4 of 14
+  documents -- mostly vendor logos repeated on every page.
+- **Region clipping is exercised by real data.** **9 placements** in the corpus
+  extend past the page edge. `inspect_page` *raises* on a coordinate outside
+  `0.0-1.0`, so clipping to `page.rect` before normalizing is what keeps the
+  coordinate contract that makes `figures` directly usable as `inspect_page`
+  input.
+- **No exact caption source exists in practice.** Of the 14 documents, **1 is a
+  tagged PDF** -- and it carries zero `/Figure` structure elements -- and **none**
+  carries a List of Figures. Reading structure instead of text is not an
+  available shortcut.
+- **Serial render, concurrent dispatch, 4 workers.** PyMuPDF is not thread-safe
+  for concurrent page work, so rendering stays serial; only the network calls are
+  parallel. Live on the PSoC 6 at the default cap of 20: serial dispatch ~119 s
+  (~6 s/call), 4-worker concurrent ~13 s. Results are applied in **candidate
+  order, never completion order** -- artifact bytes are fingerprinted for reuse,
+  so completion-order output would be non-deterministic and would silently defeat
+  the cache.
+- **Regions render at `detail="high"` and are sent with `detail: "low"`.** The
+  apparent mismatch is deliberate: the API downscales to 512x512 regardless of
+  input, so feeding the best available source is what gives a title rendered
+  inside a raster a chance to survive the downscale. Lowering the render is not a
+  free optimisation.
+- **The per-image token cost is documented, not measured here.** The
+  85-tokens-at-512x512 figure for `detail: "low"` comes from OpenAI's
+  documentation; the gateway used for validation returns `405 Method Not Allowed`
+  on the token-count endpoint, so it is unconfirmed against that deployment. To
+  measure real cost, read usage back off a live response.
+
 ### Deliverable 2: Page-Matched Text File
 
 The full PDF converted to text with clear page markers, using **PyMuPDF `get_text("blocks")`** with column-aware reading order:
