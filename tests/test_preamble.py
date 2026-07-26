@@ -234,6 +234,67 @@ def test_page_boundary_cut_omits_the_mid_page_clause():
     assert fm.text.count("--- PAGE ") == 1
 
 
+def test_a_page_that_does_not_fit_at_all_gets_no_marker():
+    """An exhausted budget must not claim a page is empty.
+
+    ``--- PAGE 2 ---`` with nothing after it reads as "page 2 holds no text",
+    which is a claim about document content the budget does not license.
+    """
+    doc = _doc_with_lines(2, lines=4, width=40)
+    page_one_chars = build_front_matter(doc, max_pages=1).chars_extracted
+    fm = build_front_matter(doc, max_chars=page_one_chars + 5)
+    doc.close()
+
+    assert fm.char_truncated is True
+    assert fm.text.count("--- PAGE ") == 1
+    assert "--- PAGE 2 ---" not in fm.text
+    assert "ending mid-page" not in fm.text
+
+
+def test_a_cut_just_past_a_page_boundary_omits_the_mid_page_clause():
+    """The boundary case away from the measure-zero exact-fit value.
+
+    ``max_chars`` a few characters past page 1 takes a different branch than
+    the exact fit tested above: page 2's first line does not fit, so the cut
+    still lands on the page boundary and no page was ended mid-way.
+    """
+    doc = _doc_with_lines(2, lines=4, width=40)
+    page_one_chars = build_front_matter(doc, max_pages=1).chars_extracted
+    page_two_first_line = _extract_page_text(doc[1]).splitlines(keepends=True)[0]
+    fm = build_front_matter(doc, max_chars=page_one_chars + 5)
+    doc.close()
+
+    assert 0 < 5 < len(page_two_first_line)
+    assert fm.char_truncated is True
+    assert fm.text.count("--- PAGE ") == 1
+    assert "ending mid-page" not in fm.text
+
+
+def test_max_chars_zero_emits_the_note_and_no_marker():
+    """Nothing fits, so nothing is claimed -- and no stray leading newline."""
+    doc = _doc_with_lines(2, lines=4, width=40)
+    fm = build_front_matter(doc, max_chars=0)
+    doc.close()
+
+    assert "--- PAGE " not in fm.text
+    assert not fm.text.startswith("\n")
+    assert fm.chars_shown == 0
+    assert fm.char_truncated is True
+    assert "ending mid-page" not in fm.text
+    assert fm.text == (
+        "=== NOTE: preamble truncated at 0 characters; "
+        f"0 of {fm.chars_extracted} characters from pages 1-2 shown ==="
+    )
+
+
+def test_negative_max_chars_raises():
+    """A negative cap would otherwise be quoted verbatim in the NOTE line."""
+    doc = _doc_with_lines(2)
+    with pytest.raises(ValueError, match="max_chars"):
+        build_front_matter(doc, max_chars=-50)
+    doc.close()
+
+
 def test_single_page_document_note_uses_singular_page_phrase():
     doc = _doc_with_lines(1, lines=45, width=80)
     fm = build_front_matter(doc, max_chars=200)
@@ -306,6 +367,20 @@ def test_a_leading_hyphen_needs_whitespace_to_count_as_a_bullet():
     """Datasheets are full of temperature ranges; those are not bullets."""
     assert _page_signals("-40 to +85 degrees C\n")["bullets"] == 0
     assert _page_signals("- a real bullet\n")["bullets"] == 1
+
+
+def test_a_lone_dash_on_its_own_line_counts_as_a_bullet():
+    """Infineon's extraction puts most of its markers alone on a line.
+
+    End of line satisfies the load-bearing requirement -- the dash is not
+    immediately followed by a digit or a letter -- so it counts, while the
+    ranges the whitespace rule exists for still do not.
+    """
+    text = "Features\n-\n32-bit CPU at 150 MHz\n-\n2 MByte flash\n"
+    assert _page_signals(text)["bullets"] == 2
+    assert _page_signals("-40 to +85 degrees C\n")["bullets"] == 0
+    assert _page_signals("-1.5 V minimum\n")["bullets"] == 0
+    assert _page_signals("\u201340 C\n")["bullets"] == 0
 
 
 def test_features_heading_matches_a_whole_line_only():

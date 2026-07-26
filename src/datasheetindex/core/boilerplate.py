@@ -1,10 +1,14 @@
 """Boilerplate detection for ToC nodes.
 
 Flags sections whose title matches well-known datasheet boilerplate so that
-agents can deprioritize them during navigation. Detection is intentionally
-title-only and pattern-based -- no LLM call, no text scanning -- because
-~80% of datasheet boilerplate is title-detectable and we want this to stay
-free in the happy path.
+agents can deprioritize them during navigation. *Flagging* is intentionally
+title-only and pattern-based -- no LLM call -- because ~80% of datasheet
+boilerplate is title-detectable and we want this to stay free in the happy
+path. The module also hosts ``count_legal_hits``, which does scan running
+prose: it is a separate, unanchored matcher that only reports a count for the
+front-matter ``legal_hits`` signal and flags nothing. Reach for
+``classify_title`` for titles and ``count_legal_hits`` for prose; see
+``_LEGAL_VOCABULARY`` for why the two vocabularies are not shared.
 
 Categories:
     legal     -- disclaimers, important notices, trademarks, copyright, patents
@@ -158,7 +162,11 @@ _LEGAL_VOCABULARY: tuple[str, ...] = (
     r"export\s+control",
     r"subject\s+to\s+change\s+without\s+notice",
     r"no\s+license",
-    r"as\s+is",
+    # The idiom, not the words: a bare "as is" is ordinary English ("as is
+    # shown in Figure 3"), and a features page is where that false positive
+    # would land first. The quote class covers `provided "as is"` and the
+    # typographic left quote; `[\s-]` covers `as-is`.
+    r"provided\s+[\"\u201c']?as[\s-]+is",
     r"at\s+your\s+own\s+risk",
 )
 

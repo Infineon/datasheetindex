@@ -232,6 +232,19 @@ def test_features_prose_scores_zero_legal_hits():
     assert count_legal_hits(features) == 0
 
 
+def test_as_is_only_scores_in_the_disclaimer_idiom():
+    """A bare "as is" is ordinary English; only the idiom is a disclaimer.
+
+    A features page is where a false positive would land first, so the
+    vocabulary entry carries the "provided" that makes it a legal phrase.
+    """
+    assert count_legal_hits("as is shown in Figure 3, the output rises") == 0
+    assert count_legal_hits("operates as is required by the standard") == 0
+    assert count_legal_hits("transmitted as is without buffering") == 0
+    assert count_legal_hits('provided "as is" without warranty') >= 1
+    assert count_legal_hits("provided as-is and at your own risk") >= 1
+
+
 def test_prose_matcher_covers_every_vocabulary_stem():
     """Every vocabulary entry is reachable, asserted against the constant.
 
@@ -254,7 +267,7 @@ def test_prose_matcher_covers_every_vocabulary_stem():
         "export control",
         "subject to change without notice",
         "no license",
-        "as is",
+        'provided "as is"',
         "at your own risk",
     ]
     assert len(_LEGAL_VOCABULARY) == len(stems)

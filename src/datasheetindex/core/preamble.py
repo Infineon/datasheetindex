@@ -20,11 +20,13 @@ DEFAULT_MAX_PAGES = 2
 #: 5000: no document in the local corpus is cut (2554, 2688 and 4746 chars).
 DEFAULT_MAX_CHARS = 5000
 
-# A line opening with a bullet glyph, or with a dash *followed by whitespace*.
-# The whitespace requirement is load-bearing: datasheets are full of lines like
-# "-40 to +85" and a temperature range is not a feature bullet.
+# A line opening with a bullet glyph, or with a dash that is *not* followed by
+# a digit or a letter. That requirement is load-bearing: datasheets are full of
+# lines like "-40 to +85" and a temperature range is not a feature bullet. End
+# of line satisfies it, and must, because Infineon's extraction emits most of
+# its markers as a dash alone on a line.
 _BULLET_RE = re.compile(
-    r"^\s*(?:[\u2022\u25aa\u25cb\u25e6\u2023\u00b7\u2219*]|[-\u2013\u2014]\s)"
+    r"^\s*(?:[\u2022\u25aa\u25cb\u25e6\u2023\u00b7\u2219*]|[-\u2013\u2014](?:\s|$))"
 )
 
 # A heading, matched as a whole line so that "Features of the analog subsystem"
@@ -155,12 +157,16 @@ def _page_signals(text: str) -> _PageSignals:
 
     Reported, not acted on. ``bullets`` and ``has_features_heading`` separated
     a real datasheet's front matter from a product-change notice's cover letter
-    on both measured documents (6 and 11 bullets with a features heading on the
-    PSoC 6; 0 and none on the TI PCN); ``legal_hits`` scored 0 on both and is a
-    third opinion, not the discriminator there. A unit-density signal is
-    deliberately left out because it is noisy in both directions (it misses
-    "150-MHz" and "40 microamp", and false-positives on part numbers like
-    "CY8C62x8/A").
+    on both measured documents (34 and 43 bullets with a features heading on
+    the PSoC 6; 0 and none on the TI PCN); ``legal_hits`` scored 0 on both --
+    and on every real page measured -- so it is a third opinion, not the
+    discriminator there. A unit-density signal is deliberately left out because
+    it is noisy in both directions (it misses "150-MHz" and "40 microamp", and
+    false-positives on part numbers like "CY8C62x8/A").
+
+    These are heuristic counts, not an API: the vocabulary and patterns change
+    as more documents are measured, so a caller should compare them, not
+    threshold on exact values.
     """
     lines = text.splitlines()
     return {
@@ -194,14 +200,22 @@ def build_front_matter(
     pages read makes ``_page_phrase`` produce the nonsensical "pages 1-0", so
     it is rejected here rather than reaching that string. ``bool`` is
     rejected explicitly -- it is an ``int`` subclass, so ``True`` would
-    silently become a cap of 1. ``max_chars`` needs no such guard:
-    ``max_chars=0`` still yields a coherent result, a marker plus the
-    truncation note.
+    silently become a cap of 1. ``max_chars`` is **rejected when negative**
+    rather than clamped, for the same reason: the cap is quoted verbatim in the
+    truncation note, and "truncated at -50 characters" is not a fact about the
+    document. ``max_chars=0`` is legal and yields the note alone.
+
+    A page whose text does not fit at all is **left out entirely**, marker
+    included. A marker with nothing after it would read as "this page holds no
+    text", which is a claim about document content that an exhausted budget
+    does not license. A page that is genuinely blank still gets its marker.
     """
     if not isinstance(max_pages, int) or isinstance(max_pages, bool):
         raise ValueError("max_pages must be an integer >= 1")
     if max_pages < 1:
         raise ValueError("max_pages must be an integer >= 1")
+    if max_chars < 0:
+        raise ValueError("max_chars must be an integer >= 0")
 
     total_pages = len(doc)
     pages_read = max(0, min(max_pages, total_pages))
@@ -213,13 +227,16 @@ def build_front_matter(
     budget = max_chars
     for offset, page_text in enumerate(texts):
         page_num = offset + 1
-        if budget <= 0 and page_num > 1:
-            break
         kept = (
             page_text
             if len(page_text) <= budget
             else _truncate_on_line_boundary(page_text, budget)
         )
+        if not kept and page_text:
+            # Nothing of this page fits. Its marker is withheld rather than
+            # emitted empty, and `cut_page` stays 0 so the note reports a cut
+            # on the page boundary -- which is where it landed.
+            break
         parts.append(f"--- PAGE {page_num} ---")
         parts.append(kept)
         chars_shown += len(kept)
@@ -242,17 +259,23 @@ def build_front_matter(
         )
 
     chars_extracted = sum(len(t) for t in texts)
-    text = "\n".join(parts)
+    # Notes join with the parts rather than concatenating onto an assembled
+    # string: at max_chars=0 there are no parts, and a `+= "\n"` would leave
+    # the returned text opening on a blank line.
+    notes: list[str] = []
     if chars_shown < chars_extracted:
-        text += "\n" + _char_note(
-            max_chars=max_chars,
-            chars_shown=chars_shown,
-            chars_extracted=chars_extracted,
-            pages_read=pages_read,
-            cut_page=cut_page,
+        notes.append(
+            _char_note(
+                max_chars=max_chars,
+                chars_shown=chars_shown,
+                chars_extracted=chars_extracted,
+                pages_read=pages_read,
+                cut_page=cut_page,
+            )
         )
     if total_pages > pages_read:
-        text += "\n" + _page_note(pages_read=pages_read, total_pages=total_pages)
+        notes.append(_page_note(pages_read=pages_read, total_pages=total_pages))
+    text = "\n".join(parts + notes)
 
     return FrontMatter(
         text=text,
