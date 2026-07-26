@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from datasheetindex.index import DatasheetIndex
+from datasheetindex.llm.figure_captions import DEFAULT_MAX_FIGURE_CAPTIONS
 from datasheetindex.models import DatasheetArtifacts
 
 if TYPE_CHECKING:
@@ -68,6 +69,8 @@ def build_batch(
     output_dir: str = "output",
     include_summaries: bool = False,
     llm_callable: LlmCallable | None = None,
+    caption_figures: bool = True,
+    max_figure_captions: int = DEFAULT_MAX_FIGURE_CAPTIONS,
 ) -> BatchResult:
     """Process multiple PDFs, collecting successes and failures.
 
@@ -92,6 +95,8 @@ def build_batch(
                 include_summaries=include_summaries,
                 llm_callable=llm_callable,
                 output_stem=output_stem,
+                caption_figures=caption_figures,
+                max_figure_captions=max_figure_captions,
             )
             result.succeeded.append(artifacts)
         except Exception as exc:

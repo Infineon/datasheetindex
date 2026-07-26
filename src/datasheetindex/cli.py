@@ -41,6 +41,20 @@ def _build_parser() -> argparse.ArgumentParser:
             "when LLM credentials are available"
         ),
     )
+    build_parser.add_argument(
+        "--no-caption-figures",
+        action="store_true",
+        help=(
+            "Skip naming raster figure regions with a vision model "
+            "(captioning runs by default when credentials are available)"
+        ),
+    )
+    build_parser.add_argument(
+        "--max-figure-captions",
+        type=int,
+        default=20,
+        help="Per-document ceiling on caption calls (default 20)",
+    )
     mcp_parser = subparsers.add_parser(
         "mcp",
         help="Run the local MCP server over the datasheet tools",
@@ -54,6 +68,9 @@ def _run_build(args: argparse.Namespace) -> int:
     if args.include_summaries and not args.model:
         print("Error: --include-summaries requires --model", file=sys.stderr)
         return 2
+    if args.max_figure_captions < 0:
+        print("Error: --max-figure-captions must be >= 0", file=sys.stderr)
+        return 1
     idx = DatasheetIndex(args.source)
     try:
         if args.model:
@@ -65,6 +82,8 @@ def _run_build(args: argparse.Namespace) -> int:
             output_dir=args.output_dir,
             include_summaries=args.include_summaries,
             llm_callable=llm_callable,
+            caption_figures=not args.no_caption_figures,
+            max_figure_captions=args.max_figure_captions,
         )
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)

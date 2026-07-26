@@ -276,7 +276,12 @@ def test_build_options_to_dict_covers_every_dataclass_field():
     """A hand-written map could silently omit a future field from the cache
     key; ``asdict`` cannot -- pin that the two stay in lockstep."""
     options = _BuildOptions(
-        output_dir="out", output_stem=None, include_summaries=False, model=None
+        output_dir="out",
+        output_stem=None,
+        include_summaries=False,
+        model=None,
+        caption_figures=True,
+        max_figure_captions=20,
     )
 
     assert set(options.to_dict()) == {f.name for f in fields(_BuildOptions)}

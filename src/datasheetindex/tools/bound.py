@@ -43,6 +43,7 @@ from datasheetindex.core.textfile import TextSearchMatch, extract_section_text
 from datasheetindex.core.textfile import search_text as search_text_content
 from datasheetindex.index import DatasheetIndex
 from datasheetindex.llm.client import close_llm_client
+from datasheetindex.llm.figure_captions import DEFAULT_MAX_FIGURE_CAPTIONS
 from datasheetindex.models import DatasheetArtifacts, TocNode, TocQuality
 from datasheetindex.tools.vision import Detail, inspect_page
 
@@ -58,6 +59,8 @@ class _BuildOptions:
     output_stem: str | None
     include_summaries: bool
     model: str | None
+    caption_figures: bool
+    max_figure_captions: int
 
     def to_dict(self) -> dict[str, object]:
         """The cache key, as recorded in the sidecar.
@@ -194,6 +197,8 @@ class DatasheetTools:
         include_summaries: bool = False,
         model: str | None = None,
         force_rebuild: bool = False,
+        caption_figures: bool = True,
+        max_figure_captions: int = DEFAULT_MAX_FIGURE_CAPTIONS,
     ) -> DatasheetArtifacts:
         """Build and cache datasheet artifacts for later MCP queries."""
         if include_summaries and model is None:
@@ -215,6 +220,8 @@ class DatasheetTools:
             output_stem=output_stem,
             include_summaries=include_summaries,
             model=model,
+            caption_figures=caption_figures,
+            max_figure_captions=max_figure_captions,
         )
         if (
             not force_rebuild
@@ -278,6 +285,8 @@ class DatasheetTools:
                 output_stem=output_stem,
                 include_summaries=include_summaries,
                 llm_callable=llm_callable,
+                caption_figures=caption_figures,
+                max_figure_captions=max_figure_captions,
             )
         finally:
             close_llm_client(llm_callable)

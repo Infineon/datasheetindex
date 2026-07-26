@@ -469,3 +469,12 @@ def test_manifest_has_no_hint_when_toc_is_present(tmp_path):
 
     assert manifest["toc"] != []
     assert "hint" not in manifest
+
+
+def test_build_datasheet_schema_bounds_max_figure_captions():
+    defs = {d.name: d for d in create_datasheet_tool_defs()}
+    props = defs["build_datasheet"].input_schema["properties"]
+
+    assert props["caption_figures"]["type"] == "boolean"
+    assert props["max_figure_captions"]["type"] == "integer"
+    assert props["max_figure_captions"]["minimum"] == 0

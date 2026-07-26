@@ -36,7 +36,11 @@ from datasheetindex.core.structure import (
     extract_toc,
 )
 from datasheetindex.core.textfile import scan_pages
-from datasheetindex.llm.client import close_llm_client
+from datasheetindex.llm.client import close_llm_client, get_vision_client
+from datasheetindex.llm.figure_captions import (
+    DEFAULT_MAX_FIGURE_CAPTIONS,
+    caption_figures_in_place,
+)
 from datasheetindex.models import DatasheetArtifacts, TocQuality
 
 if TYPE_CHECKING:
@@ -519,12 +523,20 @@ class DatasheetIndex:
         include_summaries: bool = False,
         llm_callable: LlmCallable | None = None,
         output_stem: str | None = None,
+        caption_figures: bool = True,
+        max_figure_captions: int = DEFAULT_MAX_FIGURE_CAPTIONS,
     ) -> DatasheetArtifacts:
         """Build the two deliverables: enriched ToC JSON and page-matched text.
 
         When ``llm_callable`` is provided, low-quality ToCs are regenerated
         via LLM and optional section summaries can be added. ``output_stem``
         optionally overrides the default stem derived from the source filename.
+
+        ``caption_figures`` (default ``True``) names raster figure regions
+        with a vision model, capped at ``max_figure_captions`` calls; unlike
+        ``include_summaries`` there is no client guard, since the absence of a
+        model is handled downstream by leaving captions pending rather than
+        by refusing to try.
 
         ``output_dir=None`` (or an empty/whitespace string) resolves to
         ``$DATASHEETINDEX_OUTPUT_DIR`` if set, otherwise a UID-namespaced
@@ -533,6 +545,12 @@ class DatasheetIndex:
 
         Returns a DatasheetArtifacts with paths, data, and quality info.
         """
+        if not isinstance(max_figure_captions, int) or isinstance(
+            max_figure_captions, bool
+        ):
+            raise ValueError("max_figure_captions must be an integer >= 0")
+        if max_figure_captions < 0:
+            raise ValueError("max_figure_captions must be an integer >= 0")
         if output_dir is None or not output_dir.strip():
             output_dir = resolve_default_output_dir()
         t_start = time.monotonic()
@@ -646,6 +664,18 @@ class DatasheetIndex:
                 add_summaries(nodes, text_content, active_llm_callable)
                 logger.info("LLM summaries done in %.1fs", time.monotonic() - t_sum)
 
+            # 6b. Caption raster figure regions the text layer never named
+            effective_cap = max_figure_captions if caption_figures else 0
+            vision_client = get_vision_client(active_llm_callable)
+            caption_outcome = caption_figures_in_place(
+                doc,
+                scan.figures,
+                vision_client=vision_client,
+                max_figure_captions=effective_cap,
+            )
+            if caption_outcome.failed:
+                enrichment_notes.append("figure_caption_failed")
+
             logger.info("Total build time: %.1fs", time.monotonic() - t_start)
 
             # 7. Build JSON structure
@@ -665,6 +695,10 @@ class DatasheetIndex:
                 "figures_excluded": {
                     "below_min_area_pct": scan.excluded_below_min_area,
                     "min_area_pct": DEFAULT_MIN_AREA_PCT,
+                },
+                "figure_captions_excluded": {
+                    "above_max": caption_outcome.excluded_above_max,
+                    "max_figure_captions": effective_cap,
                 },
             }
 

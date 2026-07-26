@@ -1429,3 +1429,46 @@ def test_a_page_with_both_an_image_and_a_caption_yields_two_entries(tmp_path):
 
     kinds = sorted(entry["kind"] for entry in artifacts.json_data["figures"])
     assert kinds == ["caption", "raster"]
+
+
+def test_negative_max_figure_captions_raises(tmp_path):
+    pdf = tmp_path / "x.pdf"
+    doc = pymupdf.open()
+    doc.new_page()
+    doc.save(pdf)
+    doc.close()
+
+    with DatasheetIndex(str(pdf)) as index:
+        with pytest.raises(ValueError, match="max_figure_captions"):
+            index.build(output_dir=str(tmp_path / "out"), max_figure_captions=-1)
+
+
+def test_caption_figures_true_with_no_model_does_not_raise(tmp_path):
+    # Unlike include_summaries. With the default True, that guard would make
+    # every keyless build raise -- destroying the fallback this design needs.
+    pdf = tmp_path / "y.pdf"
+    doc = pymupdf.open()
+    doc.new_page()
+    doc.save(pdf)
+    doc.close()
+
+    with DatasheetIndex(str(pdf)) as index:
+        artifacts = index.build(output_dir=str(tmp_path / "out"))
+
+    assert artifacts.json_data["figures"] == []
+
+
+def test_figure_captions_excluded_is_always_emitted(tmp_path):
+    pdf = tmp_path / "z.pdf"
+    doc = pymupdf.open()
+    doc.new_page()
+    doc.save(pdf)
+    doc.close()
+
+    with DatasheetIndex(str(pdf)) as index:
+        artifacts = index.build(output_dir=str(tmp_path / "out"))
+
+    assert artifacts.json_data["figure_captions_excluded"] == {
+        "above_max": 0,
+        "max_figure_captions": 20,
+    }

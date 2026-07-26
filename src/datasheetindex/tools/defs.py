@@ -178,6 +178,8 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                     include_summaries=args.get("include_summaries", False),
                     model=args.get("model"),
                     force_rebuild=args.get("force_rebuild", False),
+                    caption_figures=args.get("caption_figures", True),
+                    max_figure_captions=args.get("max_figure_captions", 20),
                 )
             except Exception:
                 # Discard the fresh instance; best-effort close so cleanup failure
@@ -295,7 +297,13 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                 "the models available on the LiteLLM gateway: gpt-4.1 "
                 "(recommended default), gpt-5-mini, gpt-5-nano, gpt-4.1-nano, "
                 "gpt-4o-mini, gpt-5, gpt-5.1, gpt-5.2. Do NOT invent or guess "
-                "model names."
+                "model names.\n\n"
+                "IMPORTANT - figure captioning cost: Figure captioning runs by "
+                "default (caption_figures=True) whenever vision-capable LLM "
+                "credentials are configured -- it is a no-op otherwise. Each "
+                "captioned figure is one VLM call, so raising "
+                "max_figure_captions raises cost proportionally; leave it at "
+                "its default unless a document is known to need more."
             ),
             input_schema={
                 "type": "object",
@@ -306,6 +314,20 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                     "include_summaries": {"type": "boolean"},
                     "model": {"type": "string"},
                     "force_rebuild": {"type": "boolean"},
+                    "caption_figures": {
+                        "type": "boolean",
+                        "description": (
+                            "Name raster figure regions with a vision model. "
+                            "Default true; no-op without credentials."
+                        ),
+                    },
+                    "max_figure_captions": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": (
+                            "Per-document ceiling on caption calls (default 20)."
+                        ),
+                    },
                 },
                 "required": ["pdf_source"],
             },
