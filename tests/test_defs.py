@@ -723,3 +723,95 @@ def test_build_datasheet_description_points_at_the_figure_digest():
     assert "figures" in description
     assert "inspect_page" in description
     assert "json_path" in description
+
+
+def test_search_text_description_discloses_the_raster_blindness():
+    """A zero-hit search must not read as "the document does not say this".
+
+    The limitation is already on ``build_datasheet``, but that description is
+    read once, pages of transcript before the search that trips over it. An
+    agent deciding what a ``[]`` means looks at the tool it just called, so the
+    caveat has to be on ``search_text`` itself -- along with the remedy, since
+    naming a limitation without an action just stops the agent.
+    """
+    description = _defs_by_name()["search_text"].description
+
+    assert "no text layer" in description
+    # The remedy, not just the caveat: the two surfaces that do see pixels.
+    assert "figures" in description
+    assert "inspect_page" in description
+    # The inference the agent has to make, spelled out.
+    assert "absence of a match does not prove" in description
+
+
+def test_empty_search_on_a_document_with_figures_returns_a_note(tmp_path):
+    """The nudge has to arrive at the moment the search fails, not before."""
+    pdf = tmp_path / "figs.pdf"
+    _figure_pdf(pdf)
+    defs = _defs_by_name()
+    _run(defs["build_datasheet"].handler, {"pdf_source": str(pdf)})
+
+    payload = json.loads(
+        _run(defs["search_text"].handler, {"query": "SUMITOMO"})["content"][0]["text"]
+    )
+
+    assert payload["results"] == []
+    note = payload["note"]
+    assert "figures" in note
+    assert "inspect_page" in note
+
+
+def test_search_note_is_absent_when_there_are_hits(tmp_path):
+    """A note on every successful search is noise the agent has to read past."""
+    pdf = tmp_path / "figs.pdf"
+    _figure_pdf(pdf)
+    defs = _defs_by_name()
+    _run(defs["build_datasheet"].handler, {"pdf_source": str(pdf)})
+
+    payload = json.loads(
+        _run(defs["search_text"].handler, {"query": "Figure"})["content"][0]["text"]
+    )
+
+    assert payload["results"]
+    assert "note" not in payload
+
+
+def test_search_note_is_absent_when_the_document_has_no_figures(tmp_path):
+    """Pointing at a figure digest that is empty sends the agent nowhere."""
+    pdf = tmp_path / "plain.pdf"
+    _make_pdf(pdf)
+    defs = _defs_by_name()
+    _run(defs["build_datasheet"].handler, {"pdf_source": str(pdf)})
+
+    payload = json.loads(
+        _run(defs["search_text"].handler, {"query": "SUMITOMO"})["content"][0]["text"]
+    )
+
+    assert payload["results"] == []
+    assert "note" not in payload
+
+
+def test_search_note_is_absent_for_a_caption_only_document(tmp_path):
+    """A text-layer figure caption is searchable, so nothing is hidden.
+
+    ``figures`` mixes two kinds. Keying the note off the array being non-empty
+    would fire on a document whose only entries are captions the search already
+    reads -- pointing the agent at pixels that do not exist.
+    """
+    pdf = tmp_path / "caption_only.pdf"
+    _make_pdf(pdf, text="Figure 4. Timing diagram")
+    defs = _defs_by_name()
+    manifest = json.loads(
+        _run(defs["build_datasheet"].handler, {"pdf_source": str(pdf)})["content"][0][
+            "text"
+        ]
+    )
+    assert manifest["figures"]["captioned"] == 1
+    assert manifest["figures"]["raster"] == 0
+
+    payload = json.loads(
+        _run(defs["search_text"].handler, {"query": "SUMITOMO"})["content"][0]["text"]
+    )
+
+    assert payload["results"] == []
+    assert "note" not in payload

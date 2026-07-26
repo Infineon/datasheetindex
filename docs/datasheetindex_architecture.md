@@ -807,6 +807,18 @@ any one agent framework:
 single pattern or a list and tags each hit with its section breadcrumb;
 `get_section_text` returns a page range prefixed with a position header.
 
+`search_text` also carries the text-layer limitation on **both** surfaces its
+consumer reads: in the tool description, and — when a search returns nothing on
+a document that holds raster regions — as a `note` on the result itself. The
+second is not redundancy. A description is read once at tool-registration time;
+the inference "zero hits does not mean absent, because some of this document is
+pixels" has to be available at the turn the agent draws the wrong conclusion.
+The gate is `DatasheetTools.has_raster_figures()`, which counts `"raster"`
+entries only: a `"caption"` entry comes from the text layer, so its words are
+searchable and nothing is hidden. Both negatives are load-bearing — no note on
+a successful search, none on a caption-only document — because a note that
+appears unconditionally is one the agent learns to skip.
+
 #### The image block carries two media-type keys
 
 `inspect_page` is the only tool returning a non-text block, and its envelope

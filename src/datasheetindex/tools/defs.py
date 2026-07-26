@@ -27,6 +27,20 @@ from typing import Any
 from datasheetindex.llm.figure_captions import DEFAULT_MAX_FIGURE_CAPTIONS
 from datasheetindex.tools.bound import DatasheetTools
 
+#: Attached to a ``search_text`` result only when the search found nothing AND
+#: the document carries raster regions -- the one case where a miss is genuinely
+#: uninformative. It names the next action, because a limitation stated without
+#: a remedy just stops the agent: the observed failure was an agent reporting
+#: "the document does not contain SUMITOMO" after one empty search, when the
+#: word was in a supplier table exported as an image.
+_EMPTY_SEARCH_RASTER_NOTE = (
+    "No text-layer match. This document contains raster figures whose contents "
+    "are pixels, not text, so a term inside one is unreachable from here. Check "
+    "the 'figures' digest returned by build_datasheet for a page whose caption "
+    "describes what you are after, then read that page with inspect_page before "
+    "concluding the term is absent."
+)
+
 
 @dataclass(frozen=True)
 class DatasheetToolDef:
@@ -216,13 +230,21 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
 
     async def search_text(args: dict[str, Any]) -> dict[str, Any]:
         try:
-            results = _require().search_text(
+            tools = _require()
+            results = tools.search_text(
                 args["query"],
                 page=args.get("page"),
                 case_sensitive=args.get("case_sensitive", False),
                 max_results=args.get("max_results", 20),
             )
-            return _ok({"query": args["query"], "results": results})
+            payload: dict[str, Any] = {"query": args["query"], "results": results}
+            # The caveat is on this tool's description too, but a description is
+            # read once and a zero-hit search is where it matters. Only when the
+            # document actually holds pixels a search cannot reach, and only on
+            # a miss: a note on every call is noise the agent reads past.
+            if not results and tools.has_raster_figures():
+                payload["note"] = _EMPTY_SEARCH_RASTER_NOTE
+            return _ok(payload)
         except Exception as exc:
             return _err_exc(exc)
 
@@ -408,7 +430,13 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                 "single string or a list of strings to search several terms in one "
                 "call. Each result includes the ToC 'breadcrumb' of the section "
                 "containing the match; list searches also tag each result with the "
-                "matching 'pattern'. Omit 'page' to search all."
+                "matching 'pattern'. Omit 'page' to search all.\n"
+                "LIMITATION - this searches the extracted text layer only. A "
+                "table, schematic or label placed as an image has no text layer, "
+                "so a term inside it cannot be found here: the absence of a match "
+                "does not prove the document lacks the term. On an empty result, "
+                "check the 'figures' digest from build_datasheet for a page whose "
+                "caption describes what you want, then read it with inspect_page."
             ),
             input_schema={
                 "type": "object",

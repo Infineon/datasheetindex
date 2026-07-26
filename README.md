@@ -213,7 +213,10 @@ tools for the bound PDF source:
   completeness guarantee
 - `search_text` - find page-aware text snippets in the latest build (pass a
   single pattern or a list of patterns), even when labels wrap across lines or
-  table values interrupt the phrase; each hit carries the section breadcrumb
+  table values interrupt the phrase; each hit carries the section breadcrumb.
+  Searches the text layer only: when it finds nothing in a document that has
+  raster figures, the result carries a `note` pointing at the `figures` digest
+  and `inspect_page` (see "Figure indexing and captions")
 - `inspect_page` - render a page image when visual confirmation is needed
 - `extract_table_markdown` - re-extract a page as layout-aware Markdown tables
 
@@ -325,7 +328,13 @@ a plot, its axes and plotted quantity -- under 60 words, and it never
 transcribes cell values or numbers. This is what lets an agent tell, from the
 manifest alone, that a page rendered entirely as a picture (no text layer at
 all) is worth opening with `inspect_page`: `search_text` returning zero hits
-on that page proves nothing, since there is no text there to search.
+on that page proves nothing, since there is no text there to search. That
+inference is easy to miss pages later, so `search_text` states the limitation
+in its own description and, when a search comes back empty on a document that
+holds raster regions, attaches a `note` naming the digest and `inspect_page`
+as the next step. Only then -- a hit-free search over a document with nothing
+but text-layer figure captions has nothing hidden from it, and a note on a
+search that succeeded is noise.
 **Each captioned figure is one VLM call**, so raising the cap raises cost
 proportionally. Without credentials configured, captioning is a no-op and the
 deterministic `figures` array is unaffected either way. `caption_figures=False`

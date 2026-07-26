@@ -787,6 +787,23 @@ class DatasheetTools:
                     match["breadcrumb"] = breadcrumb
         return matches
 
+    def has_raster_figures(self) -> bool:
+        """True when the built artifacts index at least one raster region.
+
+        Raster regions are the content ``search_text`` cannot see: a table or
+        label placed as an image carries no text layer. Text-layer caption
+        entries deliberately do not count -- their words ARE searchable, so a
+        document holding only those has nothing hidden from a search, and
+        steering the agent to ``inspect_page`` over it would waste a turn.
+        """
+        figures = self._require_artifacts().json_data.get("figures")
+        if not isinstance(figures, list):
+            return False
+        return any(
+            isinstance(figure, dict) and figure.get("kind") == "raster"
+            for figure in figures
+        )
+
     def _require_artifacts(self) -> DatasheetArtifacts:
         if self._artifacts is None:
             raise RuntimeError(
