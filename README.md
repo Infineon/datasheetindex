@@ -10,7 +10,7 @@ Agent-first parameter extraction from technical datasheets.
 
 `datasheetindex` is meant to be handed to an external agent in two parts:
 
-1. **Enriched ToC JSON** - Hierarchical section tree with page ranges, table hints, pre-computed breadcrumbs, boilerplate flags (revision history, disclaimers, etc.), a preamble (pages 1-2 raw text) for agent orientation, and a `figures` array indexing every raster image placement and text-layer figure caption (see "Figure indexing and captions" below)
+1. **Enriched ToC JSON** - Hierarchical section tree with page ranges, table hints, pre-computed breadcrumbs, boilerplate flags (revision history, disclaimers, etc.), a page-marked preamble (pages 1-2 raw text, with per-page signals in `preamble_pages`) for agent orientation, and a `figures` array indexing every raster image placement and text-layer figure caption (see "Figure indexing and captions" below)
 2. **Page-matched text file** - Full document text with `--- PAGE N ---` markers aligned to the JSON, with column-aware reading order for two-column layouts
 
 All page numbers are **1-indexed** across the JSON, the text file markers, and
@@ -462,7 +462,7 @@ src/datasheetindex/
         locate.py          # locate_text: text -> bounding-box coordinates
         figures.py         # raster_regions: exact raster placements, clipped
                             #   to the page and normalized for inspect_page
-        preamble.py        # Pages 1-2 raw text extraction
+        preamble.py        # Page-marked front matter + per-page signals
         quality.py         # ToC quality assessment
         annotations.py     # Footnote and cross-reference enrichment
         boilerplate.py     # Title-pattern boilerplate classification

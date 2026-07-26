@@ -62,9 +62,11 @@ The two engines are different heuristics, not better and worse. On a real 68-pag
 
 ### Deliverable 1: Enriched ToC JSON
 
-Not just a flat table of contents — a hierarchical tree with enough metadata for the agent to make informed navigation decisions. Includes a **preamble** — raw text from pages 1-2 — so the agent can orient itself before extraction.
+Not just a flat table of contents — a hierarchical tree with enough metadata for the agent to make informed navigation decisions. Includes a **preamble** — page-marked raw text from pages 1-2 — so the agent can orient itself before extraction.
 
 The `preamble` is generated automatically with zero LLM calls. Rather than fragile heuristics to detect product names or classify ToC entries (which break across manufacturers), the library embeds the raw text of pages 1-2 as a `preamble` — giving the agent the context to orient itself.
+
+`build_front_matter(doc, *, max_pages=2, max_chars=5000)` produces it. Each page is introduced by a `--- PAGE N ---` marker in the same format as the page-matched text file, so every line is attributable and citable, and each cap that bites appends its own `=== NOTE: ... ===` line — truncation is disclosed, never silent. `max_chars` bounds *document text* (`chars_shown`), not the returned string: markers and notes are tool framing, and counting them against the budget would make the amount of content a caller receives depend on how long the framing happens to be. The companion top-level key `preamble_pages` reports per-page evidence (`chars`, `bullets`, `legal_hits`, `has_features_heading`) computed on the whole page read, not the fragment shown, so truncation cannot skew it.
 
 Why not parse it programmatically? Because:
 - Part number regex produces false positives ("JEDEC51", "AEC100") and misses wildcards ("TPS6513x")
@@ -73,11 +75,39 @@ Why not parse it programmatically? Because:
 
 The agent IS the LLM — let it reason about the preamble text directly.
 
+#### Decisions already settled by measurement
+
+**Skipping a cover or legal page is rejected.** Detecting front matter that
+is not front matter and dropping it was considered. The error is asymmetric:
+wrongly skipping page 1 of a real datasheet costs the general description and
+half the features -- the most valuable page in the document -- while wrongly
+keeping a cover page costs some tokens. Two documents is also not a corpus to
+calibrate against. So the library reports `preamble_pages` signals and the
+agent decides; a caller given the signals can implement skipping, but a
+library that skips forecloses the alternative. This is the same shape of
+decision as the table-engine note in `CLAUDE.md`: stability is the point.
+
+**Unit density is deliberately not a signal.** A count of numeric-plus-unit
+tokens looks like the obvious fourth signal. A naive ASCII pattern undercounts
+badly -- 5 matches on PSoC page 1 against 30 for a corrected one -- because it
+misses `150-MHz` (hyphen separator), `1.1-V`, and `40 uA` (micro sign, which
+needs both U+00B5 and U+03BC). The corrected pattern then false-positives on
+part numbers, which datasheets are full of: `8/A` from `CY8C62x8/A`, `4F` from
+`Cortex-M4F`. Noisy in both directions, and `bullets` plus
+`has_features_heading` already separate the two measured documents on their own
+(6 and 11 bullets with a features heading each on the PSoC 6 front matter; 0 and
+no heading on the TI PCN cover letter). Add it later if a consumer needs it,
+calibrated against part-number forms.
+
 ```json
 {
   "source": "infineon-tle9009dqu-datasheet-en.pdf",
   "total_pages": 73,
-  "preamble": "TLE9009DQU\nLi-ion battery monitoring and balancing IC\n\nFeatures\n• Voltage monitoring of up to 9 battery cells connected in series\n• Hot plugging support\n• Dedicated 16-bit high precision delta-sigma ADC for each cell...",
+  "preamble": "--- PAGE 1 ---\nTLE9009DQU\nLi-ion battery monitoring and balancing IC\n\nFeatures\n• Voltage monitoring of up to 9 battery cells connected in series\n• Hot plugging support\n• Dedicated 16-bit high precision delta-sigma ADC for each cell...\n=== NOTE: preamble covers pages 1-2 of 73; later pages were not examined ===",
+  "preamble_pages": [
+    {"page": 1, "chars": 1954, "bullets": 22, "legal_hits": 0, "has_features_heading": true},
+    {"page": 2, "chars": 2087, "bullets": 15, "legal_hits": 1, "has_features_heading": false}
+  ],
   "toc": [
     {
       "node_id": "0001",
@@ -678,8 +708,9 @@ class DatasheetIndex:
         scan = scan_pages(self.doc)
         text_content = scan.text
 
-        # Step 2: Generate preamble (pages 1-2 raw text, ~600 tokens)
-        preamble = generate_preamble(self.doc)
+        # Step 2: Generate the page-marked front matter and its per-page signals
+        front_matter = build_front_matter(self.doc)
+        preamble = front_matter.text
 
         # Step 3: Extract ToC (PyMuPDF get_toc(), instant)
         raw_toc = extract_toc(self.doc)
@@ -739,6 +770,7 @@ class DatasheetIndex:
             "source": filename + ".pdf",
             "total_pages": len(self.doc),
             "preamble": preamble,
+            "preamble_pages": [p.to_dict() for p in front_matter.pages],
             "toc": [node.to_dict() for node in tree],
             "figures": scan.figures,
             "figures_excluded": {...},
@@ -1232,7 +1264,7 @@ Output: {"parameter": "Supply voltage VS relative", "symbol": "VVS_rel_max",
 - **Text extraction** — PyMuPDF `get_text("blocks")` with column-aware reordering for the text file
 
 ### What we add:
-- **Preamble** — pages 1-2 raw text embedded in JSON (~600 tokens) for agent orientation; zero heuristics, zero LLM calls
+- **Preamble** — page-marked pages 1-2 raw text embedded in JSON (up to 5000 characters, ~1250 tokens) plus per-page signals in `preamble_pages`, for agent orientation; zero heuristics, zero LLM calls
 - **Table detection hints** — `has_tables` / `table_count` per node from PyMuPDF (best-effort heuristic; agent reads actual text and judges for itself)
 - **`figures` / `figures_excluded`** — every raster image placement enumerated exactly (`get_image_info()`, not inferred), plus every `Figure N` / `Fig. N` text-layer caption; vector figures are still not detected by clustering drawing operations, but they leak their text so the agent is not blind there
 - **`breadcrumb`** — pre-computed full ancestry path per node (e.g. `"5 Electrical Characteristics > 5.1 Absolute Maximum Ratings"`), so downstream agents and RAG indexers see structural context without re-traversing parents
@@ -1288,7 +1320,7 @@ datasheetindex/
 │   │                      #   <stem>.build.json beside the two deliverables
 │   ├── figures.py         # raster_regions: exact raster placements, clipped
 │   │                      #   to the page and normalized for inspect_page
-│   ├── preamble.py        # Pages 1-2 raw text for agent orientation
+│   ├── preamble.py        # Page-marked front matter + per-page signals
 │   └── quality.py         # Page-level quality scoring
 │                          #   (text density, extraction confidence)
 ├── tools/

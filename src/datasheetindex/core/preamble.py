@@ -14,9 +14,10 @@ from datasheetindex.core.textfile import _extract_page_text
 
 #: Pages read from the front of the document.
 DEFAULT_MAX_PAGES = 2
-#: Document characters emitted. Raised from 2400 in 0.25.0: the old value cut
-#: the measured 4747-character front matter of the PSoC 6 in half and kept the
-#: half holding the legal footer rather than the specifications.
+#: Document characters emitted. Raised from 2400 in 0.26.0: the old value cut
+#: the measured 4746-character front matter of the PSoC 6 in half and kept the
+#: half holding the legal footer rather than the specifications. Measured at
+#: 5000: no document in the local corpus is cut (2554, 2688 and 4746 chars).
 DEFAULT_MAX_CHARS = 5000
 
 # A line opening with a bullet glyph, or with a dash *followed by whitespace*.
@@ -152,9 +153,11 @@ def _page_note(*, pages_read: int, total_pages: int) -> str:
 def _page_signals(text: str) -> _PageSignals:
     """Per-page evidence: bullet lines, legal vocabulary, a features heading.
 
-    Reported, not acted on. The three signals separated a real datasheet's
-    front matter from a product-change notice's cover letter cleanly and
-    independently on both measured fixtures; a unit-density signal is
+    Reported, not acted on. ``bullets`` and ``has_features_heading`` separated
+    a real datasheet's front matter from a product-change notice's cover letter
+    on both measured documents (6 and 11 bullets with a features heading on the
+    PSoC 6; 0 and none on the TI PCN); ``legal_hits`` scored 0 on both and is a
+    third opinion, not the discriminator there. A unit-density signal is
     deliberately left out because it is noisy in both directions (it misses
     "150-MHz" and "40 microamp", and false-positives on part numbers like
     "CY8C62x8/A").
