@@ -710,6 +710,23 @@ prices an image input without paying for generation, so both options can be
 measured before choosing. Confirm the 85-token figure for the configured model
 the same way rather than assuming it.
 
+**Settled, live, against the real gateway (2026-07-26).** `detail="low"` against
+the actual PCN page 5 region (`page_area_pct` 25.46, the Product Attributes
+table) through `gpt-4.1` on the internal LiteLLM gateway returned: *"This is a
+table comparing product attributes and qualification references for multiple
+electronic device packages."* That names the subject -- a multi-device
+attributes/qualification comparison -- not a bare "a table", so **`low` stands**;
+no escalation to `high`. `detail` in `client.describe_image` is unchanged.
+
+The token-cost side of this could not be confirmed as written: this gateway's
+`/responses/input_tokens` endpoint returns `405 Method Not Allowed` for every
+request, including a plain text-only probe with no image at all -- the endpoint
+is simply not proxied here, not an image-specific failure. So the 85-token
+`low`-detail figure is carried forward from the OpenAI documentation, unconfirmed
+against this deployment; nothing in this design depends on that count being
+exact, only on `low` being flat-rate and calculable, which the request shape
+already guarantees regardless of the precise number.
+
 **`inspect_page` is the renderer; do not write a second one.**
 `tools/vision.py:35` already takes `region` as the normalized 0.0-1.0 dict this
 spec emits and returns `[{"type": "image", "data": <base64>, "mime_type":
@@ -749,12 +766,37 @@ also making two builds of the same document gratuitously diff against each other
 Eight candidates on the PCN and 20 on the PSoC, so the concurrency is not
 theoretical: at the cap, serial dispatch at typical multi-second VLM latency would
 put tens of seconds inside one `build_datasheet` that an agent is blocked on, on
-the *common* document rather than a pathological one. **Per-call latency is
-unmeasured** -- neither fixture has been run against a live gateway for this -- so
-implementation must measure it and record the real serial and concurrent numbers
-here, exactly as section 7 requires for the scan cost. If the concurrent figure is
-still large, lowering the default cap is the lever to reconsider, not removing the
-bound.
+the *common* document rather than a pathological one.
+
+**Measured live against the real gateway (2026-07-26), 20 candidates on the
+PSoC, `gpt-4.1`.** Forced to one worker: **119.1s total, ~6.0s/call average** --
+confirming the tens-of-seconds-blocked concern above is real, not theoretical.
+At the shipped 4 workers, with per-call timing recorded: **13.45s total**,
+individual calls ranging 1.15-3.05s (most clustering around 2.2-2.9s) and
+visibly overlapping in the timing log -- an 8.9x reduction, better than a naive
+4x because per-call latency itself was lower during the concurrent run than
+during the serial one (the gateway's response time is not perfectly stable
+run-to-run, the same caveat section 7 records for the scan cost). Both runs
+produced 20/20 real, distinct, on-topic captions with no failures.
+
+One measurement artifact worth recording rather than quietly discarding: a
+first attempt at the concurrent figure, timed as a single wall-clock span
+around `caption_figures_in_place()` with no per-call instrumentation, returned
+**4.5s total** for the same 20 candidates -- faster than any single call's
+observed latency, anywhere, in either run. A direct probe (one repeat of an
+already-sent image, one genuinely novel image, both through a fresh client)
+found no evidence of gateway-side response caching: the repeat took 5.6s, not
+noticeably faster than the fresh call's 1.8s. The 4.5s figure is not used
+above and is not explained; it is recorded here because a number that cannot
+be reproduced or accounted for is exactly the kind of surprise this section
+asks to be settled by measurement, not by picking whichever run looks better.
+The per-call-instrumented 13.45s is the one to trust, since it is the one
+whose parts add up to its total.
+
+At 13.45s for the default cap, the concurrent figure is not so large that
+lowering the default cap needs reconsidering on latency grounds alone; it
+remains the lever if a future corpus pushes the typical candidate count well
+past the PSoC's 20.
 
 ### 7. Where it runs
 

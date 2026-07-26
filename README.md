@@ -10,7 +10,7 @@ Agent-first parameter extraction from technical datasheets.
 
 `datasheetindex` is meant to be handed to an external agent in two parts:
 
-1. **Enriched ToC JSON** - Hierarchical section tree with page ranges, table hints, pre-computed breadcrumbs, boilerplate flags (revision history, disclaimers, etc.), and a preamble (pages 1-2 raw text) for agent orientation
+1. **Enriched ToC JSON** - Hierarchical section tree with page ranges, table hints, pre-computed breadcrumbs, boilerplate flags (revision history, disclaimers, etc.), a preamble (pages 1-2 raw text) for agent orientation, and a `figures` array indexing every raster image placement and text-layer figure caption (see "Figure indexing and captions" below)
 2. **Page-matched text file** - Full document text with `--- PAGE N ---` markers aligned to the JSON, with column-aware reading order for two-column layouts
 
 All page numbers are **1-indexed** across the JSON, the text file markers, and
@@ -294,6 +294,33 @@ carries a `hint` field whenever the returned ToC is empty:
 
 A document with a usable ToC has no `hint` key.
 
+### Figure indexing and captions
+
+Alongside `toc`, the manifest carries `figures` -- a page-then-position list
+of every raster image placement (`kind: "raster"`, with `region` normalized
+to the `inspect_page(region=...)` coordinate contract, `bbox` in raw PDF
+points, `pixels`, and `page_area_pct`) and every `Figure N` / `Fig. N`
+caption the text layer names (`kind: "caption"`, with a string
+`figure_number` -- `"10-1"` as readily as `"12"`). The two kinds are reported
+as separate entries, never merged, even when a raster region and a caption
+share a page. `figures_excluded` reports `{"below_min_area_pct": ...,
+"min_area_pct": ...}` for placements dropped as decorative (a logo repeated
+across every page). Both keys are always present -- `figures: []` on a
+document with none -- so an empty result is distinguishable from an artifact
+built before this feature existed.
+
+`build_datasheet` (and `DatasheetIndex.build()`, `build_batch`) also take
+`caption_figures: bool = True` and `max_figure_captions: int = 20`. When a
+vision-capable client is available -- supplied explicitly, or self-created
+the same way the ToC fallback is -- every raster region above the area
+threshold gets a one-line VLM description (`caption_source: "llm"`), largest
+regions first, up to the cap; `figure_captions_excluded` discloses what the
+cap dropped. **Each captioned figure is one VLM call**, so raising the cap
+raises cost proportionally. Without credentials configured, captioning is a
+no-op and the deterministic `figures` array is unaffected either way.
+`caption_figures=False` or `max_figure_captions=0` turns it off explicitly and
+restores the pre-captioning artifact exactly.
+
 ## Python API
 
 ```python
@@ -322,6 +349,10 @@ datasheetindex build https://example.com/datasheet.pdf --output-dir output
 # With explicit LLM model for ToC fallback and summaries
 datasheetindex build datasheet.pdf --model gpt-4.1 --include-summaries
 
+# Skip figure captioning, or raise its per-document cap (default 20)
+datasheetindex build datasheet.pdf --no-caption-figures
+datasheetindex build datasheet.pdf --max-figure-captions 40
+
 # Run the local MCP server (stdio by default; needs the [mcp] extra)
 datasheetindex mcp
 ```
@@ -329,7 +360,10 @@ datasheetindex mcp
 By default, `datasheetindex` first uses native PDF ToC extraction. If ToC
 quality is low, it automatically attempts LLM fallback with the default model
 (`gpt-4.1`) when LLM credentials are available. Pass `--model` to choose the
-LLM model explicitly; `--include-summaries` requires `--model`.
+LLM model explicitly; `--include-summaries` requires `--model`. Figure
+captioning (see "Figure indexing and captions" above) runs by default under
+the same credential rule and needs no `--model` of its own; `--no-caption-figures`
+turns it off.
 
 `datasheetindex build` needs no optional extras. `datasheetindex mcp` needs the
 `[mcp]` extra and reports a single-line install hint if it is missing.
@@ -343,6 +377,8 @@ src/datasheetindex/
         textfile.py        # PDF -> page-matched text file (column-aware)
         _textmatch.py      # Shared dash/token normalization + matcher
         locate.py          # locate_text: text -> bounding-box coordinates
+        figures.py         # raster_regions: exact raster placements, clipped
+                            #   to the page and normalized for inspect_page
         preamble.py        # Pages 1-2 raw text extraction
         quality.py         # ToC quality assessment
         annotations.py     # Footnote and cross-reference enrichment
@@ -354,9 +390,10 @@ src/datasheetindex/
         registry.py        # Claude Agent SDK adapter (re-exports DatasheetTools)
     mcp_server.py          # Local stdio/HTTP MCP server entry point
     llm/
-        client.py          # LLM client factory
+        client.py          # LLM client factory (free-text + structured_json + vision)
         toc_fallback.py    # LLM-based ToC generation fallback
         summarizer.py      # Optional section summaries
+        figure_captions.py # VLM captioning for raster figure regions
     cli.py                 # CLI entry point
     index.py               # Main DatasheetIndex class
     models.py              # Data models
