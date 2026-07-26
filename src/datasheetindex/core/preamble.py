@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, TypedDict
 if TYPE_CHECKING:
     import pymupdf
 
-from datasheetindex.core.boilerplate import count_legal_hits
 from datasheetindex.core.textfile import _extract_page_text
 
 #: Pages read from the front of the document.
@@ -38,7 +37,6 @@ class _PageSignals(TypedDict):
     """Return shape of :func:`_page_signals`, typed so callers need no casts."""
 
     bullets: int
-    legal_hits: int
     has_features_heading: bool
 
 
@@ -54,7 +52,6 @@ class PreamblePage:
     page: int
     chars: int
     bullets: int = 0
-    legal_hits: int = 0
     has_features_heading: bool = False
 
     def to_dict(self) -> dict[str, object]:
@@ -63,7 +60,6 @@ class PreamblePage:
             "page": self.page,
             "chars": self.chars,
             "bullets": self.bullets,
-            "legal_hits": self.legal_hits,
             "has_features_heading": self.has_features_heading,
         }
 
@@ -153,25 +149,25 @@ def _page_note(*, pages_read: int, total_pages: int) -> str:
 
 
 def _page_signals(text: str) -> _PageSignals:
-    """Per-page evidence: bullet lines, legal vocabulary, a features heading.
+    """Per-page evidence: bullet lines and a features heading.
 
-    Reported, not acted on. ``bullets`` and ``has_features_heading`` separated
-    a real datasheet's front matter from a product-change notice's cover letter
-    on both measured documents (34 and 43 bullets with a features heading on
-    the PSoC 6; 0 and none on the TI PCN); ``legal_hits`` scored 0 on both --
-    and on every real page measured -- so it is a third opinion, not the
-    discriminator there. A unit-density signal is deliberately left out because
-    it is noisy in both directions (it misses "150-MHz" and "40 microamp", and
-    false-positives on part numbers like "CY8C62x8/A").
+    Reported, not acted on. The two separate a real datasheet's front matter
+    from a product-change notice's cover letter across the 21-document corpus
+    (34 and 43 bullets with a features heading on the PSoC 6; 0 and none on the
+    TI PCN's page 1). Two signals were designed and rejected on measurement: a
+    unit density, noisy in both directions (it misses "150-MHz" and "40
+    microamp", and false-positives on part numbers like "CY8C62x8/A"), and a
+    legal-vocabulary count, which fired on TI datasheet page footers and scored
+    zero on every cover letter it was meant to catch -- see the architecture
+    doc's "Decisions already settled by measurement".
 
-    These are heuristic counts, not an API: the vocabulary and patterns change
-    as more documents are measured, so a caller should compare them, not
-    threshold on exact values.
+    These are heuristic counts, not an API: the patterns change as more
+    documents are measured, so a caller should compare them, not threshold on
+    exact values.
     """
     lines = text.splitlines()
     return {
         "bullets": sum(1 for line in lines if _BULLET_RE.match(line)),
-        "legal_hits": count_legal_hits(text),
         "has_features_heading": any(
             line.strip().rstrip(":").strip().lower() in _FEATURES_HEADINGS
             for line in lines
@@ -253,7 +249,6 @@ def build_front_matter(
                 page=offset + 1,
                 chars=len(page_text),
                 bullets=signals["bullets"],
-                legal_hits=signals["legal_hits"],
                 has_features_heading=signals["has_features_heading"],
             )
         )

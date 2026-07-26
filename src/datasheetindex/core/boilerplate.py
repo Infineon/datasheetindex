@@ -1,14 +1,10 @@
 """Boilerplate detection for ToC nodes.
 
 Flags sections whose title matches well-known datasheet boilerplate so that
-agents can deprioritize them during navigation. *Flagging* is intentionally
-title-only and pattern-based -- no LLM call -- because ~80% of datasheet
-boilerplate is title-detectable and we want this to stay free in the happy
-path. The module also hosts ``count_legal_hits``, which does scan running
-prose: it is a separate, unanchored matcher that only reports a count for the
-front-matter ``legal_hits`` signal and flags nothing. Reach for
-``classify_title`` for titles and ``count_legal_hits`` for prose; see
-``_LEGAL_VOCABULARY`` for why the two vocabularies are not shared.
+agents can deprioritize them during navigation. Detection is intentionally
+title-only and pattern-based -- no LLM call, no text scanning -- because
+~80% of datasheet boilerplate is title-detectable and we want this to stay
+free in the happy path.
 
 Categories:
     legal     -- disclaimers, important notices, trademarks, copyright, patents
@@ -138,42 +134,6 @@ _BOILERPLATE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ),
 ]
 
-# Vocabulary that signals legal boilerplate in *running prose*. Used by the
-# front-matter `legal_hits` signal, and deliberately NOT shared with the
-# `legal` branch of `_BOILERPLATE_PATTERNS` above, which serves a different
-# question. That pattern is anchored to a whole title and several of its
-# branches require a qualifier (`product liability`, `important notices`),
-# because bare `liability` and `information` are common substantive section
-# titles. In prose the judgement inverts: a bare "liability" in a footer
-# sentence is exactly the signal. One list cannot serve both without either
-# weakening the title matcher -- which publishes a flag in the artifact -- or
-# under-counting prose. The partial duplication is the cheaper failure.
-_LEGAL_VOCABULARY: tuple[str, ...] = (
-    r"disclaimers?",
-    r"warrant(?:y|ies)",
-    r"liabilit(?:y|ies)",
-    r"liable",
-    r"trademarks?",
-    r"copyrights?",
-    r"patents?",
-    r"indemnif\w*",
-    r"terms\s+and\s+conditions",
-    r"limitations?\s+of\s+liability",
-    r"export\s+control",
-    r"subject\s+to\s+change\s+without\s+notice",
-    r"no\s+license",
-    # The idiom, not the words: a bare "as is" is ordinary English ("as is
-    # shown in Figure 3"), and a features page is where that false positive
-    # would land first. The quote class covers `provided "as is"` and the
-    # typographic left quote; `[\s-]` covers `as-is`.
-    r"provided\s+[\"\u201c']?as[\s-]+is",
-    r"at\s+your\s+own\s+risk",
-)
-
-_LEGAL_PROSE_RE = re.compile(
-    r"\b(?:" + "|".join(_LEGAL_VOCABULARY) + r")\b", re.IGNORECASE
-)
-
 
 def _normalize_title(title: str) -> str:
     """Strip leading numbering/prefixes and trailing punctuation, lowercase."""
@@ -229,19 +189,3 @@ def _flag_recursive(nodes: list[TocNode], parent_category: str) -> None:
             node.boilerplate_category = ""
         if node.nodes:
             _flag_recursive(node.nodes, node.boilerplate_category)
-
-
-def count_legal_hits(text: str) -> int:
-    """Count legal-boilerplate vocabulary matches in running prose.
-
-    A count, not a verdict: disclaimer prose scores and a features page scores
-    zero, but what to do about that is the caller's decision.
-
-    Measured: the one real cover letter on hand (TI PCN 20251008002.1, page 1)
-    also scores zero, because its footer vocabulary -- "TI Information -
-    Selective Disclosure" -- is not in ``_LEGAL_VOCABULARY``, and a disclosure
-    classification is not a liability disclaimer. So this is a third opinion on
-    a page, not the signal that separates a cover letter from front matter;
-    ``bullets`` and ``has_features_heading`` do that.
-    """
-    return len(_LEGAL_PROSE_RE.findall(text))

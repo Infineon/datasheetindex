@@ -66,7 +66,7 @@ Not just a flat table of contents — a hierarchical tree with enough metadata f
 
 The `preamble` is generated automatically with zero LLM calls. Rather than fragile heuristics to detect product names or classify ToC entries (which break across manufacturers), the library embeds the raw text of pages 1-2 as a `preamble` — giving the agent the context to orient itself.
 
-`build_front_matter(doc, *, max_pages=2, max_chars=5000)` produces it. Each page is introduced by a `--- PAGE N ---` marker in the same format as the page-matched text file, so every line is attributable and citable, and each cap that bites appends its own `=== NOTE: ... ===` line — truncation is disclosed, never silent. `max_chars` bounds *document text* (`chars_shown`), not the returned string: markers and notes are tool framing, and counting them against the budget would make the amount of content a caller receives depend on how long the framing happens to be. The companion top-level key `preamble_pages` reports per-page evidence (`chars`, `bullets`, `legal_hits`, `has_features_heading`) computed on the whole page read, not the fragment shown, so truncation cannot skew it. They are heuristic counts to be weighed, not thresholded on — see "Decisions already settled by measurement" below for what each one has and has not been measured to do.
+`build_front_matter(doc, *, max_pages=2, max_chars=5000)` produces it. Each page is introduced by a `--- PAGE N ---` marker in the same format as the page-matched text file, so every line is attributable and citable, and each cap that bites appends its own `=== NOTE: ... ===` line — truncation is disclosed, never silent. `max_chars` bounds *document text* (`chars_shown`), not the returned string: markers and notes are tool framing, and counting them against the budget would make the amount of content a caller receives depend on how long the framing happens to be. The companion top-level key `preamble_pages` reports per-page evidence (`chars`, `bullets`, `has_features_heading`) computed on the whole page read, not the fragment shown, so truncation cannot skew it. They are heuristic counts to be weighed, not thresholded on — see "Decisions already settled by measurement" below for what each one has and has not been measured to do.
 
 Why not parse it programmatically? Because:
 - Part number regex produces false positives ("JEDEC51", "AEC100") and misses wildcards ("TPS6513x")
@@ -101,26 +101,33 @@ tracked doc is worse than none. Noisy in both directions, and `bullets` plus
 and no heading on the TI PCN cover letter). Add it later if a consumer needs
 it, calibrated against part-number forms.
 
-**`legal_hits` is kept despite measuring zero everywhere it was run.** It is 0
-on all six real front-matter pages measured (PSoC 6 CY8C62x8, TI PCN
-20251008002.1, TLE9350BSJ; pages 1-2 of each), the TI product-change-notice
-cover letter it was designed to catch included -- that document's footer
-vocabulary is "TI Information - Selective Disclosure", and a disclosure
-classification is not a liability disclaimer. Its only positive evidence is
-synthetic disclaimer prose, where it scores 3 or more. It stays because a zero
-is not evidence of harm and removing a published field later is breaking, but
-read it as a third opinion on a page, not the discriminator: on the two
-documents that differ, the discrimination comes from `bullets` and
-`has_features_heading`.
+**A legal-vocabulary count was designed, built, measured and then not
+shipped.** A third signal, `legal_hits`, counted disclaimer vocabulary
+(`warranty`, `liability`, `trademarks`, the `provided "as is"` idiom) in a
+page's prose, to mark front matter that is a cover letter rather than
+specifications. On the 21-document corpus it measured *anti-correlated* with
+that purpose. It scores 2-3 on page 1 of all seven TI **datasheets** --
+`warranty` and `disclaimers` from TI's standard page footer, plus `Copyright`
+and `Trademarks` on page 2 -- and **0 on pages 1 and 2 of every one of the
+seven product-change notices**, including the TI PCN the design was written
+from, whose footer reads "TI Information - Selective Disclosure" and a
+disclosure classification is not a liability disclaimer. A high count meant
+"this is a TI datasheet", not "this page is boilerplate rather than
+specifications", which is the opposite of what it was built to say. It was
+deleted before release rather than kept: a field measured in the wrong
+direction is worse than no field, and removing a published one afterwards is
+breaking. The signal is easy to re-propose, so the measurement is recorded
+here as the answer.
 
-**All three signals are heuristic counts, so do not threshold on exact
-values.** The vocabulary behind `legal_hits` and the patterns behind `bullets`
-and `has_features_heading` are calibrated against what has been measured and
-will change as more documents are measured -- the `bullets` marker pattern was
-already widened once before release, when the corpus showed it was missing most
-of Infineon's markers. `preamble_pages` is an additive key whose field
-*names* and types are a compatibility surface; the numbers in it are evidence
-for an agent to weigh, not a stable API.
+**Both signals are heuristic counts, so do not threshold on exact values.**
+The patterns behind `bullets` and `has_features_heading` are calibrated against
+what has been measured and will change as more documents are measured -- the
+`bullets` marker pattern was widened once before release, when the corpus
+showed it was missing most of Infineon's markers, and `has_features_heading`
+was taught to strip a leading section number when the corpus showed all seven
+TI datasheets write `1 Features`. `preamble_pages` is an additive key whose
+field *names* and types are a compatibility surface; the numbers in it are
+evidence for an agent to weigh, not a stable API.
 
 #### Example artifact
 
@@ -130,8 +137,8 @@ for an agent to weigh, not a stable API.
   "total_pages": 73,
   "preamble": "--- PAGE 1 ---\nTLE9009DQU\nLi-ion battery monitoring and balancing IC\n\nFeatures\n• Voltage monitoring of up to 9 battery cells connected in series\n• Hot plugging support\n• Dedicated 16-bit high precision delta-sigma ADC for each cell...\n--- PAGE 2 ---\n• Integrated cell balancing switches\n• Operating temperature -40 to +105 C\nSpecifications are subject to change without notice...\n=== NOTE: preamble covers pages 1-2 of 73; later pages were not examined ===",
   "preamble_pages": [
-    {"page": 1, "chars": 1954, "bullets": 22, "legal_hits": 0, "has_features_heading": true},
-    {"page": 2, "chars": 2087, "bullets": 15, "legal_hits": 1, "has_features_heading": false}
+    {"page": 1, "chars": 1954, "bullets": 22, "has_features_heading": true},
+    {"page": 2, "chars": 2087, "bullets": 15, "has_features_heading": false}
   ],
   "toc": [
     {

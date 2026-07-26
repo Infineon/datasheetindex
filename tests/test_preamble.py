@@ -344,11 +344,11 @@ def test_signals_on_a_bulleted_features_page():
     signals = _page_signals(text)
 
     assert signals["bullets"] == 4
-    assert signals["legal_hits"] == 0
     assert signals["has_features_heading"] is True
 
 
 def test_signals_on_a_legal_cover_page():
+    """A cover letter shows itself by what it lacks: bullets and a heading."""
     text = (
         "Product Change Notification\n"
         "TI requires acknowledgement of receipt of this notification "
@@ -359,7 +359,6 @@ def test_signals_on_a_legal_cover_page():
     signals = _page_signals(text)
 
     assert signals["bullets"] == 0
-    assert signals["legal_hits"] >= 3
     assert signals["has_features_heading"] is False
 
 
@@ -411,9 +410,8 @@ def test_build_front_matter_populates_signals_per_page():
 
     assert fm.pages[0].bullets == 2
     assert fm.pages[0].has_features_heading is True
-    assert fm.pages[0].legal_hits == 0
     assert fm.pages[1].bullets == 0
-    assert fm.pages[1].legal_hits >= 2
+    assert fm.pages[1].has_features_heading is False
 
 
 def test_signals_reflect_the_whole_page_even_when_truncated():

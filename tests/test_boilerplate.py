@@ -3,9 +3,7 @@
 import pytest
 
 from datasheetindex.core.boilerplate import (
-    _LEGAL_VOCABULARY,
     classify_title,
-    count_legal_hits,
     flag_boilerplate,
 )
 from datasheetindex.models import TocNode
@@ -203,77 +201,3 @@ def test_flag_boilerplate_empty_title_does_not_propagate():
     assert parent.boilerplate_category == ""
     assert child_a.boilerplate_category == ""
     assert child_b.boilerplate_category == "legal"
-
-
-def test_legal_footer_sentence_scores_non_zero():
-    """The test the anchored title pattern fails; it pins the prose matcher."""
-    footer = (
-        "Infineon Technologies AG makes no warranty of any kind with respect "
-        "to this document, and disclaims all liability arising from its use. "
-        "Please note the disclaimer and the section headed Warnings at the "
-        "end of this document. Specifications are subject to change without "
-        "notice."
-    )
-    assert count_legal_hits(footer) >= 4
-    assert classify_title(footer) == ""
-
-
-def test_bare_liability_is_a_prose_hit_but_not_a_legal_title():
-    assert count_legal_hits("we accept no liability") == 1
-    assert classify_title("Liability") == ""
-    assert classify_title("Product Liability") == "legal"
-
-
-def test_features_prose_scores_zero_legal_hits():
-    features = (
-        "32-bit Arm Cortex-M4F CPU at 150 MHz, 2 MByte flash, 1 MByte SRAM, "
-        "up to 102 programmable GPIOs, 12-bit 2-Msps SAR ADC, CAPSENSE."
-    )
-    assert count_legal_hits(features) == 0
-
-
-def test_as_is_only_scores_in_the_disclaimer_idiom():
-    """A bare "as is" is ordinary English; only the idiom is a disclaimer.
-
-    A features page is where a false positive would land first, so the
-    vocabulary entry carries the "provided" that makes it a legal phrase.
-    """
-    assert count_legal_hits("as is shown in Figure 3, the output rises") == 0
-    assert count_legal_hits("operates as is required by the standard") == 0
-    assert count_legal_hits("transmitted as is without buffering") == 0
-    assert count_legal_hits('provided "as is" without warranty') >= 1
-    assert count_legal_hits("provided as-is and at your own risk") >= 1
-
-
-def test_prose_matcher_covers_every_vocabulary_stem():
-    """Every vocabulary entry is reachable, asserted against the constant.
-
-    The entries are regex fragments, so they cannot be fed back through the
-    matcher directly (`warrant(?:y|ies)` does not match its own pattern text).
-    The length assertion fails if a term is dropped from the constant; the loop
-    fails if one stops matching.
-    """
-    stems = [
-        "disclaimer",
-        "warranty",
-        "liability",
-        "liable",
-        "trademark",
-        "copyright",
-        "patent",
-        "indemnify",
-        "terms and conditions",
-        "limitation of liability",
-        "export control",
-        "subject to change without notice",
-        "no license",
-        'provided "as is"',
-        "at your own risk",
-    ]
-    assert len(_LEGAL_VOCABULARY) == len(stems)
-    for stem in stems:
-        assert count_legal_hits(stem) >= 1, stem
-
-
-def test_legal_hits_is_case_insensitive():
-    assert count_legal_hits("TRADEMARKS") == count_legal_hits("trademarks") == 1

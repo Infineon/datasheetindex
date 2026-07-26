@@ -1718,7 +1718,6 @@ def test_preamble_pages_is_emitted(tmp_path):
             "page",
             "chars",
             "bullets",
-            "legal_hits",
             "has_features_heading",
         }
     assert data["preamble"].startswith("--- PAGE 1 ---")
