@@ -355,8 +355,11 @@ those carrying a caption from either source. `pages` lists one row per page
 carrying figure entries, in ascending page order, with that page's entry count
 and its first caption (clipped to 200 characters). Because a `"caption"` entry
 is created for any `Figure N` mention in the page text, a row can name a page
-that holds no image -- a List of Figures page is the usual case -- so compare
-`raster` against `total` before treating every row as a render target. It is
+holding no raster image at all. Measured across a 14-document corpus, that
+overwhelmingly means the figure is **drawn as vector art** -- which
+`get_image_info()` cannot enumerate, so the index names the figure without being
+able to offer a region for it. Such a page rewards a full-page `inspect_page`;
+it is a signal, not noise. It is
 capped at 40 rows -- `pages_with_figures` is the true count
 and `truncated` says whether rows were dropped -- so the manifest's size does
 not grow with a pathological document's figure count. The key is always
