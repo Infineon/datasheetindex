@@ -86,6 +86,48 @@ def _truncate_on_line_boundary(text: str, budget: int) -> str:
     return "".join(kept)
 
 
+def _page_phrase(pages_read: int) -> str:
+    """``page 1`` for one page, ``pages 1-P`` otherwise."""
+    if pages_read == 1:
+        return "page 1"
+    return f"pages 1-{pages_read}"
+
+
+def _char_note(
+    *,
+    max_chars: int,
+    chars_shown: int,
+    chars_extracted: int,
+    pages_read: int,
+    cut_page: int,
+) -> str:
+    """Name what ``max_chars`` cut.
+
+    ``chars_extracted`` is characters on the pages *read*, never "front matter
+    in the document" -- that would require knowing where front matter ends,
+    which is exactly what cannot be determined.
+    """
+    tail = f", ending mid-page on page {cut_page}" if cut_page else ""
+    return (
+        f"=== NOTE: preamble truncated at {max_chars} characters; "
+        f"{chars_shown} of {chars_extracted} characters from "
+        f"{_page_phrase(pages_read)} shown{tail} ==="
+    )
+
+
+def _page_note(*, pages_read: int, total_pages: int) -> str:
+    """Claim only the mechanical fact: pages exist that were not examined.
+
+    Deliberately does not say front matter continues, or count characters it
+    never extracted -- reading one page past the limit to describe what was
+    skipped would defeat the limit.
+    """
+    return (
+        f"=== NOTE: preamble covers {_page_phrase(pages_read)} of "
+        f"{total_pages}; later pages were not examined ==="
+    )
+
+
 def build_front_matter(
     doc: pymupdf.Document,
     *,
@@ -107,6 +149,7 @@ def build_front_matter(
 
     parts: list[str] = []
     chars_shown = 0
+    cut_page = 0
     budget = max_chars
     for offset, page_text in enumerate(texts):
         page_num = offset + 1
@@ -122,6 +165,7 @@ def build_front_matter(
         chars_shown += len(kept)
         budget -= len(kept)
         if kept != page_text:
+            cut_page = page_num
             break
 
     pages = [
@@ -129,11 +173,24 @@ def build_front_matter(
         for offset, page_text in enumerate(texts)
     ]
 
+    chars_extracted = sum(len(t) for t in texts)
+    text = "\n".join(parts)
+    if chars_shown < chars_extracted:
+        text += "\n" + _char_note(
+            max_chars=max_chars,
+            chars_shown=chars_shown,
+            chars_extracted=chars_extracted,
+            pages_read=pages_read,
+            cut_page=cut_page,
+        )
+    if total_pages > pages_read:
+        text += "\n" + _page_note(pages_read=pages_read, total_pages=total_pages)
+
     return FrontMatter(
-        text="\n".join(parts),
+        text=text,
         pages=pages,
         chars_shown=chars_shown,
-        chars_extracted=sum(len(t) for t in texts),
+        chars_extracted=chars_extracted,
         pages_read=pages_read,
         total_pages=total_pages,
     )

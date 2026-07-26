@@ -185,6 +185,72 @@ def test_two_column_preamble_reads_left_then_right():
     assert left_pos < right_pos
 
 
+def test_char_truncation_note_carries_the_exact_counts():
+    doc = _doc_with_lines(2, lines=45, width=80)
+    fm = build_front_matter(doc, max_chars=200)
+    doc.close()
+
+    expected = (
+        f"=== NOTE: preamble truncated at 200 characters; "
+        f"{fm.chars_shown} of {fm.chars_extracted} characters from "
+        f"pages 1-2 shown, ending mid-page on page 1 ==="
+    )
+    assert fm.text.endswith(expected)
+
+
+def test_page_note_names_pages_read_and_total():
+    doc = _doc_with_lines(4)
+    fm = build_front_matter(doc)
+    doc.close()
+
+    assert fm.text.endswith(
+        "=== NOTE: preamble covers pages 1-2 of 4; later pages were not examined ==="
+    )
+    # The caps are independent: the text fit, so no character note.
+    assert "truncated at" not in fm.text
+
+
+def test_both_notes_appear_with_the_character_note_first():
+    doc = _doc_with_lines(4, lines=45, width=80)
+    fm = build_front_matter(doc, max_chars=200)
+    doc.close()
+
+    notes = [ln for ln in fm.text.splitlines() if ln.startswith("=== NOTE:")]
+    assert len(notes) == 2
+    assert "truncated at 200 characters" in notes[0]
+    assert "later pages were not examined" in notes[1]
+
+
+def test_page_boundary_cut_omits_the_mid_page_clause():
+    """A cap that lands exactly on a page boundary cut no page in half."""
+    doc = _doc_with_lines(2, lines=4, width=40)
+    page_one_chars = build_front_matter(doc, max_pages=1).chars_extracted
+    fm = build_front_matter(doc, max_chars=page_one_chars)
+    doc.close()
+
+    assert fm.char_truncated is True
+    assert "ending mid-page" not in fm.text
+    assert fm.text.count("--- PAGE ") == 1
+
+
+def test_single_page_document_note_uses_singular_page_phrase():
+    doc = _doc_with_lines(1, lines=45, width=80)
+    fm = build_front_matter(doc, max_chars=200)
+    doc.close()
+
+    assert "characters from page 1 shown" in fm.text
+    assert "pages 1-1" not in fm.text
+
+
+def test_notes_are_framing_and_excluded_from_chars_shown():
+    doc = _doc_with_lines(4, lines=45, width=80)
+    fm = build_front_matter(doc, max_chars=200)
+    doc.close()
+
+    assert fm.chars_shown <= 200
+    assert len(fm.text) > 200
+
+
 @pytest.mark.real_pdf
 def test_real_pdf_contains_product_name():
     """Preamble from real datasheet should contain the product name."""
