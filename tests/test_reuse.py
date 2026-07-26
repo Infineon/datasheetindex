@@ -953,6 +953,33 @@ def test_keyless_build_with_pending_captions_is_reused(
     assert second.figure_captions_pending == first.figure_captions_pending
 
 
+def test_keyless_single_instance_reuses_from_memory(
+    tmp_path, figure_pdf, not_editable, build_spy, monkeypatch
+):
+    """The memory gate's half of the reuse rule, isolated from the disk gate.
+
+    One instance, two calls, no capability appearing in between: the second
+    call must be served straight from ``self._artifacts`` without ever
+    reaching ``_reuse_from_disk``. ``test_keyless_build_with_pending_captions_
+    is_reused`` opens a second ``DatasheetTools`` for its second call, so it
+    only ever exercises the disk gate -- a regression confined to the memory
+    gate's own condition is invisible to it. On an editable install, or
+    whenever the sidecar could not be written, the memory gate is the *only*
+    gate, so it needs its own direct coverage.
+    """
+    _keyless(monkeypatch)
+    out = str(tmp_path / "out")
+
+    with DatasheetTools(str(figure_pdf)) as tools:
+        first = tools.build_datasheet(output_dir=out)
+        assert first.figure_captions_pending > 0
+
+        second = tools.build_datasheet(output_dir=out)
+
+    assert len(build_spy) == 1, "a keyless single instance must reuse, not rebuild"
+    assert second is first, "the memory gate did not serve the cached artifact"
+
+
 def test_capability_appearing_invalidates_the_artifact(
     tmp_path, figure_pdf, not_editable, build_spy, monkeypatch, caplog
 ):
