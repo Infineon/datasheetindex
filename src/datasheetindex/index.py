@@ -57,6 +57,24 @@ PDF_HEADER_SCAN_BYTES = 1024
 
 _OUTPUT_DIR_ENV_VAR = "DATASHEETINDEX_OUTPUT_DIR"
 
+#: Client provenances that also sanction section summaries. ``build()`` shares
+#: one client across three branches, so "a client exists" is not the same
+#: statement as "the caller signed up for per-section LLM calls":
+#:
+#: - ``"caller"`` -- handed in explicitly, so every LLM branch is sanctioned.
+#: - ``"toc_fallback"`` -- self-created because the native ToC is too weak to
+#:   navigate. That was already an implicit opt-in through 0.24.0, and it is
+#:   also the case where summaries help most.
+#: - ``"figure_captions"`` -- self-created *only* because the document carries
+#:   raster regions. Deliberately absent. Gating summaries on availability
+#:   instead let one inserted image turn ``include_summaries=True,
+#:   llm_callable=None`` from a no-op into one LLM call per ToC section, a cost
+#:   ``max_figure_captions`` does not bound and nothing disclosed.
+#:
+#: A new construction site is unsanctioned until it is listed here, which is
+#: the direction that fails safely.
+_SUMMARY_CLIENT_ORIGINS = frozenset({"caller", "toc_fallback"})
+
 
 def _minimum_fallback_candidate_entries(total_pages: int) -> int:
     """Minimum entry count before an LLM-generated ToC is trusted."""
@@ -533,6 +551,12 @@ class DatasheetIndex:
         via LLM and optional section summaries can be added. ``output_stem``
         optionally overrides the default stem derived from the source filename.
 
+        ``include_summaries`` needs a client whose provenance sanctions it (see
+        ``_SUMMARY_CLIENT_ORIGINS``): one the caller supplied, or the one the
+        weak-ToC fallback creates for itself. A client self-created purely to
+        caption figures does **not** enable summaries, so a keyless build
+        produces none whether or not the document has figures.
+
         ``caption_figures`` (default ``True``) names raster figure regions
         with a vision model, capped at ``max_figure_captions`` calls; unlike
         ``include_summaries`` there is no client guard, since the absence of a
@@ -611,11 +635,19 @@ class DatasheetIndex:
         needs_toc_fallback = toc_quality.score < TOC_FALLBACK_THRESHOLD
         active_llm_callable = llm_callable
         owns_llm_callable = False
+        # Where the client came from, which is a different question from
+        # whether there is one. Only the summaries branch asks; see
+        # _SUMMARY_CLIENT_ORIGINS.
+        llm_client_origin: str | None = "caller" if llm_callable is not None else None
         if active_llm_callable is None and (
             needs_toc_fallback or has_caption_candidates
         ):
             active_llm_callable = self._try_create_default_llm_client()
             owns_llm_callable = active_llm_callable is not None
+            if owns_llm_callable:
+                llm_client_origin = (
+                    "toc_fallback" if needs_toc_fallback else "figure_captions"
+                )
             if active_llm_callable is None and needs_toc_fallback:
                 logger.info(
                     "ToC quality below threshold but no LLM client is available; "
@@ -672,8 +704,15 @@ class DatasheetIndex:
                     )
                     enrichment_notes.append("toc_fallback_raised")
 
-            # 6. LLM summaries: only when explicitly requested
-            if active_llm_callable and include_summaries:
+            # 6. LLM summaries: only when explicitly requested, and only on a
+            # client whose PROVENANCE sanctions them. Do not simplify this back
+            # to ``active_llm_callable and include_summaries``: that is the
+            # regression _SUMMARY_CLIENT_ORIGINS exists to name.
+            if (
+                include_summaries
+                and active_llm_callable is not None
+                and llm_client_origin in _SUMMARY_CLIENT_ORIGINS
+            ):
                 t_sum = time.monotonic()
                 from datasheetindex.llm.summarizer import add_summaries
 

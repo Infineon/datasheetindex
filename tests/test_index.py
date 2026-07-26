@@ -1484,3 +1484,131 @@ def test_figure_captions_excluded_is_always_emitted(tmp_path):
         "above_max": 0,
         "max_figure_captions": 20,
     }
+
+
+class _RecordingLlmClient:
+    """A vision-capable client that records which LLM path called it.
+
+    One object serving both interfaces is the point: the summaries branch and
+    the captioning branch share a client by design, so only a recorder that
+    can tell their calls apart can show which branches ran.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def __call__(self, system: str, user: str) -> str:
+        self.calls.append("summary")
+        return "a section summary"
+
+    def describe_image(
+        self, system: str, image_base64: str, *, media_type: str = "image/png"
+    ) -> str:
+        self.calls.append("caption")
+        return "a block diagram of the device"
+
+    def close(self) -> None:
+        pass
+
+
+def _figure_pdf(tmp_path, name="fig-toc.pdf"):
+    """A good-ToC document carrying one raster region above ``min_area_pct``.
+
+    The raster is what makes ``build()`` self-create a client at all, so a
+    keyless summaries test written against ``_simple_pdf`` would pass whatever
+    the gate did. Each page carries well over ``summarizer.MIN_TEXT_LENGTH``
+    characters for the same reason on the other side: a thin page is skipped by
+    the summarizer, so "no summary call" would prove nothing.
+    """
+    doc = pymupdf.open()
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 20, 20))
+    pix.set_rect(pix.irect, (10, 20, 30))
+    for number in range(2):
+        page = doc.new_page(width=595, height=842)
+        writer = pymupdf.TextWriter(page.rect)
+        for line in range(6):
+            writer.append(
+                (72, 72 + line * 14),
+                f"Body text line {line} for this page of the datasheet",
+            )
+        writer.write_text(page)
+        if number == 1:
+            page.insert_image(pymupdf.Rect(50, 200, 545, 600), pixmap=pix)
+    doc.set_toc([[1, "Overview", 1], [1, "Electrical Characteristics", 2]])
+    pdf_path = tmp_path / name
+    doc.save(str(pdf_path))
+    doc.close()
+    return pdf_path
+
+
+def test_keyless_build_runs_no_summaries_even_with_a_figure(tmp_path, monkeypatch):
+    """Figure presence must not switch summaries on.
+
+    ``include_summaries=True`` with no ``llm_callable`` produced nothing
+    through 0.24.0, because the only self-created client came from the
+    weak-ToC branch and this document does not need it. Captioning added a
+    second construction site, and gating summaries on the client's mere
+    existence let a single inserted image start one LLM call per ToC section --
+    unbounded by ``max_figure_captions`` and disclosed nowhere.
+    """
+    pdf_path = _figure_pdf(tmp_path)
+    client = _RecordingLlmClient()
+    monkeypatch.setattr(
+        DatasheetIndex, "_try_create_default_llm_client", lambda _self: client
+    )
+
+    with DatasheetIndex(str(pdf_path)) as index:
+        artifacts = index.build(
+            output_dir=str(tmp_path / "out"), include_summaries=True
+        )
+
+    assert "summary" not in client.calls, (
+        "a keyless build ran summaries; the self-created caption client must "
+        "not sanction them"
+    )
+    assert all(node.summary == "" for node in artifacts.nodes)
+
+
+def test_keyless_build_still_captions_its_figures(tmp_path, monkeypatch):
+    """The other side of the gate: captioning is the whole point of self-creation.
+
+    Fails if someone "fixes" the summaries leak by refusing to self-create a
+    client for captions at all.
+    """
+    pdf_path = _figure_pdf(tmp_path)
+    client = _RecordingLlmClient()
+    monkeypatch.setattr(
+        DatasheetIndex, "_try_create_default_llm_client", lambda _self: client
+    )
+
+    with DatasheetIndex(str(pdf_path)) as index:
+        artifacts = index.build(
+            output_dir=str(tmp_path / "out"), include_summaries=True
+        )
+
+    assert client.calls == ["caption"]
+    rasters = [f for f in artifacts.json_data["figures"] if f["kind"] == "raster"]
+    assert [f["caption_source"] for f in rasters] == ["llm"]
+    assert artifacts.figure_captions_pending == 0
+
+
+def test_a_supplied_client_does_run_summaries(tmp_path, monkeypatch):
+    """A caller who hands in a client asked for the LLM work explicitly."""
+    pdf_path = _figure_pdf(tmp_path)
+    client = _RecordingLlmClient()
+    monkeypatch.setattr(
+        DatasheetIndex,
+        "_try_create_default_llm_client",
+        lambda _self: pytest.fail("a supplied client must suppress construction"),
+    )
+
+    with DatasheetIndex(str(pdf_path)) as index:
+        artifacts = index.build(
+            output_dir=str(tmp_path / "out"),
+            include_summaries=True,
+            llm_callable=client,
+        )
+
+    assert "summary" in client.calls
+    assert any(node.summary == "a section summary" for node in artifacts.nodes)
+    assert "caption" in client.calls, "a supplied vision client must still caption"
