@@ -23,7 +23,13 @@ DEFAULT_MAX_PAGES = 2
 #: Document characters emitted. Raised from 2400 in 0.26.0: the old value cut
 #: the measured 4746-character front matter of the PSoC 6 in half and kept the
 #: half holding the legal footer rather than the specifications. Measured at
-#: 5000: no document in the local corpus is cut (2554, 2688 and 4746 chars).
+#: 5000 across 21 documents: 13 fit whole -- the widest, the PSoC 6 at 4746
+#: characters, uses 95% of the budget -- and 8 are cut, six TI datasheets
+#: (5332-7404 characters on pages 1-2) and two onsemi PCNs. It stays at 5000
+#: for what it keeps: on the cut documents the specifications are inside the
+#: budget and what falls past it is page 2's table of contents, revision
+#: history and copyright footer. A caller wanting the rest raises `max_chars`,
+#: and the NOTE line names the cut so the choice is informed.
 DEFAULT_MAX_CHARS = 5000
 
 # A line opening with a bullet glyph, or with a dash that is *not* followed by

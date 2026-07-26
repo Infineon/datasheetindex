@@ -77,15 +77,44 @@ The agent IS the LLM — let it reason about the preamble text directly.
 
 #### Decisions already settled by measurement
 
+Every number in this subsection comes from one **21-document, 1047-page,
+six-vendor corpus** (Diodes, Infineon, Microchip, Nexperia, onsemi, TI): 14
+datasheets and 7 product-change notices, 2 to 294 pages, swept with
+`build_front_matter` at the defaults and re-swept after every change to the
+extractor. The sweep also checks the invariants -- marker order, the framing
+formula, notes agreeing with `char_truncated` / `pages_omitted`, per-page
+`chars` matching the full extracted page -- and reports zero failures.
+
 **Skipping a cover or legal page is rejected.** Detecting front matter that
 is not front matter and dropping it was considered. The error is asymmetric:
 wrongly skipping page 1 of a real datasheet costs the general description and
 half the features -- the most valuable page in the document -- while wrongly
-keeping a cover page costs some tokens. Two documents is also not a corpus to
-calibrate against. So the library reports `preamble_pages` signals and the
-agent decides; a caller given the signals can implement skipping, but a
-library that skips forecloses the alternative. This is the same shape of
-decision as the table-engine note in `CLAUDE.md`: stability is the point.
+keeping a cover page costs some tokens. The 21-document corpus does separate
+the two classes -- all seven product-change notices score 0 bullets and no
+features heading on page 1, while 13 of the 14 datasheets have a page-1
+features heading -- but that is an argument for publishing the signals, not for
+acting on them: a library that skips forecloses the alternative, and a caller
+given the signals can implement skipping itself. So `preamble_pages` reports
+and the agent decides. This is the same shape of decision as the table-engine
+note in `CLAUDE.md`: stability is the point.
+
+**The 5000-character budget is measured, and it does cut 8 of the 21
+documents.** 13 fit whole; the widest of those, the PSoC 6 at 4746 characters
+over pages 1-2, uses 95% of the budget. The cut 8 are six of the seven TI
+datasheets, whose pages 1-2 run 5332-7404 characters, and two of the four
+onsemi product-change notices; between 170 and 2424 characters fall past the
+cut. The default stays at 5000 for what it *keeps*, not in spite of what it
+drops: on the TI documents the general description and the features list are
+inside the budget, and what the cut loses is page 2's table of contents, its
+revision history and its copyright footer -- on the TPS54331, lines like
+"Updated the inductor current equations for IL(RMS) and IL(PK)" and "Product
+Folder Links: TPS54331". Two honest exceptions: the MSP430F5529 also loses the
+tail of its general description and its Device Information package table, and
+the onsemi IPCN26979Z loses the continuation of a qualification-test table.
+Neither is silent -- the `=== NOTE: preamble truncated at 5000 characters ===`
+line names the cut, and `max_chars` is the caller's to raise -- and raising the
+default to cover them would spend the budget of every document on the tail of
+a few.
 
 **Unit density is deliberately not a signal.** A count of numeric-plus-unit
 tokens looks like the obvious fourth signal. A naive ASCII pattern undercounts
@@ -96,10 +125,10 @@ datasheets are full of: `8/A` from `CY8C62x8/A`, `4F` from `Cortex-M4F`. No
 count for a corrected pattern is quoted here on purpose: the pattern was never
 kept, so the figure cannot be re-derived, and an unreproducible number in a
 tracked doc is worse than none. Noisy in both directions, and `bullets` plus
-`has_features_heading` already separate the two measured documents on their own
-(34 and 43 bullets with a features heading each on the PSoC 6 front matter; 0
-and no heading on the TI PCN cover letter). Add it later if a consumer needs
-it, calibrated against part-number forms.
+`has_features_heading` already separate the two document classes across the
+corpus on their own (34 and 43 bullets with a features heading each on the PSoC
+6 front matter; 0 bullets and no heading on every product-change notice's page
+1). Add it later if a consumer needs it, calibrated against part-number forms.
 
 **A legal-vocabulary count was designed, built, measured and then not
 shipped.** A third signal, `legal_hits`, counted disclaimer vocabulary
