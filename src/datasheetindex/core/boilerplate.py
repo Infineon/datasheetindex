@@ -134,6 +134,38 @@ _BOILERPLATE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ),
 ]
 
+# Vocabulary that signals legal boilerplate in *running prose*. Used by the
+# front-matter `legal_hits` signal, and deliberately NOT shared with the
+# `legal` branch of `_BOILERPLATE_PATTERNS` above, which serves a different
+# question. That pattern is anchored to a whole title and several of its
+# branches require a qualifier (`product liability`, `important notices`),
+# because bare `liability` and `information` are common substantive section
+# titles. In prose the judgement inverts: a bare "liability" in a footer
+# sentence is exactly the signal. One list cannot serve both without either
+# weakening the title matcher -- which publishes a flag in the artifact -- or
+# under-counting prose. The partial duplication is the cheaper failure.
+_LEGAL_VOCABULARY: tuple[str, ...] = (
+    r"disclaimers?",
+    r"warrant(?:y|ies)",
+    r"liabilit(?:y|ies)",
+    r"liable",
+    r"trademarks?",
+    r"copyrights?",
+    r"patents?",
+    r"indemnif\w*",
+    r"terms\s+and\s+conditions",
+    r"limitations?\s+of\s+liability",
+    r"export\s+control",
+    r"subject\s+to\s+change\s+without\s+notice",
+    r"no\s+license",
+    r"as\s+is",
+    r"at\s+your\s+own\s+risk",
+)
+
+_LEGAL_PROSE_RE = re.compile(
+    r"\b(?:" + "|".join(_LEGAL_VOCABULARY) + r")\b", re.IGNORECASE
+)
+
 
 def _normalize_title(title: str) -> str:
     """Strip leading numbering/prefixes and trailing punctuation, lowercase."""
@@ -189,3 +221,12 @@ def _flag_recursive(nodes: list[TocNode], parent_category: str) -> None:
             node.boilerplate_category = ""
         if node.nodes:
             _flag_recursive(node.nodes, node.boilerplate_category)
+
+
+def count_legal_hits(text: str) -> int:
+    """Count legal-boilerplate vocabulary matches in running prose.
+
+    A count, not a verdict: a cover letter scores high and a features page
+    scores zero, but what to do about that is the caller's decision.
+    """
+    return len(_LEGAL_PROSE_RE.findall(text))
