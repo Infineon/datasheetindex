@@ -44,6 +44,15 @@ class StructuredLlmCallable(Protocol):
         """Run a JSON-schema constrained response request."""
 
 
+class VisionLlmCallable(Protocol):
+    """Optional image-input interface for figure captioning."""
+
+    def describe_image(
+        self, system: str, image_base64: str, *, media_type: str = "image/png"
+    ) -> str:
+        """Describe one image in a single line."""
+
+
 class _ResponsesOutput(Protocol):
     @property
     def output_text(self) -> str:
@@ -52,7 +61,12 @@ class _ResponsesOutput(Protocol):
 
 class _ResponsesApi(Protocol):
     def create(
-        self, *, model: str, instructions: str, input: str, **kwargs: object
+        self,
+        *,
+        model: str,
+        instructions: str = "",
+        input: str | list[dict[str, object]],
+        **kwargs: object,
     ) -> _ResponsesOutput:
         """Create an LLM response."""
 
@@ -207,6 +221,50 @@ class _ManagedLlmClient:
             max_output_tokens=max_output_tokens,
         )
 
+    def describe_image(
+        self, system: str, image_base64: str, *, media_type: str = "image/png"
+    ) -> str:
+        """Describe one image, as Responses-API structured input.
+
+        Sent at ``detail="high"``, reversing the ``"low"`` this call used
+        before. ``"low"`` downscales to 512x512 before the model ever sees
+        the image, which sounded like the safer choice for the
+        no-transcription rule -- the model cannot fabricate rows from detail
+        it never received. Measured on the PCN's page-5 table (20 rows, 9
+        columns) with an explicit "list the row headings verbatim, or say
+        you cannot read them" probe, it did exactly that instead: `"low"`
+        invented `Voltage`, `Wafer Base Supplier`, `Wafer Fab Location`,
+        `Package Fab (OSAT)`, `Package Type`, `Mold Compound Lot Number`, and
+        `Mold Compound Location`, and missed real rows -- confident
+        fabrication, not a safe blank. At `"high"` the same probe returned
+        19 of 20 row headings verbatim correct (the one miss: `Die
+        Composition` for `Bond Wire Composition`), including both supplier
+        rows the row-labels-first prompt exists to surface. Cost, read back
+        from `usage` on live responses rather than estimated: 120 input
+        tokens per image at `"low"`, 1074 at `"high"` -- about 9x, or roughly
+        2.4k to 21.5k input tokens per document at the default cap of 20. It
+        is paid once per document and then cached on disk by the existing
+        artifact reuse.
+        """
+        response = self._responses_api.create(
+            model=self._model,
+            instructions=system,
+            input=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": system},
+                        {
+                            "type": "input_image",
+                            "image_url": f"data:{media_type};base64,{image_base64}",
+                            "detail": "high",
+                        },
+                    ],
+                }
+            ],
+        )
+        return response.output_text
+
     def close(self) -> None:
         """Release the underlying HTTP client once the callable is no longer needed."""
         if self._finalizer.alive:
@@ -315,4 +373,17 @@ def get_structured_output_client(
     structured_json = getattr(llm_callable, "structured_json", None)
     if callable(structured_json):
         return cast(StructuredLlmCallable, llm_callable)
+    return None
+
+
+def get_vision_client(llm_callable: object | None) -> VisionLlmCallable | None:
+    """Return the vision interface when the callable exposes one.
+
+    Duck-typed rather than a change to ``LlmCallable``, following the
+    ``structured_json`` precedent: a third-party ``(system, user) -> str`` a
+    consumer injects today simply yields no captions instead of breaking.
+    """
+    describe_image = getattr(llm_callable, "describe_image", None)
+    if callable(describe_image):
+        return cast(VisionLlmCallable, llm_callable)
     return None

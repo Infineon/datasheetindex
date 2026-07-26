@@ -90,6 +90,51 @@ def other_toc_pdf(tmp_path):
 
 
 @pytest.fixture
+def figure_pdf(tmp_path):
+    """``toc_pdf`` plus one raster region, so captioning has a candidate.
+
+    ``toc_pdf`` carries no images at all, so every caption count taken on it is
+    trivially zero: a capability test written against it would pass whatever
+    the rule did. Same ToC, same body text, one image above ``min_area_pct``.
+    """
+    from datasheetindex.core.quality import assess_toc_quality
+    from datasheetindex.core.structure import build_tree, extract_toc
+    from datasheetindex.core.textfile import scan_pages
+
+    doc = pymupdf.open()
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 20, 20))
+    pix.set_rect(pix.irect, (10, 20, 30))
+    # A flat colour renders as one distinct colour and the blank-region guard
+    # (figure_captions._is_blank_region) skips it before dispatch; an accent
+    # stripe keeps this fixture below that threshold, like real content.
+    pix.set_rect(pymupdf.IRect(0, 0, 20, 1), (200, 200, 200))
+    for number in range(3):
+        page = doc.new_page(width=595, height=842)
+        writer = pymupdf.TextWriter(page.rect)
+        writer.append((72, 72), "Body text for this page of the datasheet")
+        writer.write_text(page)
+        if number == 1:
+            page.insert_image(pymupdf.Rect(50, 200, 545, 600), pixmap=pix)
+    doc.set_toc([[1, "Overview", 1], [1, "Electrical Characteristics", 2]])
+    pdf_path = tmp_path / "figures.pdf"
+    doc.save(str(pdf_path))
+
+    nodes = build_tree(extract_toc(doc), len(doc))
+    score = assess_toc_quality(nodes, len(doc)).score
+    rasters = [entry for entry in scan_pages(doc).figures if entry["kind"] == "raster"]
+    doc.close()
+    assert score >= TOC_FALLBACK_THRESHOLD, (
+        f"fixture ToC scores {score}, below the {TOC_FALLBACK_THRESHOLD} "
+        "threshold; it would be marked enrichment-incomplete and never reused"
+    )
+    assert len(rasters) == 1, (
+        f"fixture yields {len(rasters)} raster candidates, not 1; the caption "
+        "tests would assert nothing"
+    )
+    return pdf_path
+
+
+@pytest.fixture
 def not_editable(monkeypatch):
     """Force the editability probe False.
 
@@ -276,7 +321,12 @@ def test_build_options_to_dict_covers_every_dataclass_field():
     """A hand-written map could silently omit a future field from the cache
     key; ``asdict`` cannot -- pin that the two stay in lockstep."""
     options = _BuildOptions(
-        output_dir="out", output_stem=None, include_summaries=False, model=None
+        output_dir="out",
+        output_stem=None,
+        include_summaries=False,
+        model=None,
+        caption_figures=True,
+        max_figure_captions=20,
     )
 
     assert set(options.to_dict()) == {f.name for f in fields(_BuildOptions)}
@@ -781,6 +831,58 @@ def test_a_malformed_json_deliverable_triggers_deserialization_failed(
     assert again.json_path.exists()
 
 
+def test_a_carriage_return_in_the_extracted_text_still_reuses(
+    tmp_path, toc_pdf, not_editable, build_spy, monkeypatch, caplog
+):
+    """The reuse-level regression: a CR byte in the extracted text must not
+    permanently disable caching for the document that contains one.
+
+    Recorded (json/text) hashes come from ``sha256_file`` on the artifact as
+    written; a later reuse check re-reads the file and hashes the resulting
+    string with ``sha256_text``. Reading with ``Path.read_text()``'s default
+    universal-newline mode silently rewrites a lone ``\\r`` to ``\\n``, so the
+    two hashes can never agree again for any document whose extracted text
+    carries a CR byte -- the artifact fails validation and rebuilds on every
+    later call, forever. This hit 2 of 14 real datasheets in a live corpus run.
+
+    PyMuPDF's own text extraction always normalizes a literal CR to LF before
+    handing text back to Python -- confirmed directly: ``page.get_text()``
+    never returns a raw ``\\r`` no matter how it is inserted (``insert_text``,
+    ``TextWriter``, ``insert_textbox``) -- so no fixture PDF reaches this bug
+    through real extraction alone. The CR is injected one layer up, at
+    ``_extract_page_text``, the seam ``scan_pages`` composes into the text
+    artifact ``atomic_write_text`` puts on disk. Everything downstream of that
+    seam -- composing the artifact, writing it, recording its hash, and later
+    reading it back for the reuse check -- is the real production code path;
+    only the origin of the CR byte is synthetic.
+    """
+    from datasheetindex.core.textfile import _extract_page_text as original_extract
+
+    def extract_with_cr(page):
+        return original_extract(page) + "\rV\rCC = 3.3 V"
+
+    monkeypatch.setattr(
+        "datasheetindex.core.textfile._extract_page_text", extract_with_cr
+    )
+
+    out = tmp_path / "out"
+    with DatasheetTools(str(toc_pdf)) as tools:
+        first = tools.build_datasheet(output_dir=str(out))
+    assert first.text_path is not None
+    assert "\r" in first.text_path.read_bytes().decode("utf-8"), (
+        "the fixture must actually carry a CR on disk, or this test proves "
+        "nothing about the bug"
+    )
+
+    with caplog.at_level("DEBUG", logger="datasheetindex.tools.bound"):
+        with DatasheetTools(str(toc_pdf)) as tools:
+            second = tools.build_datasheet(output_dir=str(out))
+
+    assert len(build_spy) == 1, "a CR in the extracted text forced a rebuild"
+    assert "hash_mismatch" not in caplog.text
+    assert second.text_content == first.text_content
+
+
 def test_switching_back_to_a_prior_document_reuses_its_artifacts(
     tmp_path, toc_pdf, other_toc_pdf, not_editable, build_spy
 ):
@@ -831,3 +933,320 @@ def test_switching_back_to_a_prior_document_reuses_its_artifacts(
         "other.json",
         "other.txt",
     ]
+
+
+class _VisionStub:
+    """A default LLM client that is vision-capable and records its close.
+
+    Registers itself on construction, so a test can count how many clients one
+    ``build_datasheet`` call opened as well as whether each was closed. A
+    second ``close()`` appends twice and breaks the opened/closed balance,
+    which is what makes double-close visible rather than silent.
+    """
+
+    def __init__(self, opened: list, closed: list) -> None:
+        self._closed = closed
+        opened.append(self)
+
+    def __call__(self, _system, _user):
+        return "unused"
+
+    def describe_image(self, _system, _image_base64, *, media_type="image/png"):
+        return "a block diagram"
+
+    def close(self):
+        self._closed.append(self)
+
+
+def _keyless(monkeypatch, opened=None):
+    """Make ``create_llm_client`` fail the way a machine with no [llm] extra does.
+
+    ``conftest``'s hermetic env already strips the credentials, so this is
+    belt and braces for the credential path -- but it also gives a test a
+    construction counter, which is how "the probe was never built" becomes an
+    assertion rather than an assumption.
+    """
+
+    def fake_create(*_args, **_kwargs):
+        if opened is not None:
+            opened.append(1)
+        raise ValueError("no credentials")
+
+    monkeypatch.setattr("datasheetindex.llm.client.create_llm_client", fake_create)
+
+
+def _with_vision(monkeypatch, opened, closed):
+    """Make ``create_llm_client`` yield a vision-capable client."""
+    monkeypatch.setattr(
+        "datasheetindex.llm.client.create_llm_client",
+        lambda *_args, **_kwargs: _VisionStub(opened, closed),
+    )
+
+
+def test_keyless_build_with_pending_captions_is_reused(
+    tmp_path, figure_pdf, not_editable, build_spy, monkeypatch
+):
+    """The regression test for the DEFAULT installation.
+
+    A plain ``uv sync`` has no ``[llm]`` extra, so without this every user
+    rebuilds every document with a raster region, forever. Pending captions are
+    an environment fact, not a defect: they must not set
+    ``llm_enrichment_incomplete`` and must not block reuse.
+    """
+    _keyless(monkeypatch)
+    out = str(tmp_path / "out")
+
+    with DatasheetTools(str(figure_pdf)) as tools:
+        first = tools.build_datasheet(output_dir=out)
+    assert first.figure_captions_pending > 0
+    assert first.llm_enrichment_incomplete is False
+    assert first.llm_enrichment_notes == ()
+
+    with DatasheetTools(str(figure_pdf)) as tools:
+        second = tools.build_datasheet(output_dir=out)
+
+    assert len(build_spy) == 1, "a keyless machine must reuse, not rebuild"
+    assert second.figure_captions_pending == first.figure_captions_pending
+
+
+def test_keyless_single_instance_reuses_from_memory(
+    tmp_path, figure_pdf, not_editable, build_spy, monkeypatch
+):
+    """The memory gate's half of the reuse rule, isolated from the disk gate.
+
+    One instance, two calls, no capability appearing in between: the second
+    call must be served straight from ``self._artifacts`` without ever
+    reaching ``_reuse_from_disk``. ``test_keyless_build_with_pending_captions_
+    is_reused`` opens a second ``DatasheetTools`` for its second call, so it
+    only ever exercises the disk gate -- a regression confined to the memory
+    gate's own condition is invisible to it. On an editable install, or
+    whenever the sidecar could not be written, the memory gate is the *only*
+    gate, so it needs its own direct coverage.
+    """
+    _keyless(monkeypatch)
+    out = str(tmp_path / "out")
+
+    with DatasheetTools(str(figure_pdf)) as tools:
+        first = tools.build_datasheet(output_dir=out)
+        assert first.figure_captions_pending > 0
+
+        second = tools.build_datasheet(output_dir=out)
+
+    assert len(build_spy) == 1, "a keyless single instance must reuse, not rebuild"
+    assert second is first, "the memory gate did not serve the cached artifact"
+
+
+def test_capability_appearing_invalidates_the_artifact(
+    tmp_path, figure_pdf, not_editable, build_spy, monkeypatch, caplog
+):
+    """The other half of the rule: the sidecar gate reacts to the environment."""
+    _keyless(monkeypatch)
+    out = str(tmp_path / "out")
+    with DatasheetTools(str(figure_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+
+    opened, closed = [], []
+    _with_vision(monkeypatch, opened, closed)
+    with caplog.at_level("DEBUG", logger="datasheetindex.tools.bound"):
+        with DatasheetTools(str(figure_pdf)) as tools:
+            second = tools.build_datasheet(output_dir=out)
+
+    assert len(build_spy) == 2, "credentials appeared and nothing was rebuilt"
+    assert "figure_captions_pending" in caplog.text, "rebuilt for the wrong reason"
+    assert second.figure_captions_pending == 0
+    assert any(f.get("caption_source") == "llm" for f in second.json_data["figures"])
+    assert len(opened) == 1, "the disk gate and build() each built their own client"
+    assert len(closed) == 1, "the probe handed to build() was not closed exactly once"
+
+    with DatasheetTools(str(figure_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+    assert len(build_spy) == 2, "a fully captioned artifact must reuse"
+
+
+def test_in_memory_cache_obeys_the_capability_rule_on_one_instance(
+    tmp_path, figure_pdf, not_editable, monkeypatch
+):
+    """One instance, so this is the memory gate and not the disk gate.
+
+    Creating a second ``DatasheetTools`` here would silently retest the
+    sidecar path, which is a different rule in a different place.
+    """
+    _keyless(monkeypatch)
+    out = str(tmp_path / "out")
+
+    with DatasheetTools(str(figure_pdf)) as tools:
+        first = tools.build_datasheet(output_dir=out)
+        assert first.figure_captions_pending > 0
+
+        opened, closed = [], []
+        _with_vision(monkeypatch, opened, closed)
+        second = tools.build_datasheet(output_dir=out)
+
+    assert second is not first, "memory served a caption-less artifact"
+    assert second.figure_captions_pending == 0
+    assert any(f.get("caption_source") == "llm" for f in second.json_data["figures"])
+    assert len(opened) == 1, "memory -> disk -> rebuild built more than one client"
+    assert len(closed) == 1
+
+
+def test_pending_counts_eligible_candidates_only(
+    tmp_path, figure_pdf, not_editable, monkeypatch
+):
+    """Counting all candidates would rebuild forever on any machine with a key,
+    precisely because the caller asked for no captions."""
+    _keyless(monkeypatch)
+    out = str(tmp_path / "out")
+
+    with DatasheetTools(str(figure_pdf)) as tools:
+        off = tools.build_datasheet(output_dir=out, caption_figures=False)
+    assert off.figure_captions_pending == 0
+
+    with DatasheetTools(str(figure_pdf)) as tools:
+        zero = tools.build_datasheet(output_dir=out + "2", max_figure_captions=0)
+    assert zero.figure_captions_pending == 0
+
+
+def test_no_path_returns_holding_an_unclosed_probe(
+    tmp_path, figure_pdf, not_editable, build_spy, monkeypatch
+):
+    """memory -> disk -> rebuild opens exactly one client and closes it once."""
+    opened, closed = [], []
+    keyless = {"now": True}
+
+    def fake_create(*_args, **_kwargs):
+        if keyless["now"]:
+            raise ValueError("no credentials")
+        return _VisionStub(opened, closed)
+
+    monkeypatch.setattr("datasheetindex.llm.client.create_llm_client", fake_create)
+    out = str(tmp_path / "out")
+
+    with DatasheetTools(str(figure_pdf)) as tools:
+        first = tools.build_datasheet(output_dir=out)
+        assert first.figure_captions_pending > 0
+        keyless["now"] = False
+        # Memory rejects, disk rejects, and the rebuild runs: three stages that
+        # would each construct a client of their own without the resolver.
+        tools.build_datasheet(output_dir=out)
+        tools.build_datasheet(output_dir=out)
+
+    assert len(build_spy) == 2, "the capability rule did not fire; this proves nothing"
+    assert len(opened) == 1, f"{len(opened)} clients opened across one call"
+    assert opened == closed, "a probe leaked a connection pool"
+
+
+def test_probe_is_not_constructed_when_it_cannot_matter(
+    tmp_path, figure_pdf, not_editable, monkeypatch
+):
+    """Laziness: a build that can produce no captions must not touch the gateway."""
+    opened: list = []
+    _keyless(monkeypatch, opened)
+    out = str(tmp_path / "out")
+    with DatasheetTools(str(figure_pdf)) as tools:
+        tools.build_datasheet(output_dir=out, caption_figures=False)
+        tools.build_datasheet(output_dir=out, caption_figures=False)
+
+    assert opened == [], "probed despite nothing being pending"
+
+
+def test_a_default_client_captions_without_an_explicit_model(
+    tmp_path, figure_pdf, monkeypatch
+):
+    """One client, not two: ``build()`` self-creates for captions as well.
+
+    Before this, ``build()`` self-created only on the weak-ToC branch, so a
+    machine with credentials in ``.env`` and no explicit ``model`` never
+    captioned -- silently, and against what the tool description and the CLI
+    help both promise.
+    """
+    opened, closed = [], []
+    _with_vision(monkeypatch, opened, closed)
+    out = str(tmp_path / "out")
+
+    with DatasheetTools(str(figure_pdf)) as tools:
+        artifacts = tools.build_datasheet(output_dir=out)
+
+    assert artifacts.figure_captions_pending == 0
+    assert any(f.get("caption_source") == "llm" for f in artifacts.json_data["figures"])
+    assert len(opened) == 1, "captioning built a second client"
+    assert len(closed) == 1, "the self-created client was not closed exactly once"
+
+
+def test_the_figure_digest_is_identical_fresh_or_reused(
+    tmp_path, figure_pdf, not_editable, build_spy, monkeypatch
+):
+    """The manifest is derived from artifacts either cache gate may have served.
+
+    ``get_artifact_manifest`` reads ``json_data``, which on a reuse is parsed
+    from the bytes on disk rather than produced in memory. A digest that
+    differed between the two would make the agent's view of a document depend
+    on whether it happened to be the first caller, which no consumer could
+    detect and none should have to.
+    """
+    _keyless(monkeypatch)
+    out = str(tmp_path / "out")
+
+    with DatasheetTools(str(figure_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+        fresh = tools.get_artifact_manifest()["figures"]
+
+    with DatasheetTools(str(figure_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+        reused = tools.get_artifact_manifest()["figures"]
+
+    assert len(build_spy) == 1, "the second call rebuilt; this proves nothing"
+    assert isinstance(fresh, dict)
+    assert fresh.get("raster") == 1, "the fixture's raster region is missing"
+    assert reused == fresh
+
+
+def test_a_rejected_cap_does_not_destroy_a_valid_sidecar(
+    tmp_path, figure_pdf, not_editable, build_spy, monkeypatch
+):
+    """Validate before invalidating.
+
+    ``build()`` rejects a bad ``max_figure_captions`` too -- but only after
+    ``_build_or_reuse`` has already removed the sidecar to make room for the
+    rebuild, so a call that could never succeed used to cost the document its
+    cache on the way to raising.
+    """
+    _keyless(monkeypatch)
+    out = str(tmp_path / "out")
+
+    with DatasheetTools(str(figure_pdf)) as tools:
+        artifacts = tools.build_datasheet(output_dir=out)
+        assert artifacts.json_path is not None
+        sidecar = sidecar_path(out, artifacts.json_path.stem)
+        assert sidecar.exists()
+
+        with pytest.raises(ValueError, match="max_figure_captions"):
+            tools.build_datasheet(output_dir=out, max_figure_captions=-1)
+
+        assert sidecar.exists(), "a rejected call removed a valid sidecar"
+
+    with DatasheetTools(str(figure_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+
+    assert len(build_spy) == 1, "the surviving sidecar was not usable"
+
+
+def test_the_probe_does_not_upgrade_an_empty_model_to_the_default(monkeypatch):
+    """The gate and the rebuild must resolve the same model, including ``""``.
+
+    Truthiness here made ``model=""`` probe a *default* vision-capable model
+    while the rebuild passed ``""`` straight through, whose caption calls all
+    fail: the artifact came back incomplete, the gate saw capability, and the
+    document rebuilt forever.
+    """
+    from datasheetindex.tools.bound import _VisionResolver
+
+    seen: list[dict] = []
+
+    def fake_create(**kwargs):
+        seen.append(kwargs)
+        raise ValueError("no credentials")
+
+    monkeypatch.setattr("datasheetindex.llm.client.create_llm_client", fake_create)
+
+    assert _VisionResolver("").get() is None
+    assert seen == [{"model": ""}]

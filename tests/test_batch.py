@@ -107,6 +107,58 @@ def test_multiple_pdfs(tmp_path):
         assert artifact.text_path is not None and artifact.text_path.exists()
 
 
+def test_build_batch_forwards_caption_options(monkeypatch, tmp_path):
+    """caption_figures/max_figure_captions must reach DatasheetIndex.build,
+    the same way include_summaries and llm_callable already do."""
+    captured_kwargs: list[dict[str, object]] = []
+
+    class _FakeIndex:
+        def __init__(self, pdf_path: str) -> None:
+            self.pdf_path = pdf_path
+
+        def _output_stem(self) -> str:
+            return Path(self.pdf_path).stem
+
+        def build(
+            self,
+            output_dir: str = "output",
+            include_summaries: bool = False,
+            llm_callable=None,
+            output_stem: str | None = None,
+            caption_figures: bool = True,
+            max_figure_captions: int = 20,
+        ) -> DatasheetArtifacts:
+            captured_kwargs.append(
+                {
+                    "caption_figures": caption_figures,
+                    "max_figure_captions": max_figure_captions,
+                }
+            )
+            stem = output_stem or self._output_stem()
+            out = Path(output_dir)
+            out.mkdir(parents=True, exist_ok=True)
+            json_path = out / f"{stem}.json"
+            text_path = out / f"{stem}.txt"
+            json_path.write_text(self.pdf_path, encoding="utf-8")
+            text_path.write_text(self.pdf_path, encoding="utf-8")
+            return DatasheetArtifacts(json_path=json_path, text_path=text_path)
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("datasheetindex.batch.DatasheetIndex", _FakeIndex)
+
+    result = build_batch(
+        [str(tmp_path / "a.pdf")],
+        output_dir=str(tmp_path / "out"),
+        caption_figures=False,
+        max_figure_captions=3,
+    )
+
+    assert result.success_count == 1
+    assert captured_kwargs == [{"caption_figures": False, "max_figure_captions": 3}]
+
+
 def test_batch_result_properties():
     result = BatchResult()
     assert result.total == 0
@@ -130,8 +182,10 @@ def test_duplicate_stems_get_unique_output_names(monkeypatch, tmp_path):
             include_summaries: bool = False,
             llm_callable=None,
             output_stem: str | None = None,
+            caption_figures: bool = True,
+            max_figure_captions: int = 20,
         ) -> DatasheetArtifacts:
-            _ = include_summaries, llm_callable
+            _ = include_summaries, llm_callable, caption_figures, max_figure_captions
             stem = output_stem or self._output_stem()
             out = Path(output_dir)
             out.mkdir(parents=True, exist_ok=True)

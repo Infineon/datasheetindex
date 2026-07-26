@@ -47,8 +47,30 @@ def sha256_text(text: str) -> str:
     Used to hash artifact content *after it has been read*, which is what makes
     a straddled or crash-mixed pair of deliverables fail validation rather than
     be served as a coherent artifact.
+
+    The caller must have read that text with newline translation disabled
+    (``Path.read_text(..., newline="")``), or this digest silently stops
+    agreeing with ``sha256_file`` of the same path. A plain ``read_text()``
+    opens in universal-newline mode and rewrites ``\\r\\n`` and lone ``\\r``
+    bytes to ``\\n`` on the way in; text this function is meant to compare
+    against a raw-byte hash must reach it unmodified. Use
+    :func:`read_artifact_text` to read artifact files for exactly this reason.
     """
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def read_artifact_text(path: str | Path) -> str:
+    """Read an artifact file's text for hashing or parsing, byte-faithfully.
+
+    ``newline=""`` disables universal-newline translation, so the returned
+    string encodes back to exactly the bytes on disk. Without it, a CR byte
+    in the file (``\\r\\n`` or a lone ``\\r``) is silently rewritten to ``\\n``,
+    and ``sha256_text`` of the result can never again agree with
+    ``sha256_file`` of the same path -- the artifact would fail reuse
+    validation forever. Every read of a deliverable that is later hashed and
+    compared against a recorded ``sha256_file`` value must go through this.
+    """
+    return Path(path).read_text(encoding="utf-8", newline="")
 
 
 def atomic_write_text(path: Path, content: str) -> None:
@@ -59,11 +81,17 @@ def atomic_write_text(path: Path, content: str) -> None:
     replace stays on one filesystem. The temp name is unique per writing thread
     so concurrent writers to the same destination do not share a temp path and
     truncate each other's content.
+
+    Written with ``newline=""`` so ``content`` lands on disk byte-for-byte: the
+    default universal-newline write mode only rewrites bytes when
+    ``os.linesep`` is not ``"\\n"``, which is a no-op on Linux/macOS but would
+    turn a lone ``\\n`` into ``\\r\\n`` on Windows, corrupting a hash taken of
+    ``content`` before the write.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_name(f"{path.name}.{os.getpid()}.{uuid4().hex}.tmp")
     try:
-        temp_path.write_text(content, encoding="utf-8")
+        temp_path.write_text(content, encoding="utf-8", newline="")
         os.replace(temp_path, path)
     except BaseException:
         temp_path.unlink(missing_ok=True)
@@ -127,6 +155,11 @@ class ArtifactRecord:
     toc_quality: dict[str, object]
     llm_enrichment_incomplete: bool = False
     llm_enrichment_notes: tuple[str, ...] = ()
+    #: Candidates this build could not caption because no vision-capable
+    #: client existed. Not a fingerprint field: it records what the build
+    #: *achieved*, and the caller compares it against the environment it is
+    #: running in now rather than for equality. See ``reuse_blocker``.
+    figure_captions_pending: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -141,6 +174,7 @@ class ArtifactRecord:
             "toc_quality": dict(self.toc_quality),
             "llm_enrichment_incomplete": self.llm_enrichment_incomplete,
             "llm_enrichment_notes": list(self.llm_enrichment_notes),
+            "figure_captions_pending": self.figure_captions_pending,
         }
 
     @classmethod
@@ -150,6 +184,13 @@ class ArtifactRecord:
         Raises on a missing key rather than defaulting: a sidecar that does not
         carry a fingerprint field cannot be validated against it, and guessing
         would turn a bug into a false cache hit.
+
+        ``figure_captions_pending`` is the one exception, and for the reason
+        that rule is written: it is not a fingerprint. A sidecar written before
+        the field existed is a valid record of a build that captioned nothing,
+        and reading it as 0 reproduces exactly the reuse behaviour that
+        artifact already had. Requiring it would instead log a diverged-shape
+        warning on every pre-existing sidecar.
         """
         artifacts = data["artifacts"]
         return cls(
@@ -164,6 +205,7 @@ class ArtifactRecord:
             toc_quality=dict(data["toc_quality"]),
             llm_enrichment_incomplete=bool(data["llm_enrichment_incomplete"]),
             llm_enrichment_notes=tuple(data["llm_enrichment_notes"]),
+            figure_captions_pending=int(data.get("figure_captions_pending", 0)),
         )
 
 
@@ -227,6 +269,11 @@ def reuse_blocker(
     rather than narrowing it. Editability is not checked here either: it is a
     property of the process, not of a record, so the caller short-circuits on it
     first.
+
+    ``figure_captions_pending`` is deliberately **not** checked here. Deciding
+    on it requires probing whether vision capability exists now, which is I/O
+    and would put a client construction inside a pure function. The caller
+    checks it after every cheap check has already passed.
     """
     if record.datasheetindex_version != running_version:
         return "version_changed"

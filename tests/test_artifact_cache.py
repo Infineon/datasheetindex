@@ -15,6 +15,7 @@ from datasheetindex.core.artifact_cache import (
     ArtifactRecord,
     atomic_write_text,
     is_editable_install,
+    read_artifact_text,
     read_sidecar,
     remove_sidecar,
     reuse_blocker,
@@ -59,6 +60,36 @@ def test_sha256_text_is_utf8():
 
     assert sha256_text(payload) == expected
     assert sha256_text(payload) != hashlib.sha256(payload.encode("latin-1")).hexdigest()
+
+
+def test_read_artifact_text_hashes_the_same_as_the_raw_bytes(tmp_path):
+    """The regression: a carriage return must not desync the two hash paths.
+
+    ``sha256_file`` hashes an artifact's raw bytes at write time; a later reuse
+    check reads the same file back and hashes the resulting string with
+    ``sha256_text``. A plain ``Path.read_text()`` opens in universal-newline
+    mode and silently rewrites a lone ``\r`` (and ``\r\n``) to ``\n``, so
+    hashing what it returns can never again agree with ``sha256_file`` of the
+    same path -- the artifact fails reuse validation forever. This is exactly
+    what a document whose extracted text carries a CR byte hit in production.
+    ``read_artifact_text`` exists to close that gap; this pins that it does.
+    """
+    target = tmp_path / "ds.txt"
+    content = "--- PAGE 1 ---\nV\rCC = 3.3 V\n"
+    atomic_write_text(target, content)
+
+    file_hash = sha256_file(target)
+
+    # The trap: reading with newline translation on desyncs the two hashes.
+    translated = target.read_text(encoding="utf-8")
+    assert "\r" not in translated, "the fixture must contain an untranslated CR"
+    assert sha256_text(translated) != file_hash, (
+        "a plain read_text() no longer strips the CR; this fixture stopped "
+        "exercising the trap"
+    )
+
+    # The fix: read_artifact_text must stay in agreement with sha256_file.
+    assert sha256_text(read_artifact_text(target)) == file_hash
 
 
 def test_atomic_write_text_creates_file(tmp_path):
@@ -352,6 +383,28 @@ def test_read_sidecar_warns_on_bad_shape(tmp_path, caplog):
         assert read_sidecar(path) is None
 
     assert any(entry.levelname == "WARNING" for entry in caplog.records)
+
+
+def test_a_sidecar_written_before_figure_captions_still_reads(tmp_path, caplog):
+    """Back-compat: the pending count is an outcome, and outcomes may be absent.
+
+    Every fingerprint field is required, because a record that does not carry
+    one cannot be validated against it. ``figure_captions_pending`` is not a
+    fingerprint -- it is compared against the current environment -- so an
+    artifact from before it existed reads as 0 rather than warning about a
+    diverged shape.
+    """
+    path = tmp_path / f"ds{SIDECAR_SUFFIX}"
+    payload = make_record().to_dict()
+    del payload["figure_captions_pending"]
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with caplog.at_level("WARNING"):
+        record = read_sidecar(path)
+
+    assert record is not None
+    assert record.figure_captions_pending == 0
+    assert caplog.records == []
 
 
 def test_remove_sidecar_is_silent_when_absent(tmp_path):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, NamedTuple, NotRequired, TypedDict
 
@@ -13,6 +14,11 @@ from datasheetindex.core._textmatch import (
     _normalize_token,
     _TokenSpan,
     _translate_search_text,
+)
+from datasheetindex.core.figures import (
+    DEFAULT_MIN_AREA_PCT,
+    caption_entries,
+    raster_regions,
 )
 
 if TYPE_CHECKING:
@@ -210,20 +216,60 @@ def _extract_page_text(page: pymupdf.Page) -> str:
     return "\n".join(b[_BLOCK_TEXT] for b in ordered)
 
 
-def generate_text(doc: pymupdf.Document) -> str:
-    """Generate page-matched text with PAGE markers.
+@dataclass(frozen=True)
+class PageScan:
+    """One pass over the document: the text file plus the figure index.
 
-    Each page's text is preceded by a ``--- PAGE N ---`` marker where N is
-    1-indexed (matching human PDF page numbers).
+    ``text`` is byte-identical to what ``generate_text`` produced before this
+    type existed; the seven stubs in ``tests/test_index.py`` depend on that.
+    """
+
+    text: str
+    figures: list[dict[str, object]]
+    excluded_below_min_area: int
+
+
+def scan_pages(
+    doc: pymupdf.Document, *, min_area_pct: float = DEFAULT_MIN_AREA_PCT
+) -> PageScan:
+    """Extract page-matched text and the figure index in one traversal.
+
+    Folded into the existing per-page pass rather than run as a second sweep:
+    ``get_image_info()`` still costs what it costs, but reopening and
+    re-loading every page object does not have to be paid twice.
     """
     parts: list[str] = []
+    figures: list[dict[str, object]] = []
+    excluded = 0
+
     for page_idx in range(len(doc)):
         page_num = page_idx + 1
         page = doc[page_idx]
         text = _extract_page_text(page)
         parts.append(f"--- PAGE {page_num} ---")
         parts.append(text)
-    return "\n".join(parts)
+
+        page_figures, page_excluded = raster_regions(page, min_area_pct=min_area_pct)
+        figures.extend(page_figures)
+        excluded += page_excluded
+        # Captions read the column-aware text, never page.get_text().
+        figures.extend(caption_entries(page_num, text))
+
+    return PageScan(
+        text="\n".join(parts),
+        figures=figures,
+        excluded_below_min_area=excluded,
+    )
+
+
+def generate_text(doc: pymupdf.Document) -> str:
+    """Generate page-matched text with PAGE markers.
+
+    Retained wrapper: the page-matched text file alone. Each page's text is
+    preceded by a ``--- PAGE N ---`` marker where N is 1-indexed (matching
+    human PDF page numbers).
+    """
+    return scan_pages(doc).text
 
 
 def extract_section_text(text_content: str, start_page: int, end_page: int) -> str:

@@ -210,12 +210,200 @@ We benchmarked table detection across three libraries (PyMuPDF, pdfplumber, pymu
 
 **Decision: Use PyMuPDF only.** The `has_tables` flag is just a navigation hint — the agent reads the actual section text and can judge for itself whether a table is present. When text looks garbled, the agent calls `inspect_page`. It doesn't need a perfectly accurate metadata flag to make that decision.
 
-**No `has_figures` field.** No library reliably detects vector diagrams. The agent infers figure presence from section titles ("Block diagram", "Pin configuration") and text references ("see Figure X"), which is more reliable than any programmatic detection.
+**Raster figures are enumerated exactly; vector figures still are not.** `get_image_info()` reads the PDF's image XObjects and returns real bboxes and pixel dimensions -- nothing is inferred, so there is no false-positive rate to calibrate for that half. The top-level `figures` array (see "Figure indexing" below) is how the agent learns a raster region exists. Clustering vector *drawing operations* to find figures remains unreliable and out of scope -- 232 vector drawings on a pinout page could be one diagram or fifty -- but that blind spot matters less than it sounds: vector figures leak their text (note text and pin labels extract normally), so the agent is not blind there, only unaware of the layout.
 
 **What's optionally included (LLM-powered, debatable):**
 - `summary` per node — useful for very large datasheets (300+ pages) where the agent needs help deciding which of 50 sections to look at. For smaller datasheets (< 100 pages), the section titles alone are usually descriptive enough. This should be configurable.
 
 **The decision on summaries:** If the ToC is high quality (descriptive titles, proper hierarchy, correct page numbers), summaries add cost without much value. If the ToC is sparse or uses cryptic section numbers, summaries become essential. The library should score ToC quality and recommend whether summaries are worth generating.
+
+### Figure indexing
+
+A second top-level key, `figures`, sits alongside `toc` -- page-keyed rather
+than node-attached, since the geometry is a page property computed in the same
+pass that produces the text file (`core/figures.py`, folded into
+`core/textfile.py:scan_pages`). It carries two entry kinds, and they are never
+merged into one, even when a raster region and a caption share a page:
+associating them by proximity is a heuristic that can name the wrong figure,
+and two honest, separate entries cannot mislead the way a wrong association
+would.
+
+- **`"raster"`** -- one image XObject placement per raster region at or above
+  `min_area_pct` (a module constant, default 1.0%; smaller placements are
+  dropped as decorative and counted in the sibling `figures_excluded` key
+  rather than silently discarded). `region` is the primary field: normalized
+  `0.0-1.0` and clipped to the visible page, in exactly the
+  `{"top", "bottom", "left", "right"}` shape `inspect_page(region=...)`
+  consumes. That shared contract is deliberate -- a `figures` entry's `region`
+  can be handed to `inspect_page` unmodified, by the agent or by the VLM
+  captioning pass below, with no coordinate math and no risk of a silent wrong
+  division. `bbox` (raw PDF points) and `pixels` are carried alongside for
+  consumers that need absolute geometry. `page_text_chars` is denormalized
+  onto the entry as the "is the agent blind here" signal: a large
+  `page_area_pct` beside a small `page_text_chars` marks a page whose
+  substance a picture is withholding from the text layer. `xref` names the
+  image XObject the placement draws, which is what makes two entries
+  recognizable as the same picture -- see the captioning dedup below.
+- **`"caption"`** -- a `Figure N` / `Fig. N` mention recognized in the
+  column-aware page text, in either of two forms (same-line with a mandatory
+  `.`/`:` separator, or split across two lines), including section-relative
+  numbering (`"10-1"`). `figure_number` is always a string, never coerced to
+  an int -- it is an identifier to display and match on, not an arithmetic
+  value, and a union type would cost every consumer a branch for no benefit.
+
+Every raster region above the threshold is also a candidate for VLM
+captioning (`caption_source: "llm"`), which fills in a short description for
+regions the text layer never named -- see `llm/figure_captions.py` and the
+README for the cost, the cap, and the default-on behaviour. The caption names
+the kind of content and then, immediately, its most identifying labels: for a
+table, its row labels first and then its column headings; for a plot, its
+axes and plotted quantity. Row-labels-first is deliberate, not stylistic --
+see the measurement below.
+
+**The unit of captioning is a picture, not a placement.** Placements sharing
+an `xref` are grouped (`llm/figure_captions.py:_image_groups`); the largest is
+rendered and described, every placement in the group receives that caption,
+and `max_figure_captions` bounds groups. This is exact, not a heuristic: a PDF
+XObject's content cannot vary between placements, only its scale, so one
+description cannot be wrong for another placement of it. Without the grouping
+a vendor logo in a page header is a fresh figure on every page -- on onsemi's
+four-page product-change notices it was the *only* region above the area
+threshold, so the document spent its entire caption budget describing one logo
+four times, in four slightly different wordings. An `xref` of 0 or missing is
+**not** an identity and never groups; treating unknown as equal would give one
+picture's caption to every unidentified figure in a document, which is the
+failure mode that produces confident nonsense rather than a visible error.
+
+**The agent is handed a digest, not the array.** `build_datasheet`'s manifest
+(`tools/bound.py:get_artifact_manifest`) carries a bounded `figures` block --
+`total` / `raster` / `captioned` counts, plus one `{page, figures, caption}`
+row per page holding figures in ascending page order, that row's caption
+being the page's **largest-area** captioned entry (by `page_area_pct`), not
+merely the first one in document order -- see the digest-selection fix below.
+The array itself stays in the ToC JSON: the manifest is returned on every
+build, and a scanned document can hold one full-page raster per page, so the
+digest is capped at 40 rows with one 350-character caption each
+(`pages_with_figures` and `truncated` disclose what was dropped). Carrying
+*something* is not optional -- the MCP agent receives only the manifest, and
+per the WSL namespace gotcha `json_path` may not even be readable from where
+the agent runs, so a digest is the difference between the agent knowing a
+page holds a figure and never learning the figure index exists.
+
+#### Decisions already settled by measurement
+
+Every number below comes from a **14-document, 998-page, 5-vendor corpus** (TI,
+Infineon, Microchip, Nexperia, Diodes) measured 2026-07-25, plus a live run
+against an OpenAI-compatible gateway. They are recorded because each is a
+decision a future reader would otherwise redo.
+
+- **`pymupdf.layout` was evaluated for figure discovery and rejected on cost.**
+  Warm, after model load: 1.28 s/page over 5 pages, 0.89 s/page over 20 --
+  extrapolating to **~119 s for the 134-page PSoC 6 against a ~8 s build**,
+  roughly 15x, in the default path, for every document. It also requires the
+  ~49 MB `[layout]` extra a plain `uv sync` excludes, brings the process-global
+  hook hazard documented in `core/engine.py`, and unlike `get_image_info()` it is
+  a model with an error rate rather than an exact enumeration. `get_image_info()`
+  is exact and free.
+- **A per-page `describe_figure(page)` tool was proposed and rejected, and the
+  analogy that motivates it is seductive.** `extract_table_markdown` earns its
+  layout-engine cost by giving the agent something it *cannot* produce itself: an
+  exact table from the text layer, no vision error, few tokens. Layout
+  classification gives it something *weaker* than looking -- an agent already
+  holding a page has `inspect_page`, and its own vision beats a DocLayNet label.
+  It also serves the wrong axis: discovery is a breadth question ("which of 134
+  pages hides something?") that a per-page call cannot answer without sweeping
+  every page, which is the 119 s above.
+- **The caption pattern's mandatory separator is load-bearing.** Requiring
+  punctuation after the figure number is what divides **404 real captions from 70
+  prose lines** across 998 pages, with no scoring and no heuristics. Without it,
+  "Figure 6-2 shows the structure..." parses as a caption. Do not relax it.
+- **Section-relative numbering is the common case, not an edge case.**
+  `Figure 12` alone matched captions in only **2 of 14** documents; widening to
+  `(\d+(?:[-–]\d+)?)` to admit `Figure 10-1` reached **11 of 14**. The same-line
+  section-relative form is the corpus's most frequent, 404 of 492 caption lines,
+  present in 9 of 14 documents. This is why `figure_number` is always a string.
+- **`min_area_pct = 1.0` is not defensive dead code.** It excludes **73 of 168
+  placements (43%)** across the corpus and changes the output in 4 of 14
+  documents -- mostly vendor logos repeated on every page.
+- **Region clipping is exercised by real data.** **9 placements** in the corpus
+  extend past the page edge. `inspect_page` *raises* on a coordinate outside
+  `0.0-1.0`, so clipping to `page.rect` before normalizing is what keeps the
+  coordinate contract that makes `figures` directly usable as `inspect_page`
+  input.
+- **No exact caption source exists in practice.** Of the 14 documents, **1 is a
+  tagged PDF** -- and it carries zero `/Figure` structure elements -- and **none**
+  carries a List of Figures. Reading structure instead of text is not an
+  available shortcut.
+- **Serial render, concurrent dispatch, 4 workers.** PyMuPDF is not thread-safe
+  for concurrent page work, so rendering stays serial; only the network calls are
+  parallel. Live on the PSoC 6 at the default cap of 20: serial dispatch ~119 s
+  (~6 s/call), 4-worker concurrent ~13 s. Results are applied in **candidate
+  order, never completion order** -- artifact bytes are fingerprinted for reuse,
+  so completion-order output would be non-deterministic and would silently defeat
+  the cache.
+- **Regions render at `detail="high"` and are now sent at `detail: "high"` too,
+  reversing the earlier `detail: "low"` choice on measured evidence of
+  fabrication rather than on a hunch.** `"low"`
+  downscales to 512x512 before the model ever sees the image, which reads as the
+  safer choice for the no-transcription rule -- the model cannot fabricate rows
+  from detail it never received. Measured on the motivating PCN's page-5
+  "Product Attributes" table (20 rows, 9 columns) with an explicit "list the row
+  headings verbatim, or say you cannot read them" probe, it did exactly the
+  opposite: `"low"` invented `Voltage`, `Wafer Base Supplier`, `Wafer Fab
+  Location`, `Package Fab (OSAT)`, `Package Type`, `Mold Compound Lot Number`,
+  and `Mold Compound Location` -- none of which are real rows -- and missed real
+  ones, including both supplier rows. At `"high"` the same probe returned 19 of
+  20 row headings verbatim correct (the one error: `Die Composition` for `Bond
+  Wire Composition`), including both supplier rows and the grey section rows
+  `Die Attributes` and `Package Attributes`. A prompt asking for row labels at a
+  resolution where they are illegible does not get a safe "I cannot read this"
+  -- it gets confident fabrication, so the resolution is part of the
+  anti-fabrication design, not independent of it.
+- **The per-image token cost is now measured, not documented from a spec
+  sheet.** A separate token-*counting* endpoint on the validation gateway
+  returns `405 Method Not Allowed`, which is why an earlier note here called the
+  cost unconfirmed -- but `usage` on a real response works, and gave real
+  numbers: **120 input tokens per image at `detail: "low"`, 1074 at
+  `detail: "high"`** -- about 9x, or roughly 2.4k to 21.5k input tokens per
+  document at the default cap of 20. Paid once per document, then cached on disk
+  by the existing artifact reuse.
+- **Row labels before column headings is load-bearing, not a style choice.**
+  With column headings named first in the prompt, the table's identifying words
+  (the supplier names) landed at character 442 of the reply on the PCN's page-5
+  table -- past the digest's caption clip. Moving row labels first moved the
+  same hook (`Mount Compound Supplier`) to character 310, inside the clip. The
+  digest clip and the prompt's label ordering are therefore one design, not two
+  independent choices.
+- **A single illustration can arrive as many overlapping raster XObjects, and
+  this is now measured, not merely suspected.** `ti-tlv9061.pdf` page 46's
+  mechanical package drawing is exported as **17** overlapping raster
+  placements, several of them empty fragments -- confirmed by a live
+  corpus run where one such fragment was blank white space captioned as "a
+  schematic diagram ... optocoupler component" (fixed by the blank-region
+  guard in `llm/figure_captions.py`; see the CHANGELOG). Clustering
+  fragments into one figure entry remains out of scope -- the same
+  ambiguity that keeps vector-drawing clustering unreliable applies here --
+  but the consequence is worth disclosing rather than leaving for the next
+  reader to rediscover: a fragmented figure inflates `figures` counts on
+  that page well beyond the visual figure count, and each fragment is a
+  separate candidate that can consume a `max_figure_captions` slot the cap
+  intended for a distinct figure elsewhere on the document.
+- **The digest's per-page caption picked the first captioned entry in array
+  order, which is the topmost figure on the page -- a bug, found on the same
+  PCN.** Page 5 carries a 7.5%-of-page product-label photo above a
+  25.5%-of-page "Product Attributes" table, in that document order. Under
+  first-in-order selection the digest told the agent page 5 was "a photo of a
+  product label" and the table -- the one holding the answer to "does this
+  document mention SUMITOMO" -- was silently dropped, even though `SUMITOMO`
+  appears 13 times in that table's `Mount Compound Supplier` and `Mold Compound
+  Supplier` rows and a text search for it correctly returns zero hits (the word
+  is pixels). The fix selects each row's caption from the page's **largest-area**
+  captioned entry instead (`page_area_pct`), which is already the signal that
+  ranks caption candidates for the `max_figure_captions` cap, so this is a
+  consistent selection rule rather than a new heuristic. Ties keep whichever
+  entry the scan reaches first in the array's own document order -- never a
+  dict or set's -- so the digest stays byte-stable across runs. On the PCN this
+  changes exactly one row (page 5).
 
 ### Deliverable 2: Page-Matched Text File
 
@@ -451,28 +639,44 @@ class DatasheetIndex:
         self.pdf_path = pdf_path
         self.doc = pymupdf.open(pdf_path)
 
-    def build(self, output_dir: str = "output",
+    def build(self, output_dir: str | None = None,
               include_summaries: bool = False,
-              llm_callable: Callable = None) -> DatasheetArtifacts:
+              llm_callable: Callable = None,
+              output_stem: str | None = None,
+              caption_figures: bool = True,
+              max_figure_captions: int = 20) -> DatasheetArtifacts:
         """Build the enriched ToC JSON and page-matched text file.
 
         Args:
-            output_dir: Directory to write output files.
+            output_dir: Directory to write output files. None resolves to
+                       $DATASHEETINDEX_OUTPUT_DIR or a UID-namespaced tempdir.
             include_summaries: Whether to generate LLM summaries per section.
                               Recommended only for large (300+ page) datasheets
                               or datasheets with poor ToC quality.
-            llm_callable: Optional LLM function for ToC fallback and summaries.
+            llm_callable: Optional LLM function for ToC fallback, summaries,
+                         and figure captioning.
                          Signature: (system: str, user: str) -> str
-                         If not provided, low-quality ToC fallback can still use
-                         the default client when credentials are available.
+                         If not provided, low-quality ToC fallback and figure
+                         captioning can still use a default client when
+                         credentials are available.
+            output_stem: Optional override for the deliverables' filename stem.
+            caption_figures: Name raster figure regions with a vision model,
+                            bounded by max_figure_captions. Default True, but
+                            it is a no-op without a vision-capable client --
+                            unlike include_summaries there is no client guard.
+            max_figure_captions: Per-document ceiling on VLM caption calls.
+                                 Must be an integer >= 0; raises ValueError
+                                 otherwise.
 
         Returns:
             DatasheetArtifacts with .json_path, .text_path, and in-memory data.
         """
         filename = Path(self.pdf_path).stem
 
-        # Step 1: Generate page-matched text file (needed by all later steps)
-        text_content = generate_text(self.doc)
+        # Step 1: Generate the page-matched text file and the figure index in
+        # one pass (the text is needed by all later steps)
+        scan = scan_pages(self.doc)
+        text_content = scan.text
 
         # Step 2: Generate preamble (pages 1-2 raw text, ~600 tokens)
         preamble = generate_preamble(self.doc)
@@ -493,12 +697,25 @@ class DatasheetIndex:
         # Step 5: Assess ToC quality
         toc_quality = assess_toc_quality(tree, len(self.doc))
 
+        # One client, shared by three branches -- but WHICH branch created it
+        # is recorded, because summaries are gated on that (see
+        # `_SUMMARY_CLIENT_ORIGINS`): a client self-created only to caption
+        # figures must not turn `include_summaries=True` into per-section calls.
         active_llm_callable = llm_callable
-        if active_llm_callable is None and toc_quality.score < 0.3:
+        llm_client_origin = "caller" if llm_callable is not None else None
+        needs_toc_fallback = toc_quality.score < 0.3
+        has_caption_candidates = eligible_caption_count(scan.figures, ...) > 0
+        if active_llm_callable is None and (
+            needs_toc_fallback or has_caption_candidates
+        ):
             active_llm_callable = self._try_create_default_llm_client()
+            if active_llm_callable is not None:
+                llm_client_origin = (
+                    "toc_fallback" if needs_toc_fallback else "figure_captions"
+                )
 
         # Step 6: If ToC is missing/poor and LLM is available, fall back
-        if active_llm_callable and toc_quality.score < 0.3:
+        if active_llm_callable and needs_toc_fallback:
             tree = generate_toc_from_text(text_content, len(self.doc), active_llm_callable)
             tree = enrich_with_table_counts(tree, self.doc)
             tree = enrich_with_continued_tables(tree, text_content)
@@ -506,11 +723,16 @@ class DatasheetIndex:
             tree = enrich_with_cross_references(tree, text_content)
             toc_quality = assess_toc_quality(tree, len(self.doc))
 
-        # Step 7: Optionally add summaries (requires LLM)
-        if active_llm_callable and (
-            include_summaries or toc_quality.recommend_summaries
-        ):
+        # Step 7: Optionally add summaries (requires a sanctioned LLM client)
+        if include_summaries and llm_client_origin in _SUMMARY_CLIENT_ORIGINS:
             add_summaries(tree, text_content, active_llm_callable)
+
+        # Step 7b: Caption raster regions the text layer never named
+        caption_figures_in_place(
+            self.doc, scan.figures,
+            vision_client=get_vision_client(active_llm_callable),
+            max_figure_captions=max_figure_captions if caption_figures else 0,
+        )
 
         # Step 8: Write output files
         json_data = {
@@ -518,6 +740,9 @@ class DatasheetIndex:
             "total_pages": len(self.doc),
             "preamble": preamble,
             "toc": [node.to_dict() for node in tree],
+            "figures": scan.figures,
+            "figures_excluded": {...},
+            "figure_captions_excluded": {...},
         }
         json_path = Path(output_dir) / f"{filename}.json"
         text_path = Path(output_dir) / f"{filename}.txt"
@@ -593,9 +818,49 @@ any one agent framework:
    from the same defs, the SDK surface exposes byte-identical tool names,
    descriptions, and schemas.
 
-`build_datasheet` returns the enriched ToC manifest; `search_text` accepts a
+`build_datasheet` returns the enriched ToC manifest, including the bounded
+`figures` digest described under "Figure indexing"; `search_text` accepts a
 single pattern or a list and tags each hit with its section breadcrumb;
 `get_section_text` returns a page range prefixed with a position header.
+
+`search_text` also carries the text-layer limitation on **both** surfaces its
+consumer reads: in the tool description, and — when a search returns nothing on
+a document that holds raster regions — as a `note` on the result itself. The
+second is not redundancy. A description is read once at tool-registration time;
+the inference "zero hits does not mean absent, because some of this document is
+pixels" has to be available at the turn the agent draws the wrong conclusion.
+The gate is `DatasheetTools.has_raster_figures()`, which counts `"raster"`
+entries only: a `"caption"` entry comes from the text layer, so its words are
+searchable and nothing is hidden. Both negatives are load-bearing — no note on
+a successful search, none on a caption-only document — because a note that
+appears unconditionally is one the agent learns to skip.
+
+#### How the tool text is divided, and why it is short
+
+A tool definition is re-sent on every request, so its length is a standing
+cost. The division that keeps it honest:
+
+- **The description answers two questions only** — when do I call this, and
+  what comes back. Nothing else belongs there.
+- **Everything about an argument lives on the argument**, in its JSON Schema
+  `description`. Guidance stays attached to what it describes, and a reader
+  scanning one parameter is not reading five paragraphs about the others.
+  `tests/test_defs.py` fails if any parameter has no description.
+- **No emphasis markers.** `IMPORTANT`, `CRITICAL`, `MUST`, `Do NOT` and
+  `CALL THIS FIRST` are all rejected by a test. They were written to stop
+  older models under-triggering; Anthropic's Claude 4.5/4.6 guidance is that
+  the same language now pushes the other way, and ordinary prose is the fix.
+- **Each description has a length budget**, set just above what the current
+  text needs, so drift back toward an essay fails a test rather than quietly
+  taxing every turn.
+
+This cut the five descriptions from 5750 characters to 2900. The information
+was preserved, not dropped: what left the prose moved into the parameters, so
+the full serialized surface fell 8389 → 7000 characters. Checked against a
+live model on the case the text exists for — an empty `search_text("SUMITOMO")`
+beside a figures row naming a supplier table — both the old and the new surface
+chose `inspect_page(page=5, detail="medium")` on 3 of 3 trials, and the new
+one names the text-layer cause in its reasoning.
 
 #### The image block carries two media-type keys
 
@@ -969,7 +1234,7 @@ Output: {"parameter": "Supply voltage VS relative", "symbol": "VVS_rel_max",
 ### What we add:
 - **Preamble** — pages 1-2 raw text embedded in JSON (~600 tokens) for agent orientation; zero heuristics, zero LLM calls
 - **Table detection hints** — `has_tables` / `table_count` per node from PyMuPDF (best-effort heuristic; agent reads actual text and judges for itself)
-- **No `has_figures`** — no library reliably detects vector diagrams; agent infers from section titles and text references
+- **`figures` / `figures_excluded`** — every raster image placement enumerated exactly (`get_image_info()`, not inferred), plus every `Figure N` / `Fig. N` text-layer caption; vector figures are still not detected by clustering drawing operations, but they leak their text so the agent is not blind there
 - **`breadcrumb`** — pre-computed full ancestry path per node (e.g. `"5 Electrical Characteristics > 5.1 Absolute Maximum Ratings"`), so downstream agents and RAG indexers see structural context without re-traversing parents
 - **`boilerplate_category`** — title-pattern flag for `legal` / `ordering` / `revision` / `contact` / `toc` / `glossary` sections, so agents can deprioritize disclaimers, revision histories, and similar admin content. Title-only regex matching (no LLM, no text scan); children of flagged parents inherit the category
 - **ToC quality assessment** — auto-detect whether summaries are worth generating
@@ -1021,6 +1286,8 @@ datasheetindex/
 │   ├── locate.py          # locate_text: text -> bounding-box coordinates
 │   ├── artifact_cache.py  # Build sidecar: fingerprint, validity, atomic writes
 │   │                      #   <stem>.build.json beside the two deliverables
+│   ├── figures.py         # raster_regions: exact raster placements, clipped
+│   │                      #   to the page and normalized for inspect_page
 │   ├── preamble.py        # Pages 1-2 raw text for agent orientation
 │   └── quality.py         # Page-level quality scoring
 │                          #   (text density, extraction confidence)
@@ -1030,10 +1297,12 @@ datasheetindex/
 │   ├── defs.py            # create_datasheet_tool_defs (framework-neutral tool defs)
 │   └── registry.py        # Claude Agent SDK adapter (re-exports DatasheetTools)
 ├── llm/
-│   ├── client.py          # Optional LLM client (free-text + structured_json)
+│   ├── client.py          # Optional LLM client (free-text + structured_json + vision)
 │   ├── toc_fallback.py    # PageIndex-style LLM ToC generation
 │   │                      #   Page numbers validated against chunk markers
 │   ├── summarizer.py      # Optional section summaries
+│   ├── figure_captions.py # VLM captioning for raster figure regions,
+│   │                      #   bounded by max_figure_captions
 │   └── untrusted.py       # Framing for document text sent to an LLM
 │                          #   (PDF text is untrusted input, not instructions)
 ├── index.py               # Main DatasheetIndex class

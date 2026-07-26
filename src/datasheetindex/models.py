@@ -137,6 +137,15 @@ class DatasheetArtifacts:
     # build, from disk or from memory.
     llm_enrichment_incomplete: bool = False
     llm_enrichment_notes: tuple[str, ...] = ()
+    # Candidates left uncaptioned because no vision-capable client was
+    # available -- counted AFTER caption_figures and max_figure_captions are
+    # applied, so it is 0 when the caller declined captions. A build outcome,
+    # not a build option: compared against the current environment rather than
+    # for equality, and deliberately NOT llm_enrichment_incomplete, which
+    # means a transient failure worth retrying. A machine with no [llm] extra
+    # is not a defect, so both caches reuse this artifact until vision
+    # capability actually appears. Both caches consult it.
+    figure_captions_pending: int = 0
 
 
 def flatten_nodes(nodes: list[TocNode]) -> list[TocNode]:

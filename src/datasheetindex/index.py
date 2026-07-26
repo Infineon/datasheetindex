@@ -26,6 +26,7 @@ from datasheetindex.core.annotations import (
     enrich_with_footnote_markers,
 )
 from datasheetindex.core.artifact_cache import atomic_write_text
+from datasheetindex.core.figures import DEFAULT_MIN_AREA_PCT
 from datasheetindex.core.preamble import generate_preamble
 from datasheetindex.core.quality import assess_toc_quality
 from datasheetindex.core.structure import (
@@ -34,8 +35,14 @@ from datasheetindex.core.structure import (
     enrich_with_table_counts,
     extract_toc,
 )
-from datasheetindex.core.textfile import generate_text
-from datasheetindex.llm.client import close_llm_client
+from datasheetindex.core.textfile import scan_pages
+from datasheetindex.llm.client import close_llm_client, get_vision_client
+from datasheetindex.llm.figure_captions import (
+    DEFAULT_MAX_FIGURE_CAPTIONS,
+    caption_figures_in_place,
+    eligible_caption_count,
+    validate_max_figure_captions,
+)
 from datasheetindex.models import DatasheetArtifacts, TocQuality
 
 if TYPE_CHECKING:
@@ -50,6 +57,24 @@ DOWNLOAD_MAX_SIZE = 100 * 1024 * 1024  # 100 MB
 PDF_HEADER_SCAN_BYTES = 1024
 
 _OUTPUT_DIR_ENV_VAR = "DATASHEETINDEX_OUTPUT_DIR"
+
+#: Client provenances that also sanction section summaries. ``build()`` shares
+#: one client across three branches, so "a client exists" is not the same
+#: statement as "the caller signed up for per-section LLM calls":
+#:
+#: - ``"caller"`` -- handed in explicitly, so every LLM branch is sanctioned.
+#: - ``"toc_fallback"`` -- self-created because the native ToC is too weak to
+#:   navigate. That was already an implicit opt-in through 0.24.0, and it is
+#:   also the case where summaries help most.
+#: - ``"figure_captions"`` -- self-created *only* because the document carries
+#:   raster regions. Deliberately absent. Gating summaries on availability
+#:   instead let one inserted image turn ``include_summaries=True,
+#:   llm_callable=None`` from a no-op into one LLM call per ToC section, a cost
+#:   ``max_figure_captions`` does not bound and nothing disclosed.
+#:
+#: A new construction site is unsanctioned until it is listed here, which is
+#: the direction that fails safely.
+_SUMMARY_CLIENT_ORIGINS = frozenset({"caller", "toc_fallback"})
 
 
 def _minimum_fallback_candidate_entries(total_pages: int) -> int:
@@ -518,12 +543,26 @@ class DatasheetIndex:
         include_summaries: bool = False,
         llm_callable: LlmCallable | None = None,
         output_stem: str | None = None,
+        caption_figures: bool = True,
+        max_figure_captions: int = DEFAULT_MAX_FIGURE_CAPTIONS,
     ) -> DatasheetArtifacts:
         """Build the two deliverables: enriched ToC JSON and page-matched text.
 
         When ``llm_callable`` is provided, low-quality ToCs are regenerated
         via LLM and optional section summaries can be added. ``output_stem``
         optionally overrides the default stem derived from the source filename.
+
+        ``include_summaries`` needs a client whose provenance sanctions it (see
+        ``_SUMMARY_CLIENT_ORIGINS``): one the caller supplied, or the one the
+        weak-ToC fallback creates for itself. A client self-created purely to
+        caption figures does **not** enable summaries, so a keyless build
+        produces none whether or not the document has figures.
+
+        ``caption_figures`` (default ``True``) names raster figure regions
+        with a vision model, capped at ``max_figure_captions`` calls; unlike
+        ``include_summaries`` there is no client guard, since the absence of a
+        model is handled downstream by leaving captions pending rather than
+        by refusing to try.
 
         ``output_dir=None`` (or an empty/whitespace string) resolves to
         ``$DATASHEETINDEX_OUTPUT_DIR`` if set, otherwise a UID-namespaced
@@ -532,6 +571,7 @@ class DatasheetIndex:
 
         Returns a DatasheetArtifacts with paths, data, and quality info.
         """
+        validate_max_figure_captions(max_figure_captions)
         if output_dir is None or not output_dir.strip():
             output_dir = resolve_default_output_dir()
         t_start = time.monotonic()
@@ -542,8 +582,9 @@ class DatasheetIndex:
 
         pdf_name = self.artifact_stem(output_stem)
 
-        # 1. Generate page-matched text
-        text_content = generate_text(doc)
+        # 1. Generate page-matched text and the figure index in one pass
+        scan = scan_pages(doc)
+        text_content = scan.text
         t_text = time.monotonic()
         logger.info("Text extraction done in %.1fs", t_text - t_doc)
 
@@ -575,12 +616,35 @@ class DatasheetIndex:
         # single transient gateway error would cost this document its ToC for
         # the life of the output directory.
         enrichment_notes: list[str] = []
+
+        # Two branches can need a client, and they share one. Captioning is the
+        # second: without it here, a caller with credentials configured but no
+        # explicit model would silently never caption, since the weak-ToC
+        # branch is the only other construction site. A client of its own would
+        # double the connection cost and leak on the path where only captions
+        # need one, so both branches use ``active_llm_callable`` and the single
+        # ``close_llm_client`` in the ``finally``. A caller-supplied callable
+        # suppresses construction entirely -- including the probe ``bound.py``
+        # hands in, which it owns and closes itself.
+        effective_cap = max_figure_captions if caption_figures else 0
+        has_caption_candidates = eligible_caption_count(scan.figures, effective_cap) > 0
+        needs_toc_fallback = toc_quality.score < TOC_FALLBACK_THRESHOLD
         active_llm_callable = llm_callable
         owns_llm_callable = False
-        if active_llm_callable is None and toc_quality.score < TOC_FALLBACK_THRESHOLD:
+        # Where the client came from, which is a different question from
+        # whether there is one. Only the summaries branch asks; see
+        # _SUMMARY_CLIENT_ORIGINS.
+        llm_client_origin: str | None = "caller" if llm_callable is not None else None
+        if active_llm_callable is None and (
+            needs_toc_fallback or has_caption_candidates
+        ):
             active_llm_callable = self._try_create_default_llm_client()
             owns_llm_callable = active_llm_callable is not None
-            if active_llm_callable is None:
+            if owns_llm_callable:
+                llm_client_origin = (
+                    "toc_fallback" if needs_toc_fallback else "figure_captions"
+                )
+            if active_llm_callable is None and needs_toc_fallback:
                 logger.info(
                     "ToC quality below threshold but no LLM client is available; "
                     "these artifacts will not be cached for reuse"
@@ -589,7 +653,7 @@ class DatasheetIndex:
 
         try:
             # 5. LLM fallback: regenerate ToC if quality is poor
-            if active_llm_callable and toc_quality.score < TOC_FALLBACK_THRESHOLD:
+            if active_llm_callable and needs_toc_fallback:
                 t_llm = time.monotonic()
                 logger.info(
                     "ToC quality below threshold (%.2f < %.2f), running LLM fallback",
@@ -636,13 +700,31 @@ class DatasheetIndex:
                     )
                     enrichment_notes.append("toc_fallback_raised")
 
-            # 6. LLM summaries: only when explicitly requested
-            if active_llm_callable and include_summaries:
+            # 6. LLM summaries: only when explicitly requested, and only on a
+            # client whose PROVENANCE sanctions them. Do not simplify this back
+            # to ``active_llm_callable and include_summaries``: that is the
+            # regression _SUMMARY_CLIENT_ORIGINS exists to name.
+            if (
+                include_summaries
+                and active_llm_callable is not None
+                and llm_client_origin in _SUMMARY_CLIENT_ORIGINS
+            ):
                 t_sum = time.monotonic()
                 from datasheetindex.llm.summarizer import add_summaries
 
                 add_summaries(nodes, text_content, active_llm_callable)
                 logger.info("LLM summaries done in %.1fs", time.monotonic() - t_sum)
+
+            # 6b. Caption raster figure regions the text layer never named
+            vision_client = get_vision_client(active_llm_callable)
+            caption_outcome = caption_figures_in_place(
+                doc,
+                scan.figures,
+                vision_client=vision_client,
+                max_figure_captions=effective_cap,
+            )
+            if caption_outcome.failed:
+                enrichment_notes.append("figure_caption_failed")
 
             logger.info("Total build time: %.1fs", time.monotonic() - t_start)
 
@@ -659,6 +741,15 @@ class DatasheetIndex:
                     "recommend_summaries": toc_quality.recommend_summaries,
                 },
                 "toc": [node.to_dict() for node in nodes],
+                "figures": scan.figures,
+                "figures_excluded": {
+                    "below_min_area_pct": scan.excluded_below_min_area,
+                    "min_area_pct": DEFAULT_MIN_AREA_PCT,
+                },
+                "figure_captions_excluded": {
+                    "above_max": caption_outcome.excluded_above_max,
+                    "max_figure_captions": effective_cap,
+                },
             }
 
             # 8. Write output files
@@ -689,6 +780,7 @@ class DatasheetIndex:
                 nodes=nodes,
                 llm_enrichment_incomplete=bool(enrichment_notes),
                 llm_enrichment_notes=tuple(enrichment_notes),
+                figure_captions_pending=caption_outcome.pending,
             )
         finally:
             if owns_llm_callable:

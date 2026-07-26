@@ -10,7 +10,7 @@ Agent-first parameter extraction from technical datasheets.
 
 `datasheetindex` is meant to be handed to an external agent in two parts:
 
-1. **Enriched ToC JSON** - Hierarchical section tree with page ranges, table hints, pre-computed breadcrumbs, boilerplate flags (revision history, disclaimers, etc.), and a preamble (pages 1-2 raw text) for agent orientation
+1. **Enriched ToC JSON** - Hierarchical section tree with page ranges, table hints, pre-computed breadcrumbs, boilerplate flags (revision history, disclaimers, etc.), a preamble (pages 1-2 raw text) for agent orientation, and a `figures` array indexing every raster image placement and text-layer figure caption (see "Figure indexing and captions" below)
 2. **Page-matched text file** - Full document text with `--- PAGE N ---` markers aligned to the JSON, with column-aware reading order for two-column layouts
 
 All page numbers are **1-indexed** across the JSON, the text file markers, and
@@ -200,9 +200,11 @@ You can run the local MCP server directly from the repository. It exposes these
 tools for the bound PDF source:
 
 - `build_datasheet` - build and save the `.json` / `.txt` artifacts, and return
-  the manifest: source info, total pages, ToC quality, and the full enriched ToC.
-  For a PDF with no usable ToC the manifest also carries a `hint` telling the
-  agent to navigate by `search_text` instead (see "Datasheets without a ToC")
+  the manifest: source info, total pages, ToC quality, the full enriched ToC,
+  and a bounded `figures` digest naming the pages that carry figure entries
+  (see "Figure indexing and captions"). For a PDF with no usable ToC the
+  manifest also carries a `hint` telling the agent to navigate by `search_text`
+  instead (see "Datasheets without a ToC")
 - `get_section_text` - return extracted text for a page range from the latest
   build, opening with a position header (`=== Page X of N ===` for one page,
   `=== Pages X-Y of N ===` for a range) followed by zero or more
@@ -211,7 +213,10 @@ tools for the bound PDF source:
   completeness guarantee
 - `search_text` - find page-aware text snippets in the latest build (pass a
   single pattern or a list of patterns), even when labels wrap across lines or
-  table values interrupt the phrase; each hit carries the section breadcrumb
+  table values interrupt the phrase; each hit carries the section breadcrumb.
+  Searches the text layer only: when it finds nothing in a document that has
+  raster figures, the result carries a `note` pointing at the `figures` digest
+  and `inspect_page` (see "Figure indexing and captions")
 - `inspect_page` - render a page image when visual confirmation is needed
 - `extract_table_markdown` - re-extract a page as layout-aware Markdown tables
 
@@ -288,11 +293,116 @@ carries a `hint` field whenever the returned ToC is empty:
   "total_pages": 26,
   "toc_quality": { "score": 0.0, "entry_count": 0, ... },
   "toc": [],
+  "figures": { "total": 0, "raster": 0, "captioned": 0, "pages_with_figures": 0, "pages": [], "truncated": false },
   "hint": "This PDF has no usable table of contents, so there is no section map to plan from. Orient by reading pages 1-2 with get_section_text, then locate content with search_text and read around each hit with get_section_text. inspect_page renders a page as an image when the extracted text is unclear."
 }
 ```
 
 A document with a usable ToC has no `hint` key.
+
+### Figure indexing and captions
+
+Alongside `toc`, the ToC JSON carries `figures` -- a page-then-position list
+of every raster image placement (`kind: "raster"`, with `region` normalized
+to the `inspect_page(region=...)` coordinate contract, `bbox` in raw PDF
+points, `pixels`, `page_area_pct`, and `xref` -- the image XObject drawn,
+which two placements of the same picture share) and every `Figure N` / `Fig. N`
+caption the text layer names (`kind: "caption"`, with a string
+`figure_number` -- `"10-1"` as readily as `"12"`). The two kinds are reported
+as separate entries, never merged, even when a raster region and a caption
+share a page. `figures_excluded` reports `{"below_min_area_pct": ...,
+"min_area_pct": ...}` for placements dropped as decorative (a logo repeated
+across every page). Both keys are always present -- `figures: []` on a
+document with none -- so an empty result is distinguishable from an artifact
+built before this feature existed.
+
+`build_datasheet` (and `DatasheetIndex.build()`, `build_batch`) also take
+`caption_figures: bool = True` and `max_figure_captions: int = 20`. When a
+vision-capable client is available -- supplied explicitly, or self-created
+the same way the ToC fallback is -- every raster region above the area
+threshold gets a short VLM description (`caption_source: "llm"`), largest
+regions first, up to the cap; `figure_captions_excluded` discloses what the
+cap dropped. Placements sharing an `xref` are one picture: the largest is
+described, every placement receives the answer, and the cap counts pictures,
+not placements. A header logo repeated on four pages is therefore one call
+with four identical captions, not four calls -- measured at 33% of the calls
+on a seven-document PCN corpus and 10% across nineteen documents. The caption names the kind of content (table, schematic, plot,
+photo, block diagram, pinout) and then, immediately, its most identifying
+labels -- for a table, its row labels first and then its column headings; for
+a plot, its axes and plotted quantity -- under 60 words, and it never
+transcribes cell values or numbers. This is what lets an agent tell, from the
+manifest alone, that a page rendered entirely as a picture (no text layer at
+all) is worth opening with `inspect_page`: `search_text` returning zero hits
+on that page proves nothing, since there is no text there to search. That
+inference is easy to miss pages later, so `search_text` states the limitation
+in its own description and, when a search comes back empty on a document that
+holds raster regions, attaches a `note` naming the digest and `inspect_page`
+as the next step. Only then -- a hit-free search over a document with nothing
+but text-layer figure captions has nothing hidden from it, and a note on a
+search that succeeded is noise.
+**Each captioned figure is one VLM call**, so raising the cap raises cost
+proportionally. Without credentials configured, captioning is a no-op and the
+deterministic `figures` array is unaffected either way. `caption_figures=False`
+or `max_figure_captions=0` turns it off explicitly and restores the
+pre-captioning artifact exactly.
+
+Images are sent to the vision model at `detail: "high"`, not the API's
+cheaper `"low"` (512x512-downscale) tier. Measured on a product-change-notice
+datasheet whose "Product Attributes" table is rendered entirely as a raster
+image: at `"low"` the model confidently invented several row headings that do
+not exist in the table; at `"high"` it returned 19 of 20 row headings
+verbatim correct, including the two rows naming a supplier. Cost, read from
+`usage` on live responses: 120 input tokens per image at `"low"` versus 1074
+at `"high"` -- about 9x, or roughly 2.4k to 21.5k input tokens per document at
+the default cap of 20, paid once per document and then cached on disk by the
+existing artifact reuse.
+
+A caller who supplies, or has credentials for, a vision-capable client and asks
+for summaries gets both. A **keyless** build runs no summaries: with
+`llm_callable=None`, `include_summaries=True` produces summaries only when the
+weak-ToC fallback needed a client of its own, so a document's figures never
+switch summaries on by themselves. Captioning is unaffected -- it is the one
+branch that self-creates a client for its own sake.
+
+`build_datasheet`'s manifest does not repeat the `figures` array; it carries a
+bounded **digest** of it, so an agent learns that raster content exists without
+reading a file:
+
+```json
+"figures": {
+  "total": 27,
+  "raster": 20,
+  "captioned": 7,
+  "pages_with_figures": 12,
+  "pages": [
+    { "page": 3, "figures": 2, "caption": "Figure 1. Functional block diagram" },
+    { "page": 9, "figures": 1, "caption": null }
+  ],
+  "truncated": false
+}
+```
+
+`total` counts the entries in the ToC JSON's `figures` array that carry a
+usable integer `page`, `raster` the `kind: "raster"` ones, and `captioned`
+those carrying a caption from either source. `pages` lists one row per page
+carrying figure entries, in ascending page order, with that page's entry count
+and its **largest-area** caption (by `page_area_pct`, clipped to 350
+characters), not merely its first in document order -- a small figure listed
+ahead of a larger one in the ToC JSON must not shadow it in the digest. Ties
+break on document order, never on dict or set iteration, so the digest is
+byte-stable across runs. Because a `"caption"` entry
+is created for any `Figure N` mention in the page text, a row can name a page
+holding no raster image at all. Measured across a 14-document corpus, that
+overwhelmingly means the figure is **drawn as vector art** -- which
+`get_image_info()` cannot enumerate, so the index names the figure without being
+able to offer a region for it. Such a page rewards a full-page `inspect_page`;
+it is a signal, not noise. It is
+capped at 40 rows -- `pages_with_figures` is the true count
+and `truncated` says whether rows were dropped -- so the manifest's size does
+not grow with a pathological document's figure count. The key is always
+present, so `"total": 0` is distinguishable from an artifact predating the
+figure index. Full detail, including each region's coordinates for
+`inspect_page(region=...)`, stays in the ToC JSON at `json_path`.
 
 ## Python API
 
@@ -322,6 +432,10 @@ datasheetindex build https://example.com/datasheet.pdf --output-dir output
 # With explicit LLM model for ToC fallback and summaries
 datasheetindex build datasheet.pdf --model gpt-4.1 --include-summaries
 
+# Skip figure captioning, or raise its per-document cap (default 20)
+datasheetindex build datasheet.pdf --no-caption-figures
+datasheetindex build datasheet.pdf --max-figure-captions 40
+
 # Run the local MCP server (stdio by default; needs the [mcp] extra)
 datasheetindex mcp
 ```
@@ -329,7 +443,10 @@ datasheetindex mcp
 By default, `datasheetindex` first uses native PDF ToC extraction. If ToC
 quality is low, it automatically attempts LLM fallback with the default model
 (`gpt-4.1`) when LLM credentials are available. Pass `--model` to choose the
-LLM model explicitly; `--include-summaries` requires `--model`.
+LLM model explicitly; `--include-summaries` requires `--model`. Figure
+captioning (see "Figure indexing and captions" above) runs by default under
+the same credential rule and needs no `--model` of its own; `--no-caption-figures`
+turns it off.
 
 `datasheetindex build` needs no optional extras. `datasheetindex mcp` needs the
 `[mcp]` extra and reports a single-line install hint if it is missing.
@@ -343,6 +460,8 @@ src/datasheetindex/
         textfile.py        # PDF -> page-matched text file (column-aware)
         _textmatch.py      # Shared dash/token normalization + matcher
         locate.py          # locate_text: text -> bounding-box coordinates
+        figures.py         # raster_regions: exact raster placements, clipped
+                            #   to the page and normalized for inspect_page
         preamble.py        # Pages 1-2 raw text extraction
         quality.py         # ToC quality assessment
         annotations.py     # Footnote and cross-reference enrichment
@@ -354,9 +473,10 @@ src/datasheetindex/
         registry.py        # Claude Agent SDK adapter (re-exports DatasheetTools)
     mcp_server.py          # Local stdio/HTTP MCP server entry point
     llm/
-        client.py          # LLM client factory
+        client.py          # LLM client factory (free-text + structured_json + vision)
         toc_fallback.py    # LLM-based ToC generation fallback
         summarizer.py      # Optional section summaries
+        figure_captions.py # VLM captioning for raster figure regions
     cli.py                 # CLI entry point
     index.py               # Main DatasheetIndex class
     models.py              # Data models
