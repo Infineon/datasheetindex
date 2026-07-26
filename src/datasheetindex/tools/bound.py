@@ -18,7 +18,7 @@ import json
 import logging
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from datasheetindex._version import package_version
 from datasheetindex.core.artifact_cache import (
@@ -147,6 +147,79 @@ _NO_TOC_HINT = (
     "content with search_text and read around each hit with get_section_text. "
     "inspect_page renders a page as an image when the extracted text is unclear."
 )
+
+
+#: Bounds on the manifest's figure digest. The manifest is returned by **every**
+#: ``build_datasheet`` call, and a scanned datasheet can carry one full-page
+#: raster per page, so the digest's size must not track the document's. Both
+#: limits are constants, which is what makes the digest O(1): at most
+#: ``_MANIFEST_FIGURE_PAGES`` page rows, each carrying at most one caption of at
+#: most ``_MANIFEST_CAPTION_CHARS`` characters -- roughly 10 KB in the worst
+#: case, however many figures the ToC JSON holds. Full detail is never
+#: duplicated here; it stays in the ToC JSON at ``json_path``.
+_MANIFEST_FIGURE_PAGES = 40
+_MANIFEST_CAPTION_CHARS = 200
+
+
+def _clip_caption(caption: str) -> str:
+    """Bound one caption's length, marking the cut so it is not read as the whole.
+
+    A text-layer caption is a label plus whatever line follows it, which on a
+    pathological page can be a paragraph.
+    """
+    if len(caption) <= _MANIFEST_CAPTION_CHARS:
+        return caption
+    return caption[: _MANIFEST_CAPTION_CHARS - 3].rstrip() + "..."
+
+
+def _figure_digest(figures: object) -> dict[str, object]:
+    """A bounded per-page digest of the ToC JSON's ``figures`` array.
+
+    The manifest is the only thing the MCP / Agent-SDK agent is *handed*, so
+    without this an agent cannot tell that a document has raster content at
+    all -- it would have to know to open ``json_path``, which per this
+    project's own WSL gotcha may not even be in its filesystem namespace. It is
+    a digest rather than the array itself for the reason the bounds above give.
+
+    What it answers: are there figures, how many carry a caption, and which
+    pages to reach for with ``inspect_page``. Deliberately tolerant of a
+    malformed or absent array -- an artifact is worth serving even if its
+    figure index is not, so anything unrecognised is skipped rather than
+    raising out of the manifest.
+    """
+    entries = figures if isinstance(figures, list) else []
+    by_page: dict[int, dict[str, object]] = {}
+    total = 0
+    raster = 0
+    captioned = 0
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        page = entry.get("page")
+        if not isinstance(page, int):
+            continue
+        total += 1
+        if entry.get("kind") == "raster":
+            raster += 1
+        caption = entry.get("caption")
+        caption = caption.strip() if isinstance(caption, str) else ""
+        if caption:
+            captioned += 1
+        row = by_page.setdefault(page, {"page": page, "figures": 0, "caption": None})
+        row["figures"] = cast("int", row["figures"]) + 1
+        # First captioned entry in array order wins, so the digest is
+        # reproducible from the same artifact bytes.
+        if caption and row["caption"] is None:
+            row["caption"] = _clip_caption(caption)
+    pages = [by_page[page] for page in sorted(by_page)]
+    return {
+        "total": total,
+        "raster": raster,
+        "captioned": captioned,
+        "pages_with_figures": len(pages),
+        "pages": pages[:_MANIFEST_FIGURE_PAGES],
+        "truncated": len(pages) > _MANIFEST_FIGURE_PAGES,
+    }
 
 
 def _continuation_notes(text_content: str, start_page: int, end_page: int) -> list[str]:
@@ -579,6 +652,11 @@ class DatasheetTools:
         Keyed off the returned ToC being empty -- the outcome the agent faces --
         not off LLM availability: a rejected fallback candidate leaves the ToC
         empty with credentials present.
+
+        ``figures`` is a bounded digest of the ToC JSON's ``figures`` array, not
+        the array (see ``_figure_digest``). It is always present, so an empty
+        digest distinguishes "no raster content" from "an artifact that predates
+        the figure index".
         """
         artifacts = self._require_artifacts()
         manifest: dict[str, object] = {
@@ -592,6 +670,7 @@ class DatasheetTools:
             ),
             "toc_quality": artifacts.json_data.get("toc_quality"),
             "toc": artifacts.json_data.get("toc"),
+            "figures": _figure_digest(artifacts.json_data.get("figures")),
         }
         if not manifest["toc"]:
             manifest["hint"] = _NO_TOC_HINT

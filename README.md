@@ -200,9 +200,11 @@ You can run the local MCP server directly from the repository. It exposes these
 tools for the bound PDF source:
 
 - `build_datasheet` - build and save the `.json` / `.txt` artifacts, and return
-  the manifest: source info, total pages, ToC quality, and the full enriched ToC.
-  For a PDF with no usable ToC the manifest also carries a `hint` telling the
-  agent to navigate by `search_text` instead (see "Datasheets without a ToC")
+  the manifest: source info, total pages, ToC quality, the full enriched ToC,
+  and a bounded `figures` digest naming the pages that hold raster content
+  (see "Figure indexing and captions"). For a PDF with no usable ToC the
+  manifest also carries a `hint` telling the agent to navigate by `search_text`
+  instead (see "Datasheets without a ToC")
 - `get_section_text` - return extracted text for a page range from the latest
   build, opening with a position header (`=== Page X of N ===` for one page,
   `=== Pages X-Y of N ===` for a range) followed by zero or more
@@ -288,6 +290,7 @@ carries a `hint` field whenever the returned ToC is empty:
   "total_pages": 26,
   "toc_quality": { "score": 0.0, "entry_count": 0, ... },
   "toc": [],
+  "figures": { "total": 0, "raster": 0, "captioned": 0, "pages_with_figures": 0, "pages": [], "truncated": false },
   "hint": "This PDF has no usable table of contents, so there is no section map to plan from. Orient by reading pages 1-2 with get_section_text, then locate content with search_text and read around each hit with get_section_text. inspect_page renders a page as an image when the extracted text is unclear."
 }
 ```
@@ -296,7 +299,7 @@ A document with a usable ToC has no `hint` key.
 
 ### Figure indexing and captions
 
-Alongside `toc`, the manifest carries `figures` -- a page-then-position list
+Alongside `toc`, the ToC JSON carries `figures` -- a page-then-position list
 of every raster image placement (`kind: "raster"`, with `region` normalized
 to the `inspect_page(region=...)` coordinate contract, `bbox` in raw PDF
 points, `pixels`, and `page_area_pct`) and every `Figure N` / `Fig. N`
@@ -320,6 +323,42 @@ raises cost proportionally. Without credentials configured, captioning is a
 no-op and the deterministic `figures` array is unaffected either way.
 `caption_figures=False` or `max_figure_captions=0` turns it off explicitly and
 restores the pre-captioning artifact exactly.
+
+A caller who supplies, or has credentials for, a vision-capable client and asks
+for summaries gets both. A **keyless** build runs no summaries: with
+`llm_callable=None`, `include_summaries=True` produces summaries only when the
+weak-ToC fallback needed a client of its own, so a document's figures never
+switch summaries on by themselves. Captioning is unaffected -- it is the one
+branch that self-creates a client for its own sake.
+
+`build_datasheet`'s manifest does not repeat the `figures` array; it carries a
+bounded **digest** of it, so an agent learns that raster content exists without
+reading a file:
+
+```json
+"figures": {
+  "total": 27,
+  "raster": 20,
+  "captioned": 7,
+  "pages_with_figures": 12,
+  "pages": [
+    { "page": 3, "figures": 2, "caption": "Figure 1. Functional block diagram" },
+    { "page": 9, "figures": 1, "caption": null }
+  ],
+  "truncated": false
+}
+```
+
+`total` counts every entry in the ToC JSON's `figures` array, `raster` the
+`kind: "raster"` ones, and `captioned` those carrying a caption from either
+source. `pages` lists one row per page holding figures, in ascending page
+order, with that page's entry count and its first caption (clipped to 200
+characters). It is capped at 40 rows -- `pages_with_figures` is the true count
+and `truncated` says whether rows were dropped -- so the manifest's size does
+not grow with a pathological document's figure count. The key is always
+present, so `"total": 0` is distinguishable from an artifact predating the
+figure index. Full detail, including each region's coordinates for
+`inspect_page(region=...)`, stays in the ToC JSON at `json_path`.
 
 ## Python API
 

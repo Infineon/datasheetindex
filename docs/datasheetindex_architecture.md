@@ -254,6 +254,19 @@ captioning (`caption_source: "llm"`), which fills in a one-line description
 for regions the text layer never named -- see `llm/figure_captions.py` and
 the README for the cost, the cap, and the default-on behaviour.
 
+**The agent is handed a digest, not the array.** `build_datasheet`'s manifest
+(`tools/bound.py:get_artifact_manifest`) carries a bounded `figures` block --
+`total` / `raster` / `captioned` counts, plus one `{page, figures, caption}`
+row per page holding figures in ascending page order. The array itself stays in
+the ToC JSON: the manifest is returned on every build, and a scanned document
+can hold one full-page raster per page, so the digest is capped at 40 rows with
+one 200-character caption each (`pages_with_figures` and `truncated` disclose
+what was dropped). Carrying *something* is not optional -- the MCP agent
+receives only the manifest, and per the WSL namespace gotcha `json_path` may
+not even be readable from where the agent runs, so a digest is the difference
+between the agent knowing a page holds a figure and never learning the figure
+index exists.
+
 ### Deliverable 2: Page-Matched Text File
 
 The full PDF converted to text with clear page markers, using **PyMuPDF `get_text("blocks")`** with column-aware reading order:
@@ -644,7 +657,8 @@ any one agent framework:
    from the same defs, the SDK surface exposes byte-identical tool names,
    descriptions, and schemas.
 
-`build_datasheet` returns the enriched ToC manifest; `search_text` accepts a
+`build_datasheet` returns the enriched ToC manifest, including the bounded
+`figures` digest described under "Figure indexing"; `search_text` accepts a
 single pattern or a list and tags each hit with its section breadcrumb;
 `get_section_text` returns a page range prefixed with a position header.
 

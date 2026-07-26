@@ -478,3 +478,145 @@ def test_build_datasheet_schema_bounds_max_figure_captions():
     assert props["caption_figures"]["type"] == "boolean"
     assert props["max_figure_captions"]["type"] == "integer"
     assert props["max_figure_captions"]["minimum"] == 0
+
+
+def _figure_pdf(path):
+    """A one-page PDF with a raster region and a text-layer figure caption."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=595, height=842)
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 20, 20))
+    pix.set_rect(pix.irect, (10, 20, 30))
+    page.insert_image(pymupdf.Rect(50, 200, 545, 600), pixmap=pix)
+    writer = pymupdf.TextWriter(page.rect)
+    writer.append((72, 72), "Figure 3. Functional block diagram")
+    writer.write_text(page)
+    doc.save(str(path))
+    doc.close()
+
+
+def test_manifest_carries_the_figure_digest(tmp_path):
+    """The agent is handed the manifest and nothing else.
+
+    Without a figure block in it, the consumer this branch was built for never
+    learns the document has raster content: it could read ``json_path`` off
+    disk, but nothing tells it to, and per the WSL namespace gotcha the
+    server's filesystem may not be the agent's. This pins the exact shape the
+    README documents.
+    """
+    pdf = tmp_path / "figs.pdf"
+    _figure_pdf(pdf)
+    defs = _defs_by_name()
+
+    manifest = json.loads(
+        _run(defs["build_datasheet"].handler, {"pdf_source": str(pdf)})["content"][0][
+            "text"
+        ]
+    )
+
+    digest = manifest["figures"]
+    assert set(digest) == {
+        "total",
+        "raster",
+        "captioned",
+        "pages_with_figures",
+        "pages",
+        "truncated",
+    }
+    # One raster placement plus one text-layer caption entry, both on page 1.
+    assert digest["total"] == 2
+    assert digest["raster"] == 1
+    assert digest["captioned"] == 1
+    assert digest["pages_with_figures"] == 1
+    assert digest["truncated"] is False
+    assert digest["pages"] == [
+        {"page": 1, "figures": 2, "caption": "Figure 3. Functional block diagram"}
+    ]
+    # A digest, not a copy: no regions, bboxes or pixel dimensions here.
+    assert "region" not in json.dumps(digest)
+
+
+def test_manifest_figure_digest_is_coherent_without_figures(tmp_path):
+    """Always present, so zero is distinguishable from "predates the feature"."""
+    pdf = tmp_path / "plain.pdf"
+    _make_pdf(pdf)
+    defs = _defs_by_name()
+
+    manifest = json.loads(
+        _run(defs["build_datasheet"].handler, {"pdf_source": str(pdf)})["content"][0][
+            "text"
+        ]
+    )
+
+    assert manifest["figures"] == {
+        "total": 0,
+        "raster": 0,
+        "captioned": 0,
+        "pages_with_figures": 0,
+        "pages": [],
+        "truncated": False,
+    }
+
+
+def test_figure_digest_is_bounded_by_constants_not_by_the_document():
+    """A scanned datasheet must not put its whole figure index in every reply."""
+    from datasheetindex.tools.bound import (
+        _MANIFEST_CAPTION_CHARS,
+        _MANIFEST_FIGURE_PAGES,
+        _figure_digest,
+    )
+
+    figures = [
+        {
+            "page": page,
+            "kind": "raster",
+            "caption": "A very long caption. " * 40,
+        }
+        for page in range(1, 101)
+        for _ in range(3)
+    ]
+
+    digest = _figure_digest(figures)
+
+    rows = digest["pages"]
+    assert isinstance(rows, list)
+    assert digest["total"] == 300
+    assert digest["pages_with_figures"] == 100
+    assert len(rows) == _MANIFEST_FIGURE_PAGES
+    assert digest["truncated"] is True
+    listed_pages = []
+    for row in rows:
+        assert isinstance(row, dict)
+        listed_pages.append(row.get("page"))
+        caption = row.get("caption")
+        assert isinstance(caption, str)
+        assert len(caption) <= _MANIFEST_CAPTION_CHARS
+        assert caption.endswith("..."), "a clipped caption must say so"
+    # Ascending page order, and the first listed pages are the first pages.
+    assert listed_pages == list(range(1, _MANIFEST_FIGURE_PAGES + 1))
+
+
+def test_figure_digest_tolerates_a_malformed_or_absent_array():
+    """An artifact is worth serving even when its figure index is not."""
+    from datasheetindex.tools.bound import _figure_digest
+
+    empty = {
+        "total": 0,
+        "raster": 0,
+        "captioned": 0,
+        "pages_with_figures": 0,
+        "pages": [],
+        "truncated": False,
+    }
+
+    assert _figure_digest(None) == empty
+    assert _figure_digest("not an array") == empty
+    assert _figure_digest([None, 7, {"kind": "raster"}, {"page": "three"}]) == empty
+
+
+def test_build_datasheet_description_points_at_the_figure_digest():
+    """An agent that is not told about the digest will not read it."""
+    description = _defs_by_name()["build_datasheet"].description
+
+    assert "figures" in description
+    assert "inspect_page" in description
+    assert "json_path" in description

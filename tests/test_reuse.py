@@ -1114,3 +1114,31 @@ def test_a_default_client_captions_without_an_explicit_model(
     assert any(f.get("caption_source") == "llm" for f in artifacts.json_data["figures"])
     assert len(opened) == 1, "captioning built a second client"
     assert len(closed) == 1, "the self-created client was not closed exactly once"
+
+
+def test_the_figure_digest_is_identical_fresh_or_reused(
+    tmp_path, figure_pdf, not_editable, build_spy, monkeypatch
+):
+    """The manifest is derived from artifacts either cache gate may have served.
+
+    ``get_artifact_manifest`` reads ``json_data``, which on a reuse is parsed
+    from the bytes on disk rather than produced in memory. A digest that
+    differed between the two would make the agent's view of a document depend
+    on whether it happened to be the first caller, which no consumer could
+    detect and none should have to.
+    """
+    _keyless(monkeypatch)
+    out = str(tmp_path / "out")
+
+    with DatasheetTools(str(figure_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+        fresh = tools.get_artifact_manifest()["figures"]
+
+    with DatasheetTools(str(figure_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+        reused = tools.get_artifact_manifest()["figures"]
+
+    assert len(build_spy) == 1, "the second call rebuilt; this proves nothing"
+    assert isinstance(fresh, dict)
+    assert fresh.get("raster") == 1, "the fixture's raster region is missing"
+    assert reused == fresh
