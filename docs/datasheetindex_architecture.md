@@ -62,9 +62,11 @@ The two engines are different heuristics, not better and worse. On a real 68-pag
 
 ### Deliverable 1: Enriched ToC JSON
 
-Not just a flat table of contents — a hierarchical tree with enough metadata for the agent to make informed navigation decisions. Includes a **preamble** — raw text from pages 1-2 — so the agent can orient itself before extraction.
+Not just a flat table of contents — a hierarchical tree with enough metadata for the agent to make informed navigation decisions. Includes a **preamble** — page-marked raw text from pages 1-2 — so the agent can orient itself before extraction.
 
 The `preamble` is generated automatically with zero LLM calls. Rather than fragile heuristics to detect product names or classify ToC entries (which break across manufacturers), the library embeds the raw text of pages 1-2 as a `preamble` — giving the agent the context to orient itself.
+
+`build_front_matter(doc, *, max_pages=2, max_chars=5000)` produces it. Each page is introduced by a `--- PAGE N ---` marker in the same format as the page-matched text file, so every line is attributable and citable, and each cap that bites appends its own `=== NOTE: ... ===` line — truncation is disclosed, never silent. `max_chars` bounds *document text* (`chars_shown`), not the returned string: markers and notes are tool framing, and counting them against the budget would make the amount of content a caller receives depend on how long the framing happens to be. The companion top-level key `preamble_pages` reports per-page evidence (`chars`, `bullets`, `has_features_heading`) computed on the whole page read, not the fragment shown, so truncation cannot skew it. They are heuristic counts to be weighed, not thresholded on — see "Decisions already settled by measurement" below for what each one has and has not been measured to do.
 
 Why not parse it programmatically? Because:
 - Part number regex produces false positives ("JEDEC51", "AEC100") and misses wildcards ("TPS6513x")
@@ -73,11 +75,107 @@ Why not parse it programmatically? Because:
 
 The agent IS the LLM — let it reason about the preamble text directly.
 
+#### Decisions already settled by measurement
+
+Every number in this subsection comes from one **21-document, 1047-page,
+six-vendor corpus** (Diodes, Infineon, Microchip, Nexperia, onsemi, TI): 14
+datasheets and 7 product-change notices, 2 to 294 pages, swept with
+`build_front_matter` at the defaults and re-swept after every change to the
+extractor. The sweep also checks the invariants -- marker order, the framing
+formula, notes agreeing with `char_truncated` / `pages_omitted`, per-page
+`chars` matching the full extracted page -- and reports zero failures.
+
+**Skipping a cover or legal page is rejected.** Detecting front matter that
+is not front matter and dropping it was considered. The error is asymmetric:
+wrongly skipping page 1 of a real datasheet costs the general description and
+half the features -- the most valuable page in the document -- while wrongly
+keeping a cover page costs some tokens. The 21-document corpus does separate
+the two classes -- all seven product-change notices score 0 bullets and no
+features heading on page 1, while 13 of the 14 datasheets have a page-1
+features heading -- but that is an argument for publishing the signals, not for
+acting on them: a library that skips forecloses the alternative, and a caller
+given the signals can implement skipping itself. So `preamble_pages` reports
+and the agent decides. This is the same shape of decision as the table-engine
+note in `CLAUDE.md`: stability is the point.
+
+**The 5000-character budget is measured, and it does cut 8 of the 21
+documents.** 13 fit whole; the widest of those, the PSoC 6 at 4746 characters
+over pages 1-2, uses 95% of the budget. The cut 8 are six of the seven TI
+datasheets, whose pages 1-2 run 5332-7404 characters, and two of the four
+onsemi product-change notices; between 170 and 2424 characters fall past the
+cut. The default stays at 5000 for what it *keeps*, not in spite of what it
+drops: on the TI documents the general description and the features list are
+inside the budget, and what the cut loses is page 2's table of contents, its
+revision history and its copyright footer -- on the TPS54331, lines like
+"Updated the inductor current equations for IL(RMS) and IL(PK)" and "Product
+Folder Links: TPS54331". Two honest exceptions: the MSP430F5529 also loses the
+tail of its general description and its Device Information package table, and
+the onsemi IPCN26979Z loses the continuation of a qualification-test table.
+Neither is silent -- the `=== NOTE: preamble truncated at 5000 characters ===`
+line names the cut, and `max_chars` is the caller's to raise -- and raising the
+default to cover them would spend the budget of every document on the tail of
+a few.
+
+**Unit density is deliberately not a signal.** A count of numeric-plus-unit
+tokens looks like the obvious third signal. A naive ASCII pattern undercounts
+badly -- 5 matches on PSoC page 1 -- because it misses `150-MHz` (hyphen
+separator), `1.1-V`, and `40 uA` (micro sign, which needs both U+00B5 and
+U+03BC). The corrected pattern then false-positives on part numbers, which
+datasheets are full of: `8/A` from `CY8C62x8/A`, `4F` from `Cortex-M4F`. No
+count for a corrected pattern is quoted here on purpose: the pattern was never
+kept, so the figure cannot be re-derived, and an unreproducible number in a
+tracked doc is worse than none. Noisy in both directions, and `bullets` plus
+`has_features_heading` already do as much separating as has been asked of them:
+all seven product-change notices score 0 bullets and no features heading on page
+1, and 13 of the 14 datasheets report a page-1 features heading. That separation
+runs in one direction only -- the Infineon IRF540N is a datasheet scoring 0
+bullets and no heading on *both* pages, indistinguishable from a cover letter on
+these two signals -- and it is `has_features_heading` that carries it: page-1
+`bullets` is 0 on three of the fourteen datasheets (Diodes AH1751, Infineon
+IRF540N, Microchip ATmega328P), so the PSoC 6's 34 and 43 illustrate what the
+count looks like on a dense features page rather than measure what it
+discriminates. Add unit density later if a consumer needs it, calibrated against
+part-number forms.
+
+**A legal-vocabulary count was designed, built, measured and then not
+shipped.** A third signal, `legal_hits`, counted disclaimer vocabulary
+(`warranty`, `liability`, `trademarks`, the `provided "as is"` idiom) in a
+page's prose, to mark front matter that is a cover letter rather than
+specifications. On the 21-document corpus it measured *anti-correlated* with
+that purpose. It scores 2-3 on page 1 of all seven TI **datasheets** --
+`warranty` and `disclaimers` from TI's standard page footer, plus `Copyright`
+and `Trademarks` on page 2 -- and **0 on pages 1 and 2 of every one of the
+seven product-change notices**, including the TI PCN the design was written
+from, whose footer reads "TI Information - Selective Disclosure" and a
+disclosure classification is not a liability disclaimer. A high count meant
+"this is a TI datasheet", not "this page is boilerplate rather than
+specifications", which is the opposite of what it was built to say. It was
+deleted before release rather than kept: a field measured in the wrong
+direction is worse than no field, and removing a published one afterwards is
+breaking. The signal is easy to re-propose, so the measurement is recorded
+here as the answer.
+
+**Both signals are heuristic counts, so do not threshold on exact values.**
+The patterns behind `bullets` and `has_features_heading` are calibrated against
+what has been measured and will change as more documents are measured -- the
+`bullets` marker pattern was widened once before release, when the corpus
+showed it was missing most of Infineon's markers, and `has_features_heading`
+was taught to strip a leading section number when the corpus showed all seven
+TI datasheets write `1 Features`. `preamble_pages` is an additive key whose
+field *names* and types are a compatibility surface; the numbers in it are
+evidence for an agent to weigh, not a stable API.
+
+#### Example artifact
+
 ```json
 {
   "source": "infineon-tle9009dqu-datasheet-en.pdf",
   "total_pages": 73,
-  "preamble": "TLE9009DQU\nLi-ion battery monitoring and balancing IC\n\nFeatures\n• Voltage monitoring of up to 9 battery cells connected in series\n• Hot plugging support\n• Dedicated 16-bit high precision delta-sigma ADC for each cell...",
+  "preamble": "--- PAGE 1 ---\nTLE9009DQU\nLi-ion battery monitoring and balancing IC\n\nFeatures\n• Voltage monitoring of up to 9 battery cells connected in series\n• Hot plugging support\n• Dedicated 16-bit high precision delta-sigma ADC for each cell...\n--- PAGE 2 ---\n• Integrated cell balancing switches\n• Operating temperature -40 to +105 C\nSpecifications are subject to change without notice...\n=== NOTE: preamble covers pages 1-2 of 73; later pages were not examined ===",
+  "preamble_pages": [
+    {"page": 1, "chars": 1954, "bullets": 22, "has_features_heading": true},
+    {"page": 2, "chars": 2087, "bullets": 15, "has_features_heading": false}
+  ],
   "toc": [
     {
       "node_id": "0001",
@@ -678,8 +776,9 @@ class DatasheetIndex:
         scan = scan_pages(self.doc)
         text_content = scan.text
 
-        # Step 2: Generate preamble (pages 1-2 raw text, ~600 tokens)
-        preamble = generate_preamble(self.doc)
+        # Step 2: Generate the page-marked front matter and its per-page signals
+        front_matter = build_front_matter(self.doc)
+        preamble = front_matter.text
 
         # Step 3: Extract ToC (PyMuPDF get_toc(), instant)
         raw_toc = extract_toc(self.doc)
@@ -739,6 +838,7 @@ class DatasheetIndex:
             "source": filename + ".pdf",
             "total_pages": len(self.doc),
             "preamble": preamble,
+            "preamble_pages": [p.to_dict() for p in front_matter.pages],
             "toc": [node.to_dict() for node in tree],
             "figures": scan.figures,
             "figures_excluded": {...},
@@ -1232,7 +1332,7 @@ Output: {"parameter": "Supply voltage VS relative", "symbol": "VVS_rel_max",
 - **Text extraction** — PyMuPDF `get_text("blocks")` with column-aware reordering for the text file
 
 ### What we add:
-- **Preamble** — pages 1-2 raw text embedded in JSON (~600 tokens) for agent orientation; zero heuristics, zero LLM calls
+- **Preamble** — page-marked pages 1-2 raw text embedded in JSON (up to 5000 characters, ~1250 tokens) plus per-page signals in `preamble_pages`, for agent orientation; zero heuristics, zero LLM calls
 - **Table detection hints** — `has_tables` / `table_count` per node from PyMuPDF (best-effort heuristic; agent reads actual text and judges for itself)
 - **`figures` / `figures_excluded`** — every raster image placement enumerated exactly (`get_image_info()`, not inferred), plus every `Figure N` / `Fig. N` text-layer caption; vector figures are still not detected by clustering drawing operations, but they leak their text so the agent is not blind there
 - **`breadcrumb`** — pre-computed full ancestry path per node (e.g. `"5 Electrical Characteristics > 5.1 Absolute Maximum Ratings"`), so downstream agents and RAG indexers see structural context without re-traversing parents
@@ -1288,7 +1388,7 @@ datasheetindex/
 │   │                      #   <stem>.build.json beside the two deliverables
 │   ├── figures.py         # raster_regions: exact raster placements, clipped
 │   │                      #   to the page and normalized for inspect_page
-│   ├── preamble.py        # Pages 1-2 raw text for agent orientation
+│   ├── preamble.py        # Page-marked front matter + per-page signals
 │   └── quality.py         # Page-level quality scoring
 │                          #   (text density, extraction confidence)
 ├── tools/
