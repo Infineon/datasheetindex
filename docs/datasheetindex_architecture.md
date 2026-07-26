@@ -99,6 +99,8 @@ part numbers, which datasheets are full of: `8/A` from `CY8C62x8/A`, `4F` from
 no heading on the TI PCN cover letter). Add it later if a consumer needs it,
 calibrated against part-number forms.
 
+#### Example artifact
+
 ```json
 {
   "source": "infineon-tle9009dqu-datasheet-en.pdf",
