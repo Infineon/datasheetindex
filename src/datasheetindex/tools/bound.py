@@ -193,6 +193,10 @@ def _figure_digest(figures: object) -> dict[str, object]:
     """
     entries = figures if isinstance(figures, list) else []
     by_page: dict[int, dict[str, object]] = {}
+    # The area of the entry currently winning each page's caption slot, kept
+    # alongside ``by_page`` rather than folded into it so the comparison below
+    # never has to unpack the row it may overwrite.
+    best_area_by_page: dict[int, float] = {}
     total = 0
     raster = 0
     captioned = 0
@@ -211,10 +215,24 @@ def _figure_digest(figures: object) -> dict[str, object]:
             captioned += 1
         row = by_page.setdefault(page, {"page": page, "figures": 0, "caption": None})
         row["figures"] = cast("int", row["figures"]) + 1
-        # First captioned entry in array order wins, so the digest is
-        # reproducible from the same artifact bytes.
-        if caption and row["caption"] is None:
-            row["caption"] = _clip_caption(caption)
+        if caption:
+            # The page's largest-area captioned entry wins the row: area is
+            # already the signal that ranks caption candidates
+            # (``figure_captions._candidate_order``), so a page's most
+            # substantial figure -- not merely its topmost -- is what the
+            # digest surfaces. An entry with no usable area (e.g. a
+            # text-layer "caption" entry, which carries no page_area_pct)
+            # sorts last, so a captioned raster region always outranks it.
+            # The comparison is strictly "greater than", so a tie keeps
+            # whichever entry this loop reached first -- the array's own
+            # document order, never a dict or set's -- which is what makes
+            # the digest byte-stable across runs.
+            area = entry.get("page_area_pct")
+            area = area if isinstance(area, (int, float)) else -1.0
+            best = best_area_by_page.get(page)
+            if best is None or area > best:
+                best_area_by_page[page] = area
+                row["caption"] = _clip_caption(caption)
     pages = [by_page[page] for page in sorted(by_page)]
     return {
         "total": total,

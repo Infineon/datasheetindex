@@ -625,6 +625,69 @@ def test_figure_digest_tolerates_a_malformed_or_absent_array():
     assert _figure_digest([None, 7, {"kind": "raster"}, {"page": "three"}]) == empty
 
 
+def test_figure_digest_picks_the_largest_area_caption_not_the_first():
+    """Regression guard for the motivating failure.
+
+    A TI product-change notice has a 7.5%-of-page product-label photo above
+    a 25.5%-of-page "Product Attributes" table on the same page, in that
+    document order. Picking the first captioned entry in array order names
+    the photo and silently drops the table that actually answers a question
+    like "does this document mention SUMITOMO" -- text search finds nothing
+    because the table is pixels, so the digest is the only place an agent can
+    learn it exists. Written so it fails against first-in-array-order
+    selection: the smaller figure is listed first here on purpose.
+    """
+    from datasheetindex.tools.bound import _figure_digest
+
+    photo_caption = "a photo of a product label"
+    table_caption = (
+        "a table titled Product Attributes with row labels including Mount "
+        "Compound Supplier and Mold Compound Supplier"
+    )
+    figures = [
+        {
+            "page": 5,
+            "kind": "raster",
+            "page_area_pct": 7.5,
+            "caption": photo_caption,
+        },
+        {
+            "page": 5,
+            "kind": "raster",
+            "page_area_pct": 25.5,
+            "caption": table_caption,
+        },
+    ]
+
+    digest = _figure_digest(figures)
+
+    assert digest["pages"] == [{"page": 5, "figures": 2, "caption": table_caption}]
+
+
+def test_figure_digest_tie_break_is_deterministic():
+    """Equal-area captioned entries must resolve the same way every call.
+
+    The digest feeds an artifact that is fingerprinted for on-disk reuse, so
+    a tie whose winner depended on dict or set iteration order would make the
+    same build produce different bytes across runs.
+    """
+    from datasheetindex.tools.bound import _figure_digest
+
+    figures = [
+        {"page": 2, "kind": "raster", "page_area_pct": 10.0, "caption": "first"},
+        {"page": 2, "kind": "raster", "page_area_pct": 10.0, "caption": "second"},
+    ]
+
+    results = [_figure_digest(figures) for _ in range(5)]
+
+    assert all(result == results[0] for result in results)
+    pages = results[0]["pages"]
+    assert isinstance(pages, list)
+    first_row = pages[0]
+    assert isinstance(first_row, dict)
+    assert first_row.get("caption") == "first"
+
+
 def test_build_datasheet_description_points_at_the_figure_digest():
     """An agent that is not told about the digest will not read it."""
     description = _defs_by_name()["build_datasheet"].description
