@@ -185,8 +185,10 @@ def build_front_matter(
     string: the ``--- PAGE N ---`` markers and any ``=== NOTE: ... ===`` line
     are tool framing. Marker overhead for pages 1..P is exactly
     ``sum(13 + digits(n) for n in 1..P) + (2 * P - 1)`` -- 31 at the default
-    ``max_pages=2``. Note lines add roughly 120 characters each; that is an
-    estimate, not a bound, since they embed page numbers and counts.
+    ``max_pages=2``. A note line adds around 100 characters -- measured at 77
+    for the page note and 124 for the character note on a 134-page document.
+    Those are estimates, not bounds, since the lines embed page numbers and
+    counts.
 
     Raises ``ValueError`` unless ``max_pages`` is an integer ``>= 1``: zero
     pages read makes ``_page_phrase`` produce the nonsensical "pages 1-0", so

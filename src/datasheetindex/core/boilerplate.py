@@ -226,7 +226,14 @@ def _flag_recursive(nodes: list[TocNode], parent_category: str) -> None:
 def count_legal_hits(text: str) -> int:
     """Count legal-boilerplate vocabulary matches in running prose.
 
-    A count, not a verdict: a cover letter scores high and a features page
-    scores zero, but what to do about that is the caller's decision.
+    A count, not a verdict: disclaimer prose scores and a features page scores
+    zero, but what to do about that is the caller's decision.
+
+    Measured: the one real cover letter on hand (TI PCN 20251008002.1, page 1)
+    also scores zero, because its footer vocabulary -- "TI Information -
+    Selective Disclosure" -- is not in ``_LEGAL_VOCABULARY``, and a disclosure
+    classification is not a liability disclaimer. So this is a third opinion on
+    a page, not the signal that separates a cover letter from front matter;
+    ``bullets`` and ``has_features_heading`` do that.
     """
     return len(_LEGAL_PROSE_RE.findall(text))
