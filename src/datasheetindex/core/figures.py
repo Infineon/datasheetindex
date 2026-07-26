@@ -8,6 +8,7 @@ into the extraction, so they are not invisible the way a raster region is.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -18,6 +19,20 @@ if TYPE_CHECKING:
 #: 4 of 14 documents repeat one image XObject across pages (a vendor logo). Set
 #: low on purpose -- excluding real content is the expensive error.
 DEFAULT_MIN_AREA_PCT = 1.0
+
+#: Figure numbers are plain (``12``) or section-relative (``10-1``), with either
+#: a hyphen or an en-dash. Measured across 14 documents: the plain-only pattern
+#: found captions in 2 of them; this one finds them in 11.
+_FIGURE_NUMBER = r"(\d+(?:[-–]\d+)?)"
+
+#: A line that is *only* a figure label. Its title is the next non-empty line.
+_SPLIT_FORM = re.compile(rf"^(?:Figure|Fig\.)\s+{_FIGURE_NUMBER}\s*[.:]?\s*$")
+
+#: Label, a **mandatory** ``.`` or ``:``, then the title on the same line. The
+#: separator is the whole prose filter: in "Figure 2 shows the major
+#: subsystems" it is a space, so that line matches neither form and emits
+#: nothing.
+_SAME_LINE_FORM = re.compile(rf"^(?:Figure|Fig\.)\s+{_FIGURE_NUMBER}\s*[.:]\s+(\S.*)$")
 
 
 def raster_regions(
@@ -72,3 +87,57 @@ def raster_regions(
             }
         )
     return entries, excluded
+
+
+def caption_entries(page_number: int, page_text: str) -> list[dict[str, object]]:
+    """Return caption entries found in one page's column-aware text.
+
+    ``page_text`` must come from ``_extract_page_text`` -- the same
+    column-aware extraction the text file carries. On ``page.get_text()`` a
+    two-column page can interleave a split-form number with an unrelated
+    title, silently producing a wrong caption.
+
+    A ``Figure N`` mention matching neither accepted form emits nothing. An
+    entry claiming page 12 merely *mentions* Figure 3 is noise the consumer
+    would have to filter, and every entry in this array is meant to be worth
+    acting on.
+    """
+    lines = page_text.splitlines()
+    entries: list[dict[str, object]] = []
+
+    for index, raw in enumerate(lines):
+        line = raw.strip()
+
+        same_line = _SAME_LINE_FORM.match(line)
+        if same_line is not None:
+            entries.append(_caption_entry(page_number, same_line.group(1), line))
+            continue
+
+        split = _SPLIT_FORM.match(line)
+        if split is None:
+            continue
+        title = next((nxt.strip() for nxt in lines[index + 1 :] if nxt.strip()), None)
+        if title is None:
+            # A bare label as the last line of a page: no title to pair it
+            # with, and reaching onto the next page would invent one.
+            continue
+        entries.append(_caption_entry(page_number, split.group(1), f"{line} {title}"))
+
+    return entries
+
+
+def _caption_entry(
+    page_number: int, figure_number: str, caption: str
+) -> dict[str, object]:
+    return {
+        "page": page_number,
+        "kind": "caption",
+        "region": None,
+        "bbox": None,
+        # A string always. Section-relative numbers are not integers, and a
+        # union type costs every consumer a branch for no benefit -- this is an
+        # identifier to display and match on, never an arithmetic value.
+        "figure_number": figure_number,
+        "caption": caption,
+        "caption_source": "text",
+    }

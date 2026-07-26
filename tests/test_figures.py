@@ -7,7 +7,11 @@ from typing import cast
 import pymupdf
 import pytest
 
-from datasheetindex.core.figures import DEFAULT_MIN_AREA_PCT, raster_regions
+from datasheetindex.core.figures import (
+    DEFAULT_MIN_AREA_PCT,
+    caption_entries,
+    raster_regions,
+)
 from datasheetindex.tools.vision import inspect_page
 
 
@@ -130,3 +134,76 @@ def test_page_without_images_yields_nothing():
 
     assert entries == []
     assert excluded == 0
+
+
+def test_split_form_joins_the_next_non_empty_line():
+    entries = caption_entries(7, "intro\nFigure 2\nBlock diagram\nmore body")
+
+    assert len(entries) == 1
+    assert entries[0] == {
+        "page": 7,
+        "kind": "caption",
+        "region": None,
+        "bbox": None,
+        "figure_number": "2",
+        "caption": "Figure 2 Block diagram",
+        "caption_source": "text",
+    }
+
+
+def test_same_line_form_requires_its_separator():
+    entries = caption_entries(3, "Figure 3. Package outline")
+
+    assert len(entries) == 1
+    assert entries[0]["figure_number"] == "3"
+    assert entries[0]["caption"] == "Figure 3. Package outline"
+
+
+def test_section_relative_numbering_in_both_forms():
+    # 404 of the corpus's 492 captions take the same-line hyphenated form.
+    same_line = caption_entries(9, "Figure 10-1. Reset Logic")
+    split = caption_entries(9, "Figure 3-2\nClock tree\n")
+    en_dash = caption_entries(9, "Figure 10–1. Reset Logic")
+
+    assert same_line[0]["figure_number"] == "10-1"
+    assert same_line[0]["caption"] == "Figure 10-1. Reset Logic"
+    assert split[0]["figure_number"] == "3-2"
+    assert split[0]["caption"] == "Figure 3-2 Clock tree"
+    assert en_dash[0]["figure_number"] == "10–1"
+
+
+def test_figure_number_is_a_string_even_when_plain():
+    entries = caption_entries(1, "Figure 4. Timing")
+
+    assert entries[0]["figure_number"] == "4"
+    assert isinstance(entries[0]["figure_number"], str)
+
+
+def test_fig_abbreviation_is_accepted():
+    entries = caption_entries(2, "Fig. 10. Enable and disable times")
+
+    assert entries[0]["figure_number"] == "10"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "as Figure 5 shows the limit is 3V",
+        "Figure 2 shows the major subsystems of the device",
+        "Figure 6-2 shows the structure of the 32 general purpose registers",
+        "See Figure 3",
+    ],
+)
+def test_prose_is_not_a_caption(text):
+    # The mandatory separator rejected 70 prose lines across the corpus while
+    # admitting 404 real same-line captions. Widening the number pattern for
+    # section-relative numbering widened the prose surface with it.
+    assert caption_entries(1, text) == []
+
+
+def test_bare_figure_number_as_the_last_line_yields_nothing():
+    assert caption_entries(1, "body text\nFigure 9\n") == []
+
+
+def test_page_with_no_captions_yields_nothing():
+    assert caption_entries(1, "Absolute Maximum Ratings\nVCC 5.5 V") == []
