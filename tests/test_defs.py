@@ -688,6 +688,34 @@ def test_figure_digest_tie_break_is_deterministic():
     assert first_row.get("caption") == "first"
 
 
+def test_figure_digest_caption_clip_is_350_and_clips_at_350():
+    """The clip bound is 350: a longer caption is truncated, a shorter is not."""
+    from datasheetindex.tools.bound import _MANIFEST_CAPTION_CHARS, _figure_digest
+
+    assert _MANIFEST_CAPTION_CHARS == 350
+
+    long_caption = "a" * 400
+    short_caption = "b" * 300
+    figures = [
+        {"page": 1, "kind": "raster", "caption": long_caption},
+        {"page": 2, "kind": "raster", "caption": short_caption},
+    ]
+
+    digest = _figure_digest(figures)
+    digest_pages = digest["pages"]
+    assert isinstance(digest_pages, list)
+    rows: dict[object, object] = {}
+    for row in digest_pages:
+        assert isinstance(row, dict)
+        rows[row.get("page")] = row.get("caption")
+
+    row_1 = rows[1]
+    assert isinstance(row_1, str)
+    assert len(row_1) == 350
+    assert row_1 == long_caption[:347] + "..."
+    assert rows[2] == short_caption
+
+
 def test_build_datasheet_description_points_at_the_figure_digest():
     """An agent that is not told about the digest will not read it."""
     description = _defs_by_name()["build_datasheet"].description

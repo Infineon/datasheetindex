@@ -68,10 +68,16 @@ def _is_blank_region(image_base64: str) -> bool:
 
 
 CAPTION_SYSTEM_PROMPT = (
-    "You are labelling a figure extracted from an electronics datasheet. "
-    "In one sentence, name the kind of content (table, schematic, plot, "
-    "photo, block diagram, pinout) and its subject. Do NOT transcribe any "
-    "values, cell contents, or numbers. This is a navigation label, not data."
+    "You are labelling a figure from an electronics datasheet so an agent "
+    "can decide whether it holds what it is looking for. Name the kind of "
+    "content (table, schematic, plot, photo, block diagram, pinout), then "
+    "IMMEDIATELY name the figure's most identifying labels: for a table its "
+    "row labels first, then its column headings; for a plot its axes and "
+    "plotted quantity; for a diagram its labelled blocks. Your text may be "
+    "truncated, so identifying labels must come before any description of "
+    "structure. Name only labels you can actually read; if they are "
+    "illegible, say so rather than guessing. Do NOT transcribe cell values, "
+    "measurements or numbers. Under 60 words. Do not begin with 'This is'."
 )
 
 

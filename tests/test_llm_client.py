@@ -416,10 +416,13 @@ def test_describe_image_sends_responses_api_shaped_input():
     assert isinstance(image_part["image_url"], str)
 
 
-def test_describe_image_requests_low_detail():
-    # 512x512 at a flat documented token cost, and the model physically cannot
-    # transcribe cell values it never received -- the no-transcription guard
-    # enforced by the input rather than only by the prompt.
+def test_describe_image_requests_high_detail():
+    # Measured on the PCN's page-5 table: at "low" (512x512 downscale) the
+    # model confidently invented row headings it never received; at "high"
+    # it returned 19 of 20 verbatim correct. This guard stops "detail"
+    # silently regressing back to "low", which would resume the
+    # fabrication -- a prompt fix alone cannot bound what the model can
+    # actually read.
     from datasheetindex.llm.client import _ManagedLlmClient
 
     captured = {}
@@ -438,7 +441,7 @@ def test_describe_image_requests_low_detail():
     image_part = next(
         p for p in captured["input"][0]["content"] if p["type"] == "input_image"
     )
-    assert image_part["detail"] == "low"
+    assert image_part["detail"] == "high"
 
 
 @pytest.mark.usefixtures("_has_env")

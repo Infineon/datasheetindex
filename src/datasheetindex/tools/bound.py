@@ -158,11 +158,20 @@ _NO_TOC_HINT = (
 #: raster per page, so the digest's size must not track the document's. Both
 #: limits are constants, which is what makes the digest O(1): at most
 #: ``_MANIFEST_FIGURE_PAGES`` page rows, each carrying at most one caption of at
-#: most ``_MANIFEST_CAPTION_CHARS`` characters -- roughly 10 KB in the worst
-#: case, however many figures the ToC JSON holds. Full detail is never
-#: duplicated here; it stays in the ToC JSON at ``json_path``.
+#: most ``_MANIFEST_CAPTION_CHARS`` characters -- roughly 14 KB in the worst
+#: case (up from ~8 KB at the previous 200-character clip), however many
+#: figures the ToC JSON holds. Full detail is never duplicated here; it stays
+#: in the ToC JSON at ``json_path``.
 _MANIFEST_FIGURE_PAGES = 40
-_MANIFEST_CAPTION_CHARS = 200
+#: Measured across the PCN corpus fixture with the current caption prompt:
+#: median caption length 325 characters, max 601. 350 keeps the median intact
+#: and clips the tail rather than the common case. At this bound the
+#: `Mount Compound Supplier` row-label hook (char 310 in the PCN's page-5
+#: table caption) survives the clip; `Mold Compound Supplier` (char 367) does
+#: not, and is a known, accepted miss -- one surviving supplier hook is
+#: enough to tell an agent the table holds supplier data, and 350 is the
+#: chosen bound, not raised further to chase the second one.
+_MANIFEST_CAPTION_CHARS = 350
 
 
 def _clip_caption(caption: str) -> str:

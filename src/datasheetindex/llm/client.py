@@ -226,12 +226,25 @@ class _ManagedLlmClient:
     ) -> str:
         """Describe one image, as Responses-API structured input.
 
-        ``detail="low"`` resizes to 512x512 at a flat token cost, which is what
-        makes ``max_figure_captions`` translate into a spend the tool
-        description can state. It also enforces the no-transcription rule
-        through the input: at that resolution a dense table's values are
-        unreadable, so the model cannot fabricate rows from detail it never
-        received.
+        Sent at ``detail="high"``, reversing the ``"low"`` this call used
+        before. ``"low"`` downscales to 512x512 before the model ever sees
+        the image, which sounded like the safer choice for the
+        no-transcription rule -- the model cannot fabricate rows from detail
+        it never received. Measured on the PCN's page-5 table (20 rows, 9
+        columns) with an explicit "list the row headings verbatim, or say
+        you cannot read them" probe, it did exactly that instead: `"low"`
+        invented `Voltage`, `Wafer Base Supplier`, `Wafer Fab Location`,
+        `Package Fab (OSAT)`, `Package Type`, `Mold Compound Lot Number`, and
+        `Mold Compound Location`, and missed real rows -- confident
+        fabrication, not a safe blank. At `"high"` the same probe returned
+        19 of 20 row headings verbatim correct (the one miss: `Die
+        Composition` for `Bond Wire Composition`), including both supplier
+        rows the row-labels-first prompt exists to surface. Cost, read back
+        from `usage` on live responses rather than estimated: 120 input
+        tokens per image at `"low"`, 1074 at `"high"` -- about 9x, or roughly
+        2.4k to 21.5k input tokens per document at the default cap of 20. It
+        is paid once per document and then cached on disk by the existing
+        artifact reuse.
         """
         response = self._responses_api.create(
             model=self._model,
@@ -244,7 +257,7 @@ class _ManagedLlmClient:
                         {
                             "type": "input_image",
                             "image_url": f"data:{media_type};base64,{image_base64}",
-                            "detail": "low",
+                            "detail": "high",
                         },
                     ],
                 }
