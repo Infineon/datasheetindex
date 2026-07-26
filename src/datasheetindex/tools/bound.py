@@ -42,13 +42,15 @@ from datasheetindex.core.structure import (
 from datasheetindex.core.textfile import TextSearchMatch, extract_section_text
 from datasheetindex.core.textfile import search_text as search_text_content
 from datasheetindex.index import DatasheetIndex
-from datasheetindex.llm.client import close_llm_client
+from datasheetindex.llm.client import close_llm_client, get_vision_client
 from datasheetindex.llm.figure_captions import DEFAULT_MAX_FIGURE_CAPTIONS
 from datasheetindex.models import DatasheetArtifacts, TocNode, TocQuality
 from datasheetindex.tools.vision import Detail, inspect_page
 
 if TYPE_CHECKING:
     import pymupdf
+
+    from datasheetindex.llm.client import LlmCallable
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +79,66 @@ class _BuildOptions:
         fails loudly at ``json.dumps`` instead of silently at the cache key.
         """
         return asdict(self)
+
+
+class _VisionResolver:
+    """Resolve vision capability at most once per ``build_datasheet`` call.
+
+    The in-memory gate, the disk check and ``build()`` are three independent
+    construction sites on one path: a populated ``_artifacts`` with pending
+    captions, credentials now present, and a sidecar that also has pending
+    captions walks memory -> disk -> rebuild. Each stage is correct alone and
+    together they would open three clients.
+
+    Per call, never an instance attribute: caching capability on the instance
+    would hold a connection pool for the object's lifetime and freeze the
+    answer, and credentials appearing between two calls on one instance is
+    exactly what the in-memory rule exists to catch.
+
+    Lazy, so the common paths cost nothing: a resolver nobody asks constructs
+    nothing at all.
+    """
+
+    _UNSET = object()
+
+    def __init__(self, model: str | None) -> None:
+        self._model = model
+        self._resolved: object = self._UNSET
+        self._owned: LlmCallable | None = None
+
+    def get(self) -> object | None:
+        """The vision client, constructing at most once. None when unavailable."""
+        if self._resolved is not self._UNSET:
+            return self._resolved
+        candidate: LlmCallable | None = None
+        try:
+            from datasheetindex.llm.client import create_llm_client
+
+            candidate = create_llm_client(
+                **({"model": self._model} if self._model else {})
+            )
+        except (ImportError, ValueError, OSError):
+            candidate = None
+        if candidate is not None:
+            self._owned = candidate
+        self._resolved = get_vision_client(candidate)
+        return self._resolved
+
+    def take(self) -> LlmCallable | None:
+        """Hand the owned client to ``build()``; ownership stays with the caller.
+
+        Not only what ``get`` returned: a client that turned out not to be
+        vision-capable is still the client ``build()`` should use for its
+        weak-ToC branch, and constructing a second one there is the cost this
+        class exists to avoid.
+        """
+        return self._owned
+
+    def close(self) -> None:
+        """Close what this resolver constructed. Safe to call more than once."""
+        if self._owned is not None:
+            close_llm_client(self._owned)
+            self._owned = None
 
 
 _NO_TOC_HINT = (
@@ -223,6 +285,22 @@ class DatasheetTools:
             caption_figures=caption_figures,
             max_figure_captions=max_figure_captions,
         )
+        # One resolver for the whole call, closed however the call exits. Both
+        # gates and the rebuild ask it, so a walk through all three opens one
+        # client rather than three.
+        resolver = _VisionResolver(model)
+        try:
+            return self._build_or_reuse(options, resolver, force_rebuild)
+        finally:
+            resolver.close()
+
+    def _build_or_reuse(
+        self,
+        options: _BuildOptions,
+        resolver: _VisionResolver,
+        force_rebuild: bool,
+    ) -> DatasheetArtifacts:
+        """The body of ``build_datasheet``, minus the resolver's lifecycle."""
         if (
             not force_rebuild
             and self._artifacts is not None
@@ -236,14 +314,24 @@ class DatasheetTools:
             and self._artifacts.json_path.exists()
             and self._artifacts.text_path is not None
             and self._artifacts.text_path.exists()
+            # Pending captions are not a defect, so the artifact above is
+            # complete and every check so far has passed it. They become a
+            # reason to rebuild only once vision capability actually exists --
+            # which is why this is last: the probe is real, and it must not be
+            # constructed on a path that was going to reject the artifact
+            # anyway.
+            and not (
+                self._artifacts.figure_captions_pending > 0
+                and resolver.get() is not None
+            )
         ):
             return self._artifacts
 
-        stem = self._index.artifact_stem(output_stem)
-        sidecar = sidecar_path(resolved_output_dir, stem)
+        stem = self._index.artifact_stem(options.output_stem)
+        sidecar = sidecar_path(options.output_dir, stem)
 
         if not force_rebuild:
-            reused = self._reuse_from_disk(sidecar, options)
+            reused = self._reuse_from_disk(sidecar, options, resolver)
             if reused is not None:
                 self._artifacts = reused
                 self._build_options = options
@@ -273,23 +361,29 @@ class DatasheetTools:
                 exc_info=True,
             )
 
-        llm_callable = None
+        # A probe the resolver already built is handed to the build rather than
+        # discarded and reconstructed -- the resolver still owns it and closes
+        # it. Only an explicit model that no gate has already resolved needs a
+        # client of its own here.
+        llm_callable = resolver.take()
+        owned_here = None
         try:
-            if model is not None:
+            if llm_callable is None and options.model is not None:
                 from datasheetindex.llm.client import create_llm_client
 
-                llm_callable = create_llm_client(model=model)
+                owned_here = create_llm_client(model=options.model)
+                llm_callable = owned_here
 
             artifacts = self._index.build(
-                output_dir=resolved_output_dir,
-                output_stem=output_stem,
-                include_summaries=include_summaries,
+                output_dir=options.output_dir,
+                output_stem=options.output_stem,
+                include_summaries=options.include_summaries,
                 llm_callable=llm_callable,
-                caption_figures=caption_figures,
-                max_figure_captions=max_figure_captions,
+                caption_figures=options.caption_figures,
+                max_figure_captions=options.max_figure_captions,
             )
         finally:
-            close_llm_client(llm_callable)
+            close_llm_client(owned_here)
 
         self._write_build_sidecar(
             sidecar, options, artifacts, source_sha256, source_size
@@ -300,7 +394,7 @@ class DatasheetTools:
         return artifacts
 
     def _reuse_from_disk(
-        self, sidecar: Path, options: _BuildOptions
+        self, sidecar: Path, options: _BuildOptions, resolver: _VisionResolver
     ) -> DatasheetArtifacts | None:
         """Return artifacts loaded from disk, or None to rebuild.
 
@@ -314,6 +408,11 @@ class DatasheetTools:
         Every rejection goes through one log line with a stable token, so a test
         can assert *which* check rejected a record rather than only that a
         rebuild happened.
+
+        ``resolver`` is asked last and only when it can change the answer.
+        Probing means constructing a real HTTP client, so a version bump, a
+        changed source or a fully captioned artifact must reach their verdict
+        without one.
         """
         if is_editable_install():
             logger.debug("Not reusing on-disk artifacts: %s", "editable_install")
@@ -380,6 +479,15 @@ class DatasheetTools:
             )
             return None
 
+        # Last, because it is the only check that costs a connection: an
+        # artifact whose captions are pending is reused as-is while vision
+        # remains unavailable, and invalidated the moment capability appears.
+        # Distinct from llm_enrichment_incomplete above, which is a transient
+        # failure worth retrying; this is a stable fact about the environment.
+        if record.figure_captions_pending > 0 and resolver.get() is not None:
+            logger.debug("Not reusing on-disk artifacts: %s", "figure_captions_pending")
+            return None
+
         logger.info("Reusing valid on-disk artifacts from %s", json_path)
         return DatasheetArtifacts(
             json_path=json_path,
@@ -390,6 +498,7 @@ class DatasheetTools:
             nodes=nodes,
             llm_enrichment_incomplete=record.llm_enrichment_incomplete,
             llm_enrichment_notes=record.llm_enrichment_notes,
+            figure_captions_pending=record.figure_captions_pending,
         )
 
     def _write_build_sidecar(
@@ -451,6 +560,7 @@ class DatasheetTools:
                 toc_quality=quality.to_dict() if quality is not None else {},
                 llm_enrichment_incomplete=artifacts.llm_enrichment_incomplete,
                 llm_enrichment_notes=artifacts.llm_enrichment_notes,
+                figure_captions_pending=artifacts.figure_captions_pending,
             )
             write_sidecar(sidecar, record)
         except Exception:

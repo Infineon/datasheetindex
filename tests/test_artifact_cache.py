@@ -354,6 +354,28 @@ def test_read_sidecar_warns_on_bad_shape(tmp_path, caplog):
     assert any(entry.levelname == "WARNING" for entry in caplog.records)
 
 
+def test_a_sidecar_written_before_figure_captions_still_reads(tmp_path, caplog):
+    """Back-compat: the pending count is an outcome, and outcomes may be absent.
+
+    Every fingerprint field is required, because a record that does not carry
+    one cannot be validated against it. ``figure_captions_pending`` is not a
+    fingerprint -- it is compared against the current environment -- so an
+    artifact from before it existed reads as 0 rather than warning about a
+    diverged shape.
+    """
+    path = tmp_path / f"ds{SIDECAR_SUFFIX}"
+    payload = make_record().to_dict()
+    del payload["figure_captions_pending"]
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with caplog.at_level("WARNING"):
+        record = read_sidecar(path)
+
+    assert record is not None
+    assert record.figure_captions_pending == 0
+    assert caplog.records == []
+
+
 def test_remove_sidecar_is_silent_when_absent(tmp_path):
     remove_sidecar(tmp_path / f"absent{SIDECAR_SUFFIX}")
     remove_sidecar(tmp_path / "no-such-dir" / f"ds{SIDECAR_SUFFIX}")

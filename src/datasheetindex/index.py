@@ -40,6 +40,7 @@ from datasheetindex.llm.client import close_llm_client, get_vision_client
 from datasheetindex.llm.figure_captions import (
     DEFAULT_MAX_FIGURE_CAPTIONS,
     caption_figures_in_place,
+    eligible_caption_count,
 )
 from datasheetindex.models import DatasheetArtifacts, TocQuality
 
@@ -595,12 +596,27 @@ class DatasheetIndex:
         # single transient gateway error would cost this document its ToC for
         # the life of the output directory.
         enrichment_notes: list[str] = []
+
+        # Two branches can need a client, and they share one. Captioning is the
+        # second: without it here, a caller with credentials configured but no
+        # explicit model would silently never caption, since the weak-ToC
+        # branch is the only other construction site. A client of its own would
+        # double the connection cost and leak on the path where only captions
+        # need one, so both branches use ``active_llm_callable`` and the single
+        # ``close_llm_client`` in the ``finally``. A caller-supplied callable
+        # suppresses construction entirely -- including the probe ``bound.py``
+        # hands in, which it owns and closes itself.
+        effective_cap = max_figure_captions if caption_figures else 0
+        has_caption_candidates = eligible_caption_count(scan.figures, effective_cap) > 0
+        needs_toc_fallback = toc_quality.score < TOC_FALLBACK_THRESHOLD
         active_llm_callable = llm_callable
         owns_llm_callable = False
-        if active_llm_callable is None and toc_quality.score < TOC_FALLBACK_THRESHOLD:
+        if active_llm_callable is None and (
+            needs_toc_fallback or has_caption_candidates
+        ):
             active_llm_callable = self._try_create_default_llm_client()
             owns_llm_callable = active_llm_callable is not None
-            if active_llm_callable is None:
+            if active_llm_callable is None and needs_toc_fallback:
                 logger.info(
                     "ToC quality below threshold but no LLM client is available; "
                     "these artifacts will not be cached for reuse"
@@ -609,7 +625,7 @@ class DatasheetIndex:
 
         try:
             # 5. LLM fallback: regenerate ToC if quality is poor
-            if active_llm_callable and toc_quality.score < TOC_FALLBACK_THRESHOLD:
+            if active_llm_callable and needs_toc_fallback:
                 t_llm = time.monotonic()
                 logger.info(
                     "ToC quality below threshold (%.2f < %.2f), running LLM fallback",
@@ -665,7 +681,6 @@ class DatasheetIndex:
                 logger.info("LLM summaries done in %.1fs", time.monotonic() - t_sum)
 
             # 6b. Caption raster figure regions the text layer never named
-            effective_cap = max_figure_captions if caption_figures else 0
             vision_client = get_vision_client(active_llm_callable)
             caption_outcome = caption_figures_in_place(
                 doc,
@@ -730,6 +745,7 @@ class DatasheetIndex:
                 nodes=nodes,
                 llm_enrichment_incomplete=bool(enrichment_notes),
                 llm_enrichment_notes=tuple(enrichment_notes),
+                figure_captions_pending=caption_outcome.pending,
             )
         finally:
             if owns_llm_callable:

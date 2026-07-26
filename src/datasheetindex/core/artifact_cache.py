@@ -127,6 +127,11 @@ class ArtifactRecord:
     toc_quality: dict[str, object]
     llm_enrichment_incomplete: bool = False
     llm_enrichment_notes: tuple[str, ...] = ()
+    #: Candidates this build could not caption because no vision-capable
+    #: client existed. Not a fingerprint field: it records what the build
+    #: *achieved*, and the caller compares it against the environment it is
+    #: running in now rather than for equality. See ``reuse_blocker``.
+    figure_captions_pending: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -141,6 +146,7 @@ class ArtifactRecord:
             "toc_quality": dict(self.toc_quality),
             "llm_enrichment_incomplete": self.llm_enrichment_incomplete,
             "llm_enrichment_notes": list(self.llm_enrichment_notes),
+            "figure_captions_pending": self.figure_captions_pending,
         }
 
     @classmethod
@@ -150,6 +156,13 @@ class ArtifactRecord:
         Raises on a missing key rather than defaulting: a sidecar that does not
         carry a fingerprint field cannot be validated against it, and guessing
         would turn a bug into a false cache hit.
+
+        ``figure_captions_pending`` is the one exception, and for the reason
+        that rule is written: it is not a fingerprint. A sidecar written before
+        the field existed is a valid record of a build that captioned nothing,
+        and reading it as 0 reproduces exactly the reuse behaviour that
+        artifact already had. Requiring it would instead log a diverged-shape
+        warning on every pre-existing sidecar.
         """
         artifacts = data["artifacts"]
         return cls(
@@ -164,6 +177,7 @@ class ArtifactRecord:
             toc_quality=dict(data["toc_quality"]),
             llm_enrichment_incomplete=bool(data["llm_enrichment_incomplete"]),
             llm_enrichment_notes=tuple(data["llm_enrichment_notes"]),
+            figure_captions_pending=int(data.get("figure_captions_pending", 0)),
         )
 
 
@@ -227,6 +241,11 @@ def reuse_blocker(
     rather than narrowing it. Editability is not checked here either: it is a
     property of the process, not of a record, so the caller short-circuits on it
     first.
+
+    ``figure_captions_pending`` is deliberately **not** checked here. Deciding
+    on it requires probing whether vision capability exists now, which is I/O
+    and would put a client construction inside a pure function. The caller
+    checks it after every cheap check has already passed.
     """
     if record.datasheetindex_version != running_version:
         return "version_changed"

@@ -55,6 +55,30 @@ def _candidate_order(entry: dict[str, object]) -> tuple[float, int]:
     return (-cast("float", entry["page_area_pct"]), cast("int", entry["page"]))
 
 
+def _raster_candidates(figures: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Every raster region, largest visible area first.
+
+    Built on a copy: the caller's array stays in document order.
+    """
+    candidates = [entry for entry in figures if entry["kind"] == "raster"]
+    candidates.sort(key=_candidate_order)
+    return candidates
+
+
+def eligible_caption_count(
+    figures: list[dict[str, object]],
+    max_figure_captions: int = DEFAULT_MAX_FIGURE_CAPTIONS,
+) -> int:
+    """How many regions ``caption_figures_in_place`` would attempt to caption.
+
+    Exists so a caller deciding whether constructing a vision client can pay
+    for itself asks the captioning pass what a candidate is instead of keeping
+    a second copy of that definition -- a copy that could drift and silently
+    stop a client from ever being built.
+    """
+    return min(len(_raster_candidates(figures)), max(0, max_figure_captions))
+
+
 @dataclass(frozen=True)
 class CaptionOutcome:
     """What the captioning pass achieved.
@@ -80,9 +104,7 @@ def caption_figures_in_place(
     max_figure_captions: int = DEFAULT_MAX_FIGURE_CAPTIONS,
 ) -> CaptionOutcome:
     """Caption eligible raster regions, mutating ``figures`` in place."""
-    candidates = [entry for entry in figures if entry["kind"] == "raster"]
-    # Sorted on a copy: the caller's array stays in document order.
-    candidates.sort(key=_candidate_order)
+    candidates = _raster_candidates(figures)
 
     eligible = candidates[: max(0, max_figure_captions)]
     excluded_above_max = len(candidates) - len(eligible)
