@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 if TYPE_CHECKING:
     import pymupdf
 
+from datasheetindex.core.boilerplate import count_legal_hits
 from datasheetindex.core.textfile import _extract_page_text
 
 #: Pages read from the front of the document.
@@ -16,6 +18,25 @@ DEFAULT_MAX_PAGES = 2
 #: the measured 4747-character front matter of the PSoC 6 in half and kept the
 #: half holding the legal footer rather than the specifications.
 DEFAULT_MAX_CHARS = 5000
+
+# A line opening with a bullet glyph, or with a dash *followed by whitespace*.
+# The whitespace requirement is load-bearing: datasheets are full of lines like
+# "-40 to +85" and a temperature range is not a feature bullet.
+_BULLET_RE = re.compile(
+    r"^\s*(?:[\u2022\u25aa\u25cb\u25e6\u2023\u00b7\u2219*]|[-\u2013\u2014]\s)"
+)
+
+# A heading, matched as a whole line so that "Features of the analog subsystem"
+# does not count.
+_FEATURES_HEADINGS = frozenset({"features", "general description"})
+
+
+class _PageSignals(TypedDict):
+    """Return shape of :func:`_page_signals`, typed so callers need no casts."""
+
+    bullets: int
+    legal_hits: int
+    has_features_heading: bool
 
 
 @dataclass(frozen=True)
@@ -128,6 +149,27 @@ def _page_note(*, pages_read: int, total_pages: int) -> str:
     )
 
 
+def _page_signals(text: str) -> _PageSignals:
+    """Per-page evidence: bullet lines, legal vocabulary, a features heading.
+
+    Reported, not acted on. The three signals separated a real datasheet's
+    front matter from a product-change notice's cover letter cleanly and
+    independently on both measured fixtures; a unit-density signal is
+    deliberately left out because it is noisy in both directions (it misses
+    "150-MHz" and "40 microamp", and false-positives on part numbers like
+    "CY8C62x8/A").
+    """
+    lines = text.splitlines()
+    return {
+        "bullets": sum(1 for line in lines if _BULLET_RE.match(line)),
+        "legal_hits": count_legal_hits(text),
+        "has_features_heading": any(
+            line.strip().rstrip(":").strip().lower() in _FEATURES_HEADINGS
+            for line in lines
+        ),
+    }
+
+
 def build_front_matter(
     doc: pymupdf.Document,
     *,
@@ -181,10 +223,18 @@ def build_front_matter(
             cut_page = page_num
             break
 
-    pages = [
-        PreamblePage(page=offset + 1, chars=len(page_text))
-        for offset, page_text in enumerate(texts)
-    ]
+    pages = []
+    for offset, page_text in enumerate(texts):
+        signals = _page_signals(page_text)
+        pages.append(
+            PreamblePage(
+                page=offset + 1,
+                chars=len(page_text),
+                bullets=signals["bullets"],
+                legal_hits=signals["legal_hits"],
+                has_features_heading=signals["has_features_heading"],
+            )
+        )
 
     chars_extracted = sum(len(t) for t in texts)
     text = "\n".join(parts)

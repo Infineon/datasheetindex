@@ -7,6 +7,7 @@ import pytest
 
 from datasheetindex.core.preamble import (
     DEFAULT_MAX_CHARS,
+    _page_signals,
     build_front_matter,
     generate_preamble,
 )
@@ -265,6 +266,97 @@ def test_max_pages_bool_raises():
         # of 1 if this were not rejected explicitly.
         build_front_matter(doc, max_pages=True)
     doc.close()
+
+
+def test_signals_on_a_bulleted_features_page():
+    """Glyphs go in as escapes -- the project bans literal Unicode in tests."""
+    text = (
+        "CY8C62x8\n"
+        "General description\n"
+        "The PSoC 6 MCU is a dual-core device.\n"
+        "Features\n"
+        "\u2022 32-bit Arm Cortex-M4F CPU at 150 MHz\n"
+        "\u2022 2 MByte flash and 1 MByte SRAM\n"
+        "- up to 102 programmable GPIOs\n"
+        "\u25aa 12-bit 2-Msps SAR ADC\n"
+    )
+    signals = _page_signals(text)
+
+    assert signals["bullets"] == 4
+    assert signals["legal_hits"] == 0
+    assert signals["has_features_heading"] is True
+
+
+def test_signals_on_a_legal_cover_page():
+    text = (
+        "Product Change Notification\n"
+        "TI requires acknowledgement of receipt of this notification "
+        "within 30 days.\n"
+        "TI makes no warranty and accepts no liability; see the trademark "
+        "and copyright notices.\n"
+    )
+    signals = _page_signals(text)
+
+    assert signals["bullets"] == 0
+    assert signals["legal_hits"] >= 3
+    assert signals["has_features_heading"] is False
+
+
+def test_a_leading_hyphen_needs_whitespace_to_count_as_a_bullet():
+    """Datasheets are full of temperature ranges; those are not bullets."""
+    assert _page_signals("-40 to +85 degrees C\n")["bullets"] == 0
+    assert _page_signals("- a real bullet\n")["bullets"] == 1
+
+
+def test_features_heading_matches_a_whole_line_only():
+    assert _page_signals("Features\n")["has_features_heading"] is True
+    assert _page_signals("General Description:\n")["has_features_heading"] is True
+    assert (
+        _page_signals("Features of the analog subsystem\n")["has_features_heading"]
+        is False
+    )
+
+
+def test_build_front_matter_populates_signals_per_page():
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_textbox(
+        pymupdf.Rect(50, 50, 500, 300),
+        "Features\n- first feature\n- second feature",
+        fontsize=10,
+    )
+    page = doc.new_page()
+    page.insert_textbox(
+        pymupdf.Rect(50, 50, 500, 300),
+        "We disclaim all warranty and liability.",
+        fontsize=10,
+    )
+    fm = build_front_matter(doc)
+    doc.close()
+
+    assert fm.pages[0].bullets == 2
+    assert fm.pages[0].has_features_heading is True
+    assert fm.pages[0].legal_hits == 0
+    assert fm.pages[1].bullets == 0
+    assert fm.pages[1].legal_hits >= 2
+
+
+def test_signals_reflect_the_whole_page_even_when_truncated():
+    """Signals describe the page read, not the fragment shown."""
+    doc = pymupdf.open()
+    for _ in range(2):
+        page = doc.new_page()
+        writer = pymupdf.TextWriter(page.rect)
+        y = 72
+        for _ in range(40):
+            writer.append((72, y), "- " + "A" * 60)
+            y += 14
+        writer.write_text(page)
+    fm = build_front_matter(doc, max_chars=100)
+    doc.close()
+
+    assert fm.char_truncated is True
+    assert fm.pages[1].bullets > 0
 
 
 @pytest.mark.real_pdf
