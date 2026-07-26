@@ -27,7 +27,7 @@ from datasheetindex.core.annotations import (
 )
 from datasheetindex.core.artifact_cache import atomic_write_text
 from datasheetindex.core.figures import DEFAULT_MIN_AREA_PCT
-from datasheetindex.core.preamble import generate_preamble
+from datasheetindex.core.preamble import build_front_matter
 from datasheetindex.core.quality import assess_toc_quality
 from datasheetindex.core.structure import (
     build_tree,
@@ -588,8 +588,9 @@ class DatasheetIndex:
         t_text = time.monotonic()
         logger.info("Text extraction done in %.1fs", t_text - t_doc)
 
-        # 2. Generate preamble
-        preamble = generate_preamble(doc)
+        # 2. Generate the page-marked front matter and its per-page signals
+        front_matter = build_front_matter(doc)
+        preamble = front_matter.text
 
         # 3. Extract ToC, build tree, enrich with table counts
         raw_toc = extract_toc(doc)
@@ -733,6 +734,7 @@ class DatasheetIndex:
                 "source": self._source_file_name(),
                 "total_pages": total_pages,
                 "preamble": preamble,
+                "preamble_pages": [p.to_dict() for p in front_matter.pages],
                 "toc_quality": {
                     "score": toc_quality.score,
                     "entry_count": toc_quality.entry_count,

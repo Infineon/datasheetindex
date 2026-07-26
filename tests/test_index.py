@@ -11,6 +11,7 @@ import pymupdf
 import pytest
 
 from datasheetindex import index as index_module
+from datasheetindex.core.preamble import FrontMatter
 from datasheetindex.core.textfile import PageScan
 from datasheetindex.index import (
     TOC_FALLBACK_THRESHOLD,
@@ -282,7 +283,17 @@ def test_build_auto_llm_fallback_when_quality_low(monkeypatch, tmp_path):
             excluded_below_min_area=0,
         ),
     )
-    monkeypatch.setattr("datasheetindex.index.generate_preamble", lambda _doc: "pre")
+    monkeypatch.setattr(
+        "datasheetindex.index.build_front_matter",
+        lambda _doc: FrontMatter(
+            text="pre",
+            pages=[],
+            chars_shown=3,
+            chars_extracted=3,
+            pages_read=1,
+            total_pages=1,
+        ),
+    )
     monkeypatch.setattr("datasheetindex.index.extract_toc", lambda _doc: [])
     monkeypatch.setattr("datasheetindex.index.build_tree", lambda _raw, _pages: [])
     monkeypatch.setattr(
@@ -318,6 +329,9 @@ def test_build_auto_llm_fallback_when_quality_low(monkeypatch, tmp_path):
     assert len(fallback_calls) == 1
     assert artifacts.json_data["toc"][0]["title"] == "Auto"
     assert fake_llm.closed is True
+    # A stub that stops taking effect must fail here rather than pass quietly.
+    assert artifacts.json_data["preamble"] == "pre"
+    assert artifacts.json_data["preamble_pages"] == []
 
 
 def test_build_auto_llm_fallback_keeps_original_when_candidate_too_thin(
@@ -386,7 +400,17 @@ def test_build_auto_llm_fallback_keeps_original_when_candidate_too_thin(
             excluded_below_min_area=0,
         ),
     )
-    monkeypatch.setattr("datasheetindex.index.generate_preamble", lambda _doc: "pre")
+    monkeypatch.setattr(
+        "datasheetindex.index.build_front_matter",
+        lambda _doc: FrontMatter(
+            text="pre",
+            pages=[],
+            chars_shown=3,
+            chars_extracted=3,
+            pages_read=1,
+            total_pages=1,
+        ),
+    )
     monkeypatch.setattr(
         "datasheetindex.index.extract_toc", lambda _doc: [[1, "Original", 1]]
     )
@@ -507,7 +531,17 @@ def test_build_auto_llm_fallback_graceful_without_credentials(monkeypatch, tmp_p
             excluded_below_min_area=0,
         ),
     )
-    monkeypatch.setattr("datasheetindex.index.generate_preamble", lambda _doc: "pre")
+    monkeypatch.setattr(
+        "datasheetindex.index.build_front_matter",
+        lambda _doc: FrontMatter(
+            text="pre",
+            pages=[],
+            chars_shown=3,
+            chars_extracted=3,
+            pages_read=1,
+            total_pages=1,
+        ),
+    )
     monkeypatch.setattr("datasheetindex.index.extract_toc", lambda _doc: [])
     monkeypatch.setattr("datasheetindex.index.build_tree", lambda _raw, _pages: [])
     monkeypatch.setattr(
@@ -589,7 +623,17 @@ def test_build_llm_fallback_graceful_on_api_error(monkeypatch, tmp_path):
             excluded_below_min_area=0,
         ),
     )
-    monkeypatch.setattr("datasheetindex.index.generate_preamble", lambda _doc: "pre")
+    monkeypatch.setattr(
+        "datasheetindex.index.build_front_matter",
+        lambda _doc: FrontMatter(
+            text="pre",
+            pages=[],
+            chars_shown=3,
+            chars_extracted=3,
+            pages_read=1,
+            total_pages=1,
+        ),
+    )
     monkeypatch.setattr("datasheetindex.index.extract_toc", lambda _doc: [])
     monkeypatch.setattr("datasheetindex.index.build_tree", lambda _raw, _pages: [])
     monkeypatch.setattr(
@@ -647,7 +691,17 @@ def test_build_output_stem_override(monkeypatch, tmp_path):
             excluded_below_min_area=0,
         ),
     )
-    monkeypatch.setattr("datasheetindex.index.generate_preamble", lambda _doc: "pre")
+    monkeypatch.setattr(
+        "datasheetindex.index.build_front_matter",
+        lambda _doc: FrontMatter(
+            text="pre",
+            pages=[],
+            chars_shown=3,
+            chars_extracted=3,
+            pages_read=1,
+            total_pages=1,
+        ),
+    )
     monkeypatch.setattr("datasheetindex.index.extract_toc", lambda _doc: [])
     monkeypatch.setattr("datasheetindex.index.build_tree", lambda _raw, _pages: [])
     monkeypatch.setattr(
@@ -740,7 +794,17 @@ def test_build_with_none_output_dir_writes_to_resolver_default(monkeypatch, tmp_
             excluded_below_min_area=0,
         ),
     )
-    monkeypatch.setattr("datasheetindex.index.generate_preamble", lambda _doc: "pre")
+    monkeypatch.setattr(
+        "datasheetindex.index.build_front_matter",
+        lambda _doc: FrontMatter(
+            text="pre",
+            pages=[],
+            chars_shown=3,
+            chars_extracted=3,
+            pages_read=1,
+            total_pages=1,
+        ),
+    )
     monkeypatch.setattr("datasheetindex.index.extract_toc", lambda _doc: [])
     monkeypatch.setattr("datasheetindex.index.build_tree", lambda _raw, _pages: [])
     monkeypatch.setattr(
@@ -794,7 +858,17 @@ def test_build_with_blank_output_dir_falls_through_to_resolver(monkeypatch, tmp_
             excluded_below_min_area=0,
         ),
     )
-    monkeypatch.setattr("datasheetindex.index.generate_preamble", lambda _doc: "pre")
+    monkeypatch.setattr(
+        "datasheetindex.index.build_front_matter",
+        lambda _doc: FrontMatter(
+            text="pre",
+            pages=[],
+            chars_shown=3,
+            chars_extracted=3,
+            pages_read=1,
+            total_pages=1,
+        ),
+    )
     monkeypatch.setattr("datasheetindex.index.extract_toc", lambda _doc: [])
     monkeypatch.setattr("datasheetindex.index.build_tree", lambda _raw, _pages: [])
     monkeypatch.setattr(
@@ -1618,3 +1692,50 @@ def test_a_supplied_client_does_run_summaries(tmp_path, monkeypatch):
     assert "summary" in client.calls
     assert any(node.summary == "a section summary" for node in artifacts.nodes)
     assert "caption" in client.calls, "a supplied vision client must still caption"
+
+
+def test_preamble_pages_is_emitted(tmp_path):
+    """One entry per page read, with the signal fields present."""
+    pdf_path = tmp_path / "two.pdf"
+    doc = pymupdf.open()
+    for _ in range(2):
+        page = doc.new_page()
+        page.insert_textbox(
+            pymupdf.Rect(50, 50, 500, 300),
+            "Features\n- one\n- two",
+            fontsize=10,
+        )
+    doc.save(str(pdf_path))
+    doc.close()
+
+    with DatasheetIndex(str(pdf_path)) as index:
+        artifacts = index.build(output_dir=str(tmp_path / "out"))
+
+    data = artifacts.json_data
+    assert [p["page"] for p in data["preamble_pages"]] == [1, 2]
+    for entry in data["preamble_pages"]:
+        assert set(entry) == {
+            "page",
+            "chars",
+            "bullets",
+            "legal_hits",
+            "has_features_heading",
+        }
+    assert data["preamble"].startswith("--- PAGE 1 ---")
+
+
+def test_single_page_document_yields_one_preamble_page(tmp_path):
+    """A one-page document must still produce a one-entry preamble_pages."""
+    pdf_path = tmp_path / "one.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_textbox(pymupdf.Rect(50, 50, 500, 200), "Only page", fontsize=10)
+    doc.save(str(pdf_path))
+    doc.close()
+
+    with DatasheetIndex(str(pdf_path)) as index:
+        artifacts = index.build(output_dir=str(tmp_path / "out"))
+
+    data = artifacts.json_data
+    assert len(data["preamble_pages"]) == 1
+    assert "later pages were not examined" not in data["preamble"]
