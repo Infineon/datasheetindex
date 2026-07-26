@@ -201,7 +201,7 @@ tools for the bound PDF source:
 
 - `build_datasheet` - build and save the `.json` / `.txt` artifacts, and return
   the manifest: source info, total pages, ToC quality, the full enriched ToC,
-  and a bounded `figures` digest naming the pages that hold raster content
+  and a bounded `figures` digest naming the pages that carry figure entries
   (see "Figure indexing and captions"). For a PDF with no usable ToC the
   manifest also carries a `hint` telling the agent to navigate by `search_text`
   instead (see "Datasheets without a ToC")
@@ -349,11 +349,15 @@ reading a file:
 }
 ```
 
-`total` counts every entry in the ToC JSON's `figures` array, `raster` the
-`kind: "raster"` ones, and `captioned` those carrying a caption from either
-source. `pages` lists one row per page holding figures, in ascending page
-order, with that page's entry count and its first caption (clipped to 200
-characters). It is capped at 40 rows -- `pages_with_figures` is the true count
+`total` counts the entries in the ToC JSON's `figures` array that carry a
+usable integer `page`, `raster` the `kind: "raster"` ones, and `captioned`
+those carrying a caption from either source. `pages` lists one row per page
+carrying figure entries, in ascending page order, with that page's entry count
+and its first caption (clipped to 200 characters). Because a `"caption"` entry
+is created for any `Figure N` mention in the page text, a row can name a page
+that holds no image -- a List of Figures page is the usual case -- so compare
+`raster` against `total` before treating every row as a render target. It is
+capped at 40 rows -- `pages_with_figures` is the true count
 and `truncated` says whether rows were dropped -- so the manifest's size does
 not grow with a pathological document's figure count. The key is always
 present, so `"total": 0` is distinguishable from an artifact predating the
