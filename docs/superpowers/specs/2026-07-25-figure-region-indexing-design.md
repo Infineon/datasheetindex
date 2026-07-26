@@ -770,10 +770,16 @@ standalone figure is an **upper bound** on the addition, and the fold removes on
 the page-loading share of it, which was not measured separately.
 
 It is still the right placement: strictly cheaper than a second sweep, with no
-offsetting cost, and the pass already holds everything the entries need. But the
-build gets measurably slower, and the honest number to plan against is up to
-~800 ms on a 134-page document until the split is measured. Measure it during
-implementation and record the real marginal cost here.
+offsetting cost, and the pass already holds everything the entries need.
+Measured on the same 134-page PSoC, full `DatasheetIndex.build()`, three runs
+each, median of median: 8.65 s before this task's change (`generate_text`
+alone) versus 8.61 s after (`scan_pages` folding in `raster_regions` and
+`caption_entries`) -- a -0.04 s "delta" that is noise, not a regression;
+run-to-run variance across both sides was already ~0.3-0.5 s. The upper-bound
+worry above does not materialize: `get_image_info()`'s per-page cost is
+swamped by the rest of the build (table counting, ToC extraction, quality
+scoring), so the fold's marginal cost is not measurably distinguishable from
+zero at this document's scale.
 
 That pass also already holds everything the entries need: the page rect for
 normalizing `region`, the extracted text for `page_text_chars` and for

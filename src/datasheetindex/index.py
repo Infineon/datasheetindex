@@ -26,6 +26,7 @@ from datasheetindex.core.annotations import (
     enrich_with_footnote_markers,
 )
 from datasheetindex.core.artifact_cache import atomic_write_text
+from datasheetindex.core.figures import DEFAULT_MIN_AREA_PCT
 from datasheetindex.core.preamble import generate_preamble
 from datasheetindex.core.quality import assess_toc_quality
 from datasheetindex.core.structure import (
@@ -34,7 +35,7 @@ from datasheetindex.core.structure import (
     enrich_with_table_counts,
     extract_toc,
 )
-from datasheetindex.core.textfile import generate_text
+from datasheetindex.core.textfile import scan_pages
 from datasheetindex.llm.client import close_llm_client
 from datasheetindex.models import DatasheetArtifacts, TocQuality
 
@@ -542,8 +543,9 @@ class DatasheetIndex:
 
         pdf_name = self.artifact_stem(output_stem)
 
-        # 1. Generate page-matched text
-        text_content = generate_text(doc)
+        # 1. Generate page-matched text and the figure index in one pass
+        scan = scan_pages(doc)
+        text_content = scan.text
         t_text = time.monotonic()
         logger.info("Text extraction done in %.1fs", t_text - t_doc)
 
@@ -659,6 +661,11 @@ class DatasheetIndex:
                     "recommend_summaries": toc_quality.recommend_summaries,
                 },
                 "toc": [node.to_dict() for node in nodes],
+                "figures": scan.figures,
+                "figures_excluded": {
+                    "below_min_area_pct": scan.excluded_below_min_area,
+                    "min_area_pct": DEFAULT_MIN_AREA_PCT,
+                },
             }
 
             # 8. Write output files
