@@ -229,18 +229,22 @@ def test_captions_are_stripped():
     assert figures[0]["caption"] == "a pinout diagram"
 
 
-def test_every_render_precedes_every_dispatch(monkeypatch):
+def test_rendering_is_serial_on_the_calling_thread_and_precedes_dispatch(monkeypatch):
     # PyMuPDF is not thread-safe for concurrent page work; the parallel table
-    # scan already carries that scar with measured wrong counts.
+    # scan already carries that scar with measured wrong counts. "All renders
+    # before any dispatch" is not enough on its own -- a render pool would
+    # satisfy it -- so the thread the renders run on is pinned too.
     import datasheetindex.llm.figure_captions as mod
 
     events = []
     rendered_regions = []
+    render_threads = []
     real_inspect = mod.inspect_page
 
     def recording_inspect(doc, page, region=None, detail="high"):
         events.append("render")
         rendered_regions.append(region)
+        render_threads.append(threading.get_ident())
         return real_inspect(doc, page, region=region, detail=detail)
 
     monkeypatch.setattr(mod, "inspect_page", recording_inspect)
@@ -262,6 +266,10 @@ def test_every_render_precedes_every_dispatch(monkeypatch):
         "a dispatch was interleaved with rendering"
     )
     assert events[: events.index("dispatch")] == ["render"] * events.index("dispatch")
+    # Serial, not merely earlier: every render ran on the thread that called
+    # caption_figures_in_place, so no render pool slipped in.
+    assert len(render_threads) == 3
+    assert set(render_threads) == {threading.get_ident()}
     # The regions were clipped and normalized upstream and inspect_page rejects
     # anything outside 0.0-1.0: they must arrive exactly as indexed, neither
     # re-clamped nor rounded.
