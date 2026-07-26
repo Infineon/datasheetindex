@@ -1523,6 +1523,12 @@ def _figure_pdf(tmp_path, name="fig-toc.pdf"):
     doc = pymupdf.open()
     pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 20, 20))
     pix.set_rect(pix.irect, (10, 20, 30))
+    # A single flat colour renders as one distinct colour end to end, which
+    # the blank-region guard (figure_captions._is_blank_region) treats as
+    # nothing to caption and skips before ever dispatching -- an accent
+    # stripe keeps this fixture's raster region below that threshold, same
+    # as a real figure's non-uniform content would.
+    pix.set_rect(pymupdf.IRect(0, 0, 20, 1), (200, 200, 200))
     for number in range(2):
         page = doc.new_page(width=595, height=842)
         writer = pymupdf.TextWriter(page.rect)

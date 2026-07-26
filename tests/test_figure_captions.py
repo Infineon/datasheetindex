@@ -39,10 +39,25 @@ class RecordingVision:
         return self._reply
 
 
+def _content_pixmap(color=(10, 20, 30)):
+    """A 20x20 pixmap that renders as non-uniform, real content.
+
+    A flat single colour would trip the blank-region guard
+    (``color_topusage`` == 1.0) and be skipped before ever reaching the vision
+    client -- these fixtures are exercising dispatch behaviour, not blank
+    detection, so a thin accent stripe is added to keep every existing
+    fixture below the guard's threshold, the same way a real plot's thin
+    lines keep it below 1.0.
+    """
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 20, 20))
+    pix.set_rect(pix.irect, color)
+    pix.set_rect(pymupdf.IRect(0, 0, 20, 1), (200, 200, 200))
+    return pix
+
+
 def _doc_with_images(count, *, pages=1):
     doc = pymupdf.open()
-    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 20, 20))
-    pix.set_rect(pix.irect, (10, 20, 30))
+    pix = _content_pixmap()
     for _ in range(pages):
         page = doc.new_page(width=595, height=842)
         for i in range(count):
@@ -58,12 +73,45 @@ def _doc_with_one_shrinking_image_per_page(pages):
     client can tell which candidate an image belongs to.
     """
     doc = pymupdf.open()
-    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 20, 20))
-    pix.set_rect(pix.irect, (10, 20, 30))
+    pix = _content_pixmap()
     for index in range(pages):
         page = doc.new_page(width=595, height=842)
         page.insert_image(pymupdf.Rect(50, 50, 550 - index * 60, 400), pixmap=pix)
     return doc
+
+
+def _doc_with_single_raster(paint):
+    """One-page document with one raster region, painted by ``paint(pix)``.
+
+    1000x1000 source so a single accent row scales down to a small enough
+    fraction of the rendered region to land the ``color_topusage`` fraction
+    just under 1.0 rather than well under it -- see
+    ``_paint_near_blank_with_a_thin_line``.
+    """
+    doc = pymupdf.open()
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 1000, 1000))
+    paint(pix)
+    page = doc.new_page(width=595, height=842)
+    page.insert_image(pymupdf.Rect(50, 50, 500, 400), pixmap=pix)
+    return doc
+
+
+def _paint_blank(pix):
+    pix.set_rect(pix.irect, (255, 255, 255))
+
+
+def _paint_near_blank_with_a_thin_line(pix):
+    """Mostly white with a single one-pixel accent row.
+
+    A stand-in for a real plot region (mostly white, thin lines). Measured
+    through the full ``inspect_page`` render path (dpi=150, ``detail="high"``,
+    the region shape ``_doc_with_single_raster`` produces): the rendered
+    ``color_topusage`` fraction is 0.9972 -- below the 1.0 blank threshold,
+    but above a naively loosened 0.99, which is exactly the false-positive
+    this fixture is built to catch.
+    """
+    pix.set_rect(pix.irect, (255, 255, 255))
+    pix.set_rect(pymupdf.IRect(0, 500, 1000, 501), (0, 0, 0))
 
 
 def _figures(doc):
@@ -112,8 +160,7 @@ def test_a_region_on_a_captioned_page_is_still_captioned():
 def test_cap_keeps_the_largest_regions_and_discloses_the_rest():
     doc = pymupdf.open()
     page = doc.new_page(width=595, height=842)
-    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 20, 20))
-    pix.set_rect(pix.irect, (1, 2, 3))
+    pix = _content_pixmap(color=(1, 2, 3))
     # Three regions of strictly decreasing area.
     page.insert_image(pymupdf.Rect(50, 50, 550, 400), pixmap=pix)
     page.insert_image(pymupdf.Rect(50, 420, 400, 600), pixmap=pix)
@@ -323,8 +370,7 @@ def test_the_figures_array_is_not_reordered():
     # Sorting candidates by area must not reach the caller's list: the ToC JSON
     # publishes figures in document order.
     doc = pymupdf.open()
-    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 20, 20))
-    pix.set_rect(pix.irect, (10, 20, 30))
+    pix = _content_pixmap()
     for index in range(3):
         page = doc.new_page(width=595, height=842)
         # Area grows with the page number, so candidate order is the reverse of
@@ -343,3 +389,68 @@ def test_the_figures_array_is_not_reordered():
 
 def test_default_cap_is_twenty():
     assert DEFAULT_MAX_FIGURE_CAPTIONS == 20
+
+
+def test_a_blank_region_is_not_dispatched_and_reports_as_blank():
+    # A confirmed hallucination on ti-tlv9061.pdf page 46 named a blank
+    # region as "a schematic diagram ... optocoupler component". The guard
+    # must stop it before the vision client is ever called.
+    doc = _doc_with_single_raster(_paint_blank)
+    figures = _figures(doc)
+    vision = RecordingVision()
+    outcome = caption_figures_in_place(
+        doc, figures, vision_client=vision, max_figure_captions=20
+    )
+    doc.close()
+
+    raster = [f for f in figures if f["kind"] == "raster"]
+    assert len(raster) == 1
+    assert vision.calls == []
+    assert raster[0]["caption"] is None
+    assert raster[0]["caption_source"] is None
+    assert outcome.blank == 1
+    assert outcome.captioned == 0
+
+
+def test_a_blank_skip_sets_neither_failed_nor_pending():
+    # Regression guard for the cache-poisoning hazard: `failed` propagates to
+    # `llm_enrichment_incomplete`, which would rebuild a document forever for
+    # a page that is blank on every build, since blank-ness never changes.
+    # `pending` would claim no vision client was available, which is false --
+    # a client existed and simply had nothing worth calling it for.
+    doc = _doc_with_single_raster(_paint_blank)
+    figures = _figures(doc)
+    vision = RecordingVision()
+    outcome = caption_figures_in_place(
+        doc, figures, vision_client=vision, max_figure_captions=20
+    )
+    doc.close()
+
+    # The discriminator that ties this to the blank-skip path specifically:
+    # without the guard the region is dispatched normally, gets a canned
+    # reply, and *also* leaves failed/pending False -- so asserting only
+    # those two would pass by accident. Zero calls is what only the guard
+    # produces.
+    assert vision.calls == []
+    assert outcome.failed is False
+    assert outcome.pending == 0
+
+
+def test_a_near_blank_region_with_real_content_is_still_dispatched():
+    # False-positive guard: a region that is mostly but not entirely one
+    # colour -- a thin line on white, what a real plot region looks like --
+    # must still reach the vision client. This is the test a loosened
+    # threshold (e.g. 0.99) would break.
+    doc = _doc_with_single_raster(_paint_near_blank_with_a_thin_line)
+    figures = _figures(doc)
+    vision = RecordingVision()
+    outcome = caption_figures_in_place(
+        doc, figures, vision_client=vision, max_figure_captions=20
+    )
+    doc.close()
+
+    raster = [f for f in figures if f["kind"] == "raster"]
+    assert len(vision.calls) == 1
+    assert outcome.blank == 0
+    assert outcome.captioned == 1
+    assert raster[0]["caption_source"] == "llm"

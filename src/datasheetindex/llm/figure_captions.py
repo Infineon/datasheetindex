@@ -11,16 +11,17 @@ than the pathological document's. So the cap, not triage, is the cost control
 
 from __future__ import annotations
 
+import base64
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
+import pymupdf
+
 from datasheetindex.tools.vision import inspect_page
 
 if TYPE_CHECKING:
-    import pymupdf
-
     from datasheetindex.llm.client import VisionLlmCallable
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,35 @@ DEFAULT_MAX_FIGURE_CAPTIONS = 20
 #: opens twenty simultaneous gateway connections, which is how a shared
 #: deployment starts rate-limiting.
 _DISPATCH_WORKERS = 4
+
+#: A region rendered as exactly one distinct colour has nothing in it to
+#: describe -- not a tuned heuristic, a tautology. Measured over 38 real
+#: raster regions across three plot-heavy TI datasheets (tlv9061, opa2134,
+#: ads1115), rendered at dpi=150 -- the resolution inspect_page's own
+#: ``detail="high"`` default uses: 6 of 38 measured exactly 1.0, all
+#: confirmed blank XObject fragments on ti-tlv9061 p46 (the page behind the
+#: hallucination this guard fixes: a blank region captioned as "a schematic
+#: diagram ... optocoupler component"). The nearest real-content region
+#: measured 0.9877, and one near-miss blank fragment measured 0.999743 and is
+#: deliberately left uncaught here. Do NOT loosen this to 0.99 or similar --
+#: a characteristic-curve plot is mostly white with thin lines, and 0.9877 is
+#: closer to 1.0 than to 0.99, so a loosened threshold would start skipping
+#: exactly the plot figures this feature exists to caption.
+_BLANK_REGION_TOPUSAGE = 1.0
+
+
+def _is_blank_region(image_base64: str) -> bool:
+    """True when the rendered region carries a single distinct colour.
+
+    Runs *after* ``inspect_page`` has already rendered the region, so a blank
+    region still consumes one of the caller's ``max_figure_captions`` slots --
+    the cap selects candidates before this check ever runs. That is accepted
+    as the cost of a minimal guard rather than reworking candidate selection.
+    """
+    pix = pymupdf.Pixmap(base64.b64decode(image_base64))
+    fraction, _colour = pix.color_topusage()
+    return fraction >= _BLANK_REGION_TOPUSAGE
+
 
 CAPTION_SYSTEM_PROMPT = (
     "You are labelling a figure extracted from an electronics datasheet. "
@@ -111,12 +141,22 @@ class CaptionOutcome:
     the artifact incomplete so a gateway blip is not cached forever.
     ``pending`` is stable: no vision client was available, which on a default
     ``uv sync`` (no ``[llm]`` extra) is simply the environment.
+
+    ``blank`` is a third, distinct kind of stable outcome: a region skipped
+    because ``_is_blank_region`` found nothing in it. It must join neither of
+    the above. Not ``failed`` -- a region blank today renders blank on every
+    future build of the same document, so marking it would rebuild that
+    document forever for a fact that never changes, exactly the cache-
+    poisoning bug class ``failed`` exists to avoid. Not ``pending`` either --
+    a vision client *was* available; there was simply nothing captionable to
+    hand it.
     """
 
     captioned: int
     pending: int
     excluded_above_max: int
     failed: bool
+    blank: int = 0
 
 
 def caption_figures_in_place(
@@ -141,6 +181,7 @@ def caption_figures_in_place(
     # Render serially: PyMuPDF is not thread-safe for concurrent page work.
     rendered: list[tuple[dict[str, object], str]] = []
     failed = False
+    blank = 0
     for entry in eligible:
         try:
             blocks = inspect_page(
@@ -159,7 +200,16 @@ def caption_figures_in_place(
             )
             failed = True
             continue
-        rendered.append((entry, cast("str", blocks[0]["data"])))
+        image_base64 = cast("str", blocks[0]["data"])
+        if _is_blank_region(image_base64):
+            blank += 1
+            logger.info(
+                "Skipping blank figure region on page %s: rendered region is a "
+                "single colour, nothing to caption",
+                entry["page"],
+            )
+            continue
+        rendered.append((entry, image_base64))
 
     # Dispatch concurrently: network I/O, safe to overlap.
     def describe(payload: tuple[dict[str, object], str]) -> str | None:
@@ -188,4 +238,4 @@ def caption_figures_in_place(
         entry["caption_source"] = "llm"
         captioned += 1
 
-    return CaptionOutcome(captioned, 0, excluded_above_max, failed)
+    return CaptionOutcome(captioned, 0, excluded_above_max, failed, blank)

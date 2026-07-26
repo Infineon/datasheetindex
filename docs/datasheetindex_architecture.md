@@ -329,6 +329,20 @@ decision a future reader would otherwise redo.
   documentation; the gateway used for validation returns `405 Method Not Allowed`
   on the token-count endpoint, so it is unconfirmed against that deployment. To
   measure real cost, read usage back off a live response.
+- **A single illustration can arrive as many overlapping raster XObjects, and
+  this is now measured, not merely suspected.** `ti-tlv9061.pdf` page 46's
+  mechanical package drawing is exported as **17** overlapping raster
+  placements, several of them empty fragments -- confirmed by a live
+  corpus run where one such fragment was blank white space captioned as "a
+  schematic diagram ... optocoupler component" (fixed by the blank-region
+  guard in `llm/figure_captions.py`; see the CHANGELOG). Clustering
+  fragments into one figure entry remains out of scope -- the same
+  ambiguity that keeps vector-drawing clustering unreliable applies here --
+  but the consequence is worth disclosing rather than leaving for the next
+  reader to rediscover: a fragmented figure inflates `figures` counts on
+  that page well beyond the visual figure count, and each fragment is a
+  separate candidate that can consume a `max_figure_captions` slot the cap
+  intended for a distinct figure elsewhere on the document.
 
 ### Deliverable 2: Page-Matched Text File
 
