@@ -250,22 +250,28 @@ would.
   value, and a union type would cost every consumer a branch for no benefit.
 
 Every raster region above the threshold is also a candidate for VLM
-captioning (`caption_source: "llm"`), which fills in a one-line description
-for regions the text layer never named -- see `llm/figure_captions.py` and
-the README for the cost, the cap, and the default-on behaviour.
+captioning (`caption_source: "llm"`), which fills in a short description for
+regions the text layer never named -- see `llm/figure_captions.py` and the
+README for the cost, the cap, and the default-on behaviour. The caption names
+the kind of content and then, immediately, its most identifying labels: for a
+table, its row labels first and then its column headings; for a plot, its
+axes and plotted quantity. Row-labels-first is deliberate, not stylistic --
+see the measurement below.
 
 **The agent is handed a digest, not the array.** `build_datasheet`'s manifest
 (`tools/bound.py:get_artifact_manifest`) carries a bounded `figures` block --
 `total` / `raster` / `captioned` counts, plus one `{page, figures, caption}`
-row per page holding figures in ascending page order. The array itself stays in
-the ToC JSON: the manifest is returned on every build, and a scanned document
-can hold one full-page raster per page, so the digest is capped at 40 rows with
-one 200-character caption each (`pages_with_figures` and `truncated` disclose
-what was dropped). Carrying *something* is not optional -- the MCP agent
-receives only the manifest, and per the WSL namespace gotcha `json_path` may
-not even be readable from where the agent runs, so a digest is the difference
-between the agent knowing a page holds a figure and never learning the figure
-index exists.
+row per page holding figures in ascending page order, that row's caption
+being the page's **largest-area** captioned entry (by `page_area_pct`), not
+merely the first one in document order -- see the digest-selection fix below.
+The array itself stays in the ToC JSON: the manifest is returned on every
+build, and a scanned document can hold one full-page raster per page, so the
+digest is capped at 40 rows with one 350-character caption each
+(`pages_with_figures` and `truncated` disclose what was dropped). Carrying
+*something* is not optional -- the MCP agent receives only the manifest, and
+per the WSL namespace gotcha `json_path` may not even be readable from where
+the agent runs, so a digest is the difference between the agent knowing a
+page holds a figure and never learning the figure index exists.
 
 #### Decisions already settled by measurement
 
@@ -319,16 +325,39 @@ decision a future reader would otherwise redo.
   order, never completion order** -- artifact bytes are fingerprinted for reuse,
   so completion-order output would be non-deterministic and would silently defeat
   the cache.
-- **Regions render at `detail="high"` and are sent with `detail: "low"`.** The
-  apparent mismatch is deliberate: the API downscales to 512x512 regardless of
-  input, so feeding the best available source is what gives a title rendered
-  inside a raster a chance to survive the downscale. Lowering the render is not a
-  free optimisation.
-- **The per-image token cost is documented, not measured here.** The
-  85-tokens-at-512x512 figure for `detail: "low"` comes from OpenAI's
-  documentation; the gateway used for validation returns `405 Method Not Allowed`
-  on the token-count endpoint, so it is unconfirmed against that deployment. To
-  measure real cost, read usage back off a live response.
+- **Regions render at `detail="high"` and are now sent at `detail: "high"` too,
+  reversing the earlier `detail: "low"` choice on measured evidence of
+  fabrication rather than on a hunch.** `"low"`
+  downscales to 512x512 before the model ever sees the image, which reads as the
+  safer choice for the no-transcription rule -- the model cannot fabricate rows
+  from detail it never received. Measured on the motivating PCN's page-5
+  "Product Attributes" table (20 rows, 9 columns) with an explicit "list the row
+  headings verbatim, or say you cannot read them" probe, it did exactly the
+  opposite: `"low"` invented `Voltage`, `Wafer Base Supplier`, `Wafer Fab
+  Location`, `Package Fab (OSAT)`, `Package Type`, `Mold Compound Lot Number`,
+  and `Mold Compound Location` -- none of which are real rows -- and missed real
+  ones, including both supplier rows. At `"high"` the same probe returned 19 of
+  20 row headings verbatim correct (the one error: `Die Composition` for `Bond
+  Wire Composition`), including both supplier rows and the grey section rows
+  `Die Attributes` and `Package Attributes`. A prompt asking for row labels at a
+  resolution where they are illegible does not get a safe "I cannot read this"
+  -- it gets confident fabrication, so the resolution is part of the
+  anti-fabrication design, not independent of it.
+- **The per-image token cost is now measured, not documented from a spec
+  sheet.** A separate token-*counting* endpoint on the validation gateway
+  returns `405 Method Not Allowed`, which is why an earlier note here called the
+  cost unconfirmed -- but `usage` on a real response works, and gave real
+  numbers: **120 input tokens per image at `detail: "low"`, 1074 at
+  `detail: "high"`** -- about 9x, or roughly 2.4k to 21.5k input tokens per
+  document at the default cap of 20. Paid once per document, then cached on disk
+  by the existing artifact reuse.
+- **Row labels before column headings is load-bearing, not a style choice.**
+  With column headings named first in the prompt, the table's identifying words
+  (the supplier names) landed at character 442 of the reply on the PCN's page-5
+  table -- past the digest's caption clip. Moving row labels first moved the
+  same hook (`Mount Compound Supplier`) to character 310, inside the clip. The
+  digest clip and the prompt's label ordering are therefore one design, not two
+  independent choices.
 - **A single illustration can arrive as many overlapping raster XObjects, and
   this is now measured, not merely suspected.** `ti-tlv9061.pdf` page 46's
   mechanical package drawing is exported as **17** overlapping raster
@@ -343,6 +372,22 @@ decision a future reader would otherwise redo.
   that page well beyond the visual figure count, and each fragment is a
   separate candidate that can consume a `max_figure_captions` slot the cap
   intended for a distinct figure elsewhere on the document.
+- **The digest's per-page caption picked the first captioned entry in array
+  order, which is the topmost figure on the page -- a bug, found on the same
+  PCN.** Page 5 carries a 7.5%-of-page product-label photo above a
+  25.5%-of-page "Product Attributes" table, in that document order. Under
+  first-in-order selection the digest told the agent page 5 was "a photo of a
+  product label" and the table -- the one holding the answer to "does this
+  document mention SUMITOMO" -- was silently dropped, even though `SUMITOMO`
+  appears 13 times in that table's `Mount Compound Supplier` and `Mold Compound
+  Supplier` rows and a text search for it correctly returns zero hits (the word
+  is pixels). The fix selects each row's caption from the page's **largest-area**
+  captioned entry instead (`page_area_pct`), which is already the signal that
+  ranks caption candidates for the `max_figure_captions` cap, so this is a
+  consistent selection rule rather than a new heuristic. Ties keep whichever
+  entry the scan reaches first in the array's own document order -- never a
+  dict or set's -- so the digest stays byte-stable across runs. On the PCN this
+  changes exactly one row (page 5).
 
 ### Deliverable 2: Page-Matched Text File
 

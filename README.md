@@ -316,13 +316,32 @@ built before this feature existed.
 `caption_figures: bool = True` and `max_figure_captions: int = 20`. When a
 vision-capable client is available -- supplied explicitly, or self-created
 the same way the ToC fallback is -- every raster region above the area
-threshold gets a one-line VLM description (`caption_source: "llm"`), largest
+threshold gets a short VLM description (`caption_source: "llm"`), largest
 regions first, up to the cap; `figure_captions_excluded` discloses what the
-cap dropped. **Each captioned figure is one VLM call**, so raising the cap
-raises cost proportionally. Without credentials configured, captioning is a
-no-op and the deterministic `figures` array is unaffected either way.
-`caption_figures=False` or `max_figure_captions=0` turns it off explicitly and
-restores the pre-captioning artifact exactly.
+cap dropped. The caption names the kind of content (table, schematic, plot,
+photo, block diagram, pinout) and then, immediately, its most identifying
+labels -- for a table, its row labels first and then its column headings; for
+a plot, its axes and plotted quantity -- under 60 words, and it never
+transcribes cell values or numbers. This is what lets an agent tell, from the
+manifest alone, that a page rendered entirely as a picture (no text layer at
+all) is worth opening with `inspect_page`: `search_text` returning zero hits
+on that page proves nothing, since there is no text there to search.
+**Each captioned figure is one VLM call**, so raising the cap raises cost
+proportionally. Without credentials configured, captioning is a no-op and the
+deterministic `figures` array is unaffected either way. `caption_figures=False`
+or `max_figure_captions=0` turns it off explicitly and restores the
+pre-captioning artifact exactly.
+
+Images are sent to the vision model at `detail: "high"`, not the API's
+cheaper `"low"` (512x512-downscale) tier. Measured on a product-change-notice
+datasheet whose "Product Attributes" table is rendered entirely as a raster
+image: at `"low"` the model confidently invented several row headings that do
+not exist in the table; at `"high"` it returned 19 of 20 row headings
+verbatim correct, including the two rows naming a supplier. Cost, read from
+`usage` on live responses: 120 input tokens per image at `"low"` versus 1074
+at `"high"` -- about 9x, or roughly 2.4k to 21.5k input tokens per document at
+the default cap of 20, paid once per document and then cached on disk by the
+existing artifact reuse.
 
 A caller who supplies, or has credentials for, a vision-capable client and asks
 for summaries gets both. A **keyless** build runs no summaries: with
@@ -353,7 +372,11 @@ reading a file:
 usable integer `page`, `raster` the `kind: "raster"` ones, and `captioned`
 those carrying a caption from either source. `pages` lists one row per page
 carrying figure entries, in ascending page order, with that page's entry count
-and its first caption (clipped to 200 characters). Because a `"caption"` entry
+and its **largest-area** caption (by `page_area_pct`, clipped to 350
+characters), not merely its first in document order -- a small figure listed
+ahead of a larger one in the ToC JSON must not shadow it in the digest. Ties
+break on document order, never on dict or set iteration, so the digest is
+byte-stable across runs. Because a `"caption"` entry
 is created for any `Figure N` mention in the page text, a row can name a page
 holding no raster image at all. Measured across a 14-document corpus, that
 overwhelmingly means the figure is **drawn as vector art** -- which
