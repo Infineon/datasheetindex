@@ -535,8 +535,10 @@ class DatasheetIndex:
         """
         filename = Path(self.pdf_path).stem
 
-        # Step 1: Generate page-matched text file (needed by all later steps)
-        text_content = generate_text(self.doc)
+        # Step 1: Generate the page-matched text file and the figure index in
+        # one pass (the text is needed by all later steps)
+        scan = scan_pages(self.doc)
+        text_content = scan.text
 
         # Step 2: Generate preamble (pages 1-2 raw text, ~600 tokens)
         preamble = generate_preamble(self.doc)
@@ -557,12 +559,25 @@ class DatasheetIndex:
         # Step 5: Assess ToC quality
         toc_quality = assess_toc_quality(tree, len(self.doc))
 
+        # One client, shared by three branches -- but WHICH branch created it
+        # is recorded, because summaries are gated on that (see
+        # `_SUMMARY_CLIENT_ORIGINS`): a client self-created only to caption
+        # figures must not turn `include_summaries=True` into per-section calls.
         active_llm_callable = llm_callable
-        if active_llm_callable is None and toc_quality.score < 0.3:
+        llm_client_origin = "caller" if llm_callable is not None else None
+        needs_toc_fallback = toc_quality.score < 0.3
+        has_caption_candidates = eligible_caption_count(scan.figures, ...) > 0
+        if active_llm_callable is None and (
+            needs_toc_fallback or has_caption_candidates
+        ):
             active_llm_callable = self._try_create_default_llm_client()
+            if active_llm_callable is not None:
+                llm_client_origin = (
+                    "toc_fallback" if needs_toc_fallback else "figure_captions"
+                )
 
         # Step 6: If ToC is missing/poor and LLM is available, fall back
-        if active_llm_callable and toc_quality.score < 0.3:
+        if active_llm_callable and needs_toc_fallback:
             tree = generate_toc_from_text(text_content, len(self.doc), active_llm_callable)
             tree = enrich_with_table_counts(tree, self.doc)
             tree = enrich_with_continued_tables(tree, text_content)
@@ -570,11 +585,16 @@ class DatasheetIndex:
             tree = enrich_with_cross_references(tree, text_content)
             toc_quality = assess_toc_quality(tree, len(self.doc))
 
-        # Step 7: Optionally add summaries (requires LLM)
-        if active_llm_callable and (
-            include_summaries or toc_quality.recommend_summaries
-        ):
+        # Step 7: Optionally add summaries (requires a sanctioned LLM client)
+        if include_summaries and llm_client_origin in _SUMMARY_CLIENT_ORIGINS:
             add_summaries(tree, text_content, active_llm_callable)
+
+        # Step 7b: Caption raster regions the text layer never named
+        caption_figures_in_place(
+            self.doc, scan.figures,
+            vision_client=get_vision_client(active_llm_callable),
+            max_figure_captions=max_figure_captions if caption_figures else 0,
+        )
 
         # Step 8: Write output files
         json_data = {
@@ -582,6 +602,9 @@ class DatasheetIndex:
             "total_pages": len(self.doc),
             "preamble": preamble,
             "toc": [node.to_dict() for node in tree],
+            "figures": scan.figures,
+            "figures_excluded": {...},
+            "figure_captions_excluded": {...},
         }
         json_path = Path(output_dir) / f"{filename}.json"
         text_path = Path(output_dir) / f"{filename}.txt"

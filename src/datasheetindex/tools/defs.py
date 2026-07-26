@@ -24,6 +24,7 @@ from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any
 
+from datasheetindex.llm.figure_captions import DEFAULT_MAX_FIGURE_CAPTIONS
 from datasheetindex.tools.bound import DatasheetTools
 
 
@@ -179,7 +180,9 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                     model=args.get("model"),
                     force_rebuild=args.get("force_rebuild", False),
                     caption_figures=args.get("caption_figures", True),
-                    max_figure_captions=args.get("max_figure_captions", 20),
+                    max_figure_captions=args.get(
+                        "max_figure_captions", DEFAULT_MAX_FIGURE_CAPTIONS
+                    ),
                 )
             except Exception:
                 # Discard the fresh instance; best-effort close so cleanup failure
@@ -335,7 +338,8 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                         "type": "integer",
                         "minimum": 0,
                         "description": (
-                            "Per-document ceiling on caption calls (default 20)."
+                            "Per-document ceiling on caption calls "
+                            f"(default {DEFAULT_MAX_FIGURE_CAPTIONS})."
                         ),
                     },
                 },

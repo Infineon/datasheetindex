@@ -43,7 +43,10 @@ from datasheetindex.core.textfile import TextSearchMatch, extract_section_text
 from datasheetindex.core.textfile import search_text as search_text_content
 from datasheetindex.index import DatasheetIndex
 from datasheetindex.llm.client import close_llm_client, get_vision_client
-from datasheetindex.llm.figure_captions import DEFAULT_MAX_FIGURE_CAPTIONS
+from datasheetindex.llm.figure_captions import (
+    DEFAULT_MAX_FIGURE_CAPTIONS,
+    validate_max_figure_captions,
+)
 from datasheetindex.models import DatasheetArtifacts, TocNode, TocQuality
 from datasheetindex.tools.vision import Detail, inspect_page
 
@@ -115,7 +118,7 @@ class _VisionResolver:
             from datasheetindex.llm.client import create_llm_client
 
             candidate = create_llm_client(
-                **({"model": self._model} if self._model else {})
+                **({"model": self._model} if self._model is not None else {})
             )
         except (ImportError, ValueError, OSError):
             candidate = None
@@ -338,6 +341,10 @@ class DatasheetTools:
         """Build and cache datasheet artifacts for later MCP queries."""
         if include_summaries and model is None:
             raise ValueError("--include-summaries requires --model")
+        # Validate before invalidating. ``build()`` would reject this cap too,
+        # but only after ``_build_or_reuse`` has already removed the sidecar, so
+        # a rejected call would destroy a valid cache on its way to raising.
+        validate_max_figure_captions(max_figure_captions)
 
         # Resolve once so the cache key is the actual destination path -- two
         # successive calls with output_dir=None must miss the cache if the

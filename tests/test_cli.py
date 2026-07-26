@@ -54,14 +54,29 @@ def test_cli_include_summaries_requires_model(capsys):
     assert "--include-summaries requires --model" in captured.err
 
 
-def test_cli_negative_max_figure_captions_returns_nonzero(capsys):
+def test_cli_negative_max_figure_captions_is_a_usage_error(capsys):
+    """2, matching the adjacent --include-summaries guard and argparse itself.
+
+    A bad flag value is a usage error, not a build failure; 1 is what a build
+    that was asked for correctly and then failed returns.
+    """
     from datasheetindex import cli
 
     exit_code = cli.main(["build", "input.pdf", "--max-figure-captions", "-1"])
     captured = capsys.readouterr()
 
-    assert exit_code == 1
+    assert exit_code == 2
     assert "--max-figure-captions must be >= 0" in captured.err
+
+
+def test_cli_default_max_figure_captions_tracks_the_library_constant():
+    """A bumped constant must not strand the CLI on the old value."""
+    from datasheetindex import cli
+    from datasheetindex.llm.figure_captions import DEFAULT_MAX_FIGURE_CAPTIONS
+
+    args = cli._build_parser().parse_args(["build", "input.pdf"])
+
+    assert args.max_figure_captions == DEFAULT_MAX_FIGURE_CAPTIONS
 
 
 def test_cli_passes_caption_figures_options_through(monkeypatch, capsys):

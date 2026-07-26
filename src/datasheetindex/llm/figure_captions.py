@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 #: full-page image over an empty text layer.
 DEFAULT_MAX_FIGURE_CAPTIONS = 20
 
+
 #: Four rather than one-per-candidate: an unbounded pool at the default cap
 #: opens twenty simultaneous gateway connections, which is how a shared
 #: deployment starts rate-limiting.
@@ -42,6 +43,28 @@ CAPTION_SYSTEM_PROMPT = (
     "photo, block diagram, pinout) and its subject. Do NOT transcribe any "
     "values, cell contents, or numbers. This is a navigation label, not data."
 )
+
+
+def validate_max_figure_captions(max_figure_captions: object) -> None:
+    """Raise ``ValueError`` unless the cap is an integer ``>= 0``.
+
+    One definition, two callers, because the second one has a side effect to
+    order against: ``DatasheetIndex.build`` validates at its own entry, but
+    ``DatasheetTools.build_datasheet`` must reject a bad cap *before* it removes
+    a valid sidecar, or a rejected call destroys a usable cache on its way to
+    raising.
+
+    ``bool`` is rejected explicitly (it is an ``int`` subclass, so ``True``
+    would silently become a cap of 1), and a non-int is rejected here rather
+    than reaching ``candidates[:2.5]`` and raising ``TypeError`` deep inside the
+    captioning pass.
+    """
+    if not isinstance(max_figure_captions, int) or isinstance(
+        max_figure_captions, bool
+    ):
+        raise ValueError("max_figure_captions must be an integer >= 0")
+    if max_figure_captions < 0:
+        raise ValueError("max_figure_captions must be an integer >= 0")
 
 
 def _candidate_order(entry: dict[str, object]) -> tuple[float, int]:

@@ -480,6 +480,18 @@ def test_build_datasheet_schema_bounds_max_figure_captions():
     assert props["max_figure_captions"]["minimum"] == 0
 
 
+def test_build_datasheet_schema_documents_the_real_default():
+    """A bumped constant must not strand the agent-visible schema on 20."""
+    from datasheetindex.llm.figure_captions import DEFAULT_MAX_FIGURE_CAPTIONS
+
+    props = _defs_by_name()["build_datasheet"].input_schema["properties"]
+
+    assert (
+        f"default {DEFAULT_MAX_FIGURE_CAPTIONS}"
+        in props["max_figure_captions"]["description"]
+    )
+
+
 def _figure_pdf(path):
     """A one-page PDF with a raster region and a text-layer figure caption."""
     doc = pymupdf.open()

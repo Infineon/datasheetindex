@@ -48,6 +48,17 @@ _ATTR_MODULES = {
 }
 
 
+def __dir__() -> list[str]:
+    """Keep ``dir()`` listing the re-exports.
+
+    Lazy resolution means the names are absent from ``globals()`` until first
+    accessed, so without this ``dir(datasheetindex.tools)`` would report a
+    package with no public surface -- the one behaviour the PEP 562 conversion
+    did not otherwise preserve.
+    """
+    return sorted(__all__)
+
+
 def __getattr__(name: str) -> object:
     module_name = _ATTR_MODULES.get(name)
     if module_name is None:

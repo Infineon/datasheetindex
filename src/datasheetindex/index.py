@@ -41,6 +41,7 @@ from datasheetindex.llm.figure_captions import (
     DEFAULT_MAX_FIGURE_CAPTIONS,
     caption_figures_in_place,
     eligible_caption_count,
+    validate_max_figure_captions,
 )
 from datasheetindex.models import DatasheetArtifacts, TocQuality
 
@@ -570,12 +571,7 @@ class DatasheetIndex:
 
         Returns a DatasheetArtifacts with paths, data, and quality info.
         """
-        if not isinstance(max_figure_captions, int) or isinstance(
-            max_figure_captions, bool
-        ):
-            raise ValueError("max_figure_captions must be an integer >= 0")
-        if max_figure_captions < 0:
-            raise ValueError("max_figure_captions must be an integer >= 0")
+        validate_max_figure_captions(max_figure_captions)
         if output_dir is None or not output_dir.strip():
             output_dir = resolve_default_output_dir()
         t_start = time.monotonic()

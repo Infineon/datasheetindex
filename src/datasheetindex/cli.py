@@ -7,6 +7,7 @@ import sys
 
 from datasheetindex.index import DatasheetIndex
 from datasheetindex.llm.client import close_llm_client
+from datasheetindex.llm.figure_captions import DEFAULT_MAX_FIGURE_CAPTIONS
 from datasheetindex.mcp_server import _add_mcp_arguments
 
 
@@ -52,8 +53,11 @@ def _build_parser() -> argparse.ArgumentParser:
     build_parser.add_argument(
         "--max-figure-captions",
         type=int,
-        default=20,
-        help="Per-document ceiling on caption calls (default 20)",
+        default=DEFAULT_MAX_FIGURE_CAPTIONS,
+        help=(
+            "Per-document ceiling on caption calls "
+            f"(default {DEFAULT_MAX_FIGURE_CAPTIONS})"
+        ),
     )
     mcp_parser = subparsers.add_parser(
         "mcp",
@@ -69,8 +73,10 @@ def _run_build(args: argparse.Namespace) -> int:
         print("Error: --include-summaries requires --model", file=sys.stderr)
         return 2
     if args.max_figure_captions < 0:
+        # 2, like the guard above it: argparse's exit code for a usage error.
+        # 1 is reserved for a build that was asked for correctly and failed.
         print("Error: --max-figure-captions must be >= 0", file=sys.stderr)
-        return 1
+        return 2
     idx = DatasheetIndex(args.source)
     try:
         if args.model:

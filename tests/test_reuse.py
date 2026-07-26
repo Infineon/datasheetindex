@@ -1142,3 +1142,55 @@ def test_the_figure_digest_is_identical_fresh_or_reused(
     assert isinstance(fresh, dict)
     assert fresh.get("raster") == 1, "the fixture's raster region is missing"
     assert reused == fresh
+
+
+def test_a_rejected_cap_does_not_destroy_a_valid_sidecar(
+    tmp_path, figure_pdf, not_editable, build_spy, monkeypatch
+):
+    """Validate before invalidating.
+
+    ``build()`` rejects a bad ``max_figure_captions`` too -- but only after
+    ``_build_or_reuse`` has already removed the sidecar to make room for the
+    rebuild, so a call that could never succeed used to cost the document its
+    cache on the way to raising.
+    """
+    _keyless(monkeypatch)
+    out = str(tmp_path / "out")
+
+    with DatasheetTools(str(figure_pdf)) as tools:
+        artifacts = tools.build_datasheet(output_dir=out)
+        assert artifacts.json_path is not None
+        sidecar = sidecar_path(out, artifacts.json_path.stem)
+        assert sidecar.exists()
+
+        with pytest.raises(ValueError, match="max_figure_captions"):
+            tools.build_datasheet(output_dir=out, max_figure_captions=-1)
+
+        assert sidecar.exists(), "a rejected call removed a valid sidecar"
+
+    with DatasheetTools(str(figure_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+
+    assert len(build_spy) == 1, "the surviving sidecar was not usable"
+
+
+def test_the_probe_does_not_upgrade_an_empty_model_to_the_default(monkeypatch):
+    """The gate and the rebuild must resolve the same model, including ``""``.
+
+    Truthiness here made ``model=""`` probe a *default* vision-capable model
+    while the rebuild passed ``""`` straight through, whose caption calls all
+    fail: the artifact came back incomplete, the gate saw capability, and the
+    document rebuilt forever.
+    """
+    from datasheetindex.tools.bound import _VisionResolver
+
+    seen: list[dict] = []
+
+    def fake_create(**kwargs):
+        seen.append(kwargs)
+        raise ValueError("no credentials")
+
+    monkeypatch.setattr("datasheetindex.llm.client.create_llm_client", fake_create)
+
+    assert _VisionResolver("").get() is None
+    assert seen == [{"model": ""}]
