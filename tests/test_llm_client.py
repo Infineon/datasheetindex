@@ -371,6 +371,76 @@ def test_call_with_retry_raises_after_max_attempts(monkeypatch):
         _call_with_retry(api, "model", "sys", "user")  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
 
+def test_get_vision_client_detects_describe_image():
+    from datasheetindex.llm.client import get_vision_client
+
+    class WithVision:
+        def describe_image(self, system, image_base64, *, media_type="image/png"):
+            return "a block diagram"
+
+    class WithoutVision:
+        def __call__(self, system, user):
+            return "text"
+
+    assert get_vision_client(WithVision()) is not None
+    assert get_vision_client(WithoutVision()) is None
+    assert get_vision_client(None) is None
+
+
+def test_describe_image_sends_responses_api_shaped_input():
+    # image_url is a PLAIN STRING on the Responses API. The far more commonly
+    # documented Chat Completions form nests it as {"url": ...}; that variant
+    # type-checks and fails at the gateway.
+    from datasheetindex.llm.client import _ManagedLlmClient
+
+    captured = {}
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+
+            class Out:
+                output_text = "a schematic of the output stage"
+
+            return Out()
+
+    client = _ManagedLlmClient(FakeResponses(), object(), "gpt-4.1")
+    result = client.describe_image("describe it", "QUJD", media_type="image/png")
+
+    assert result == "a schematic of the output stage"
+    content = captured["input"][0]["content"]
+    text_part = next(p for p in content if p["type"] == "input_text")
+    image_part = next(p for p in content if p["type"] == "input_image")
+    assert text_part["text"] == "describe it"
+    assert image_part["image_url"] == "data:image/png;base64,QUJD"
+    assert isinstance(image_part["image_url"], str)
+
+
+def test_describe_image_requests_low_detail():
+    # 512x512 at a flat documented token cost, and the model physically cannot
+    # transcribe cell values it never received -- the no-transcription guard
+    # enforced by the input rather than only by the prompt.
+    from datasheetindex.llm.client import _ManagedLlmClient
+
+    captured = {}
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+
+            class Out:
+                output_text = "x"
+
+            return Out()
+
+    _ManagedLlmClient(FakeResponses(), object(), "gpt-4.1").describe_image("s", "QUJD")
+
+    image_part = next(
+        p for p in captured["input"][0]["content"] if p["type"] == "input_image"
+    )
+    assert image_part["detail"] == "low"
+
+
 @pytest.mark.usefixtures("_has_env")
 @pytest.mark.integration
 def test_create_llm_client_integration():
