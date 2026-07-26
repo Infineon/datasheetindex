@@ -11,6 +11,7 @@ import pymupdf
 import pytest
 
 from datasheetindex import index as index_module
+from datasheetindex.core.textfile import PageScan
 from datasheetindex.index import (
     TOC_FALLBACK_THRESHOLD,
     DatasheetIndex,
@@ -270,8 +271,22 @@ def test_build_auto_llm_fallback_when_quality_low(monkeypatch, tmp_path):
         ]
 
     monkeypatch.setattr("datasheetindex.index.pymupdf.open", fake_open)
+    # index.py still calls the real (undelegated) generate_text at this point
+    # in the branch -- Task 4 switches the call site to scan_pages. Both
+    # patches are kept here so the fake docs (which only implement __len__)
+    # are never handed to the real per-page traversal, while the scan_pages
+    # patch is already in place, inert, for Task 4 to pick up unchanged.
     monkeypatch.setattr(
         "datasheetindex.index.generate_text", lambda _doc: "--- PAGE 1 ---\n"
+    )
+    monkeypatch.setattr(
+        "datasheetindex.index.scan_pages",
+        lambda _doc, **_kw: PageScan(
+            text="--- PAGE 1 ---\n",
+            figures=[],
+            excluded_below_min_area=0,
+        ),
+        raising=False,
     )
     monkeypatch.setattr("datasheetindex.index.generate_preamble", lambda _doc: "pre")
     monkeypatch.setattr("datasheetindex.index.extract_toc", lambda _doc: [])
@@ -366,8 +381,22 @@ def test_build_auto_llm_fallback_keeps_original_when_candidate_too_thin(
         ]
 
     monkeypatch.setattr("datasheetindex.index.pymupdf.open", fake_open)
+    # index.py still calls the real (undelegated) generate_text at this point
+    # in the branch -- Task 4 switches the call site to scan_pages. Both
+    # patches are kept here so the fake docs (which only implement __len__)
+    # are never handed to the real per-page traversal, while the scan_pages
+    # patch is already in place, inert, for Task 4 to pick up unchanged.
     monkeypatch.setattr(
         "datasheetindex.index.generate_text", lambda _doc: "--- PAGE 1 ---\n"
+    )
+    monkeypatch.setattr(
+        "datasheetindex.index.scan_pages",
+        lambda _doc, **_kw: PageScan(
+            text="--- PAGE 1 ---\n",
+            figures=[],
+            excluded_below_min_area=0,
+        ),
+        raising=False,
     )
     monkeypatch.setattr("datasheetindex.index.generate_preamble", lambda _doc: "pre")
     monkeypatch.setattr(
@@ -479,8 +508,22 @@ def test_build_auto_llm_fallback_graceful_without_credentials(monkeypatch, tmp_p
         return _FakeBuildDoc()
 
     monkeypatch.setattr("datasheetindex.index.pymupdf.open", fake_open)
+    # index.py still calls the real (undelegated) generate_text at this point
+    # in the branch -- Task 4 switches the call site to scan_pages. Both
+    # patches are kept here so the fake docs (which only implement __len__)
+    # are never handed to the real per-page traversal, while the scan_pages
+    # patch is already in place, inert, for Task 4 to pick up unchanged.
     monkeypatch.setattr(
         "datasheetindex.index.generate_text", lambda _doc: "--- PAGE 1 ---\n"
+    )
+    monkeypatch.setattr(
+        "datasheetindex.index.scan_pages",
+        lambda _doc, **_kw: PageScan(
+            text="--- PAGE 1 ---\n",
+            figures=[],
+            excluded_below_min_area=0,
+        ),
+        raising=False,
     )
     monkeypatch.setattr("datasheetindex.index.generate_preamble", lambda _doc: "pre")
     monkeypatch.setattr("datasheetindex.index.extract_toc", lambda _doc: [])
@@ -553,8 +596,22 @@ def test_build_llm_fallback_graceful_on_api_error(monkeypatch, tmp_path):
         raise RuntimeError("429 Too Many Requests")
 
     monkeypatch.setattr("datasheetindex.index.pymupdf.open", fake_open)
+    # index.py still calls the real (undelegated) generate_text at this point
+    # in the branch -- Task 4 switches the call site to scan_pages. Both
+    # patches are kept here so the fake docs (which only implement __len__)
+    # are never handed to the real per-page traversal, while the scan_pages
+    # patch is already in place, inert, for Task 4 to pick up unchanged.
     monkeypatch.setattr(
         "datasheetindex.index.generate_text", lambda _doc: "--- PAGE 1 ---\n"
+    )
+    monkeypatch.setattr(
+        "datasheetindex.index.scan_pages",
+        lambda _doc, **_kw: PageScan(
+            text="--- PAGE 1 ---\n",
+            figures=[],
+            excluded_below_min_area=0,
+        ),
+        raising=False,
     )
     monkeypatch.setattr("datasheetindex.index.generate_preamble", lambda _doc: "pre")
     monkeypatch.setattr("datasheetindex.index.extract_toc", lambda _doc: [])
@@ -603,8 +660,22 @@ def test_build_output_stem_override(monkeypatch, tmp_path):
         return _FakeBuildDoc()
 
     monkeypatch.setattr("datasheetindex.index.pymupdf.open", fake_open)
+    # index.py still calls the real (undelegated) generate_text at this point
+    # in the branch -- Task 4 switches the call site to scan_pages. Both
+    # patches are kept here so the fake docs (which only implement __len__)
+    # are never handed to the real per-page traversal, while the scan_pages
+    # patch is already in place, inert, for Task 4 to pick up unchanged.
     monkeypatch.setattr(
         "datasheetindex.index.generate_text", lambda _doc: "--- PAGE 1 ---\n"
+    )
+    monkeypatch.setattr(
+        "datasheetindex.index.scan_pages",
+        lambda _doc, **_kw: PageScan(
+            text="--- PAGE 1 ---\n",
+            figures=[],
+            excluded_below_min_area=0,
+        ),
+        raising=False,
     )
     monkeypatch.setattr("datasheetindex.index.generate_preamble", lambda _doc: "pre")
     monkeypatch.setattr("datasheetindex.index.extract_toc", lambda _doc: [])
@@ -688,8 +759,22 @@ def test_build_with_none_output_dir_writes_to_resolver_default(monkeypatch, tmp_
     monkeypatch.setattr(
         "datasheetindex.index.pymupdf.open", lambda _path: _FakeBuildDoc()
     )
+    # index.py still calls the real (undelegated) generate_text at this point
+    # in the branch -- Task 4 switches the call site to scan_pages. Both
+    # patches are kept here so the fake docs (which only implement __len__)
+    # are never handed to the real per-page traversal, while the scan_pages
+    # patch is already in place, inert, for Task 4 to pick up unchanged.
     monkeypatch.setattr(
         "datasheetindex.index.generate_text", lambda _doc: "--- PAGE 1 ---\n"
+    )
+    monkeypatch.setattr(
+        "datasheetindex.index.scan_pages",
+        lambda _doc, **_kw: PageScan(
+            text="--- PAGE 1 ---\n",
+            figures=[],
+            excluded_below_min_area=0,
+        ),
+        raising=False,
     )
     monkeypatch.setattr("datasheetindex.index.generate_preamble", lambda _doc: "pre")
     monkeypatch.setattr("datasheetindex.index.extract_toc", lambda _doc: [])
@@ -734,8 +819,22 @@ def test_build_with_blank_output_dir_falls_through_to_resolver(monkeypatch, tmp_
     monkeypatch.setattr(
         "datasheetindex.index.pymupdf.open", lambda _path: _FakeBuildDoc()
     )
+    # index.py still calls the real (undelegated) generate_text at this point
+    # in the branch -- Task 4 switches the call site to scan_pages. Both
+    # patches are kept here so the fake docs (which only implement __len__)
+    # are never handed to the real per-page traversal, while the scan_pages
+    # patch is already in place, inert, for Task 4 to pick up unchanged.
     monkeypatch.setattr(
         "datasheetindex.index.generate_text", lambda _doc: "--- PAGE 1 ---\n"
+    )
+    monkeypatch.setattr(
+        "datasheetindex.index.scan_pages",
+        lambda _doc, **_kw: PageScan(
+            text="--- PAGE 1 ---\n",
+            figures=[],
+            excluded_below_min_area=0,
+        ),
+        raising=False,
     )
     monkeypatch.setattr("datasheetindex.index.generate_preamble", lambda _doc: "pre")
     monkeypatch.setattr("datasheetindex.index.extract_toc", lambda _doc: [])

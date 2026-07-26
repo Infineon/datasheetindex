@@ -2,6 +2,7 @@
 
 import re
 from pathlib import Path
+from typing import cast
 
 import pymupdf
 import pytest
@@ -348,3 +349,55 @@ def test_real_pdf_has_text_between_markers():
     content_sections = sections[1:]
     non_empty = [s for s in content_sections if s.strip()]
     assert len(non_empty) > page_count * 0.8
+
+
+def test_generate_text_delegates_to_scan_pages():
+    # The retained wrapper must not drift from the function it delegates to.
+    from datasheetindex.core.textfile import generate_text, scan_pages
+
+    doc = pymupdf.open()
+    page = doc.new_page()
+    writer = pymupdf.TextWriter(page.rect)
+    writer.append((72, 72), "Supply voltage")
+    writer.write_text(page)
+
+    assert generate_text(doc) == scan_pages(doc).text
+    doc.close()
+
+
+def test_scan_pages_collects_figures_across_pages():
+    from datasheetindex.core.textfile import scan_pages
+
+    doc = pymupdf.open()
+    first = doc.new_page(width=595, height=842)
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 20, 20))
+    pix.set_rect(pix.irect, (0, 255, 0))
+    first.insert_image(pymupdf.Rect(100, 100, 400, 400), pixmap=pix)
+    second = doc.new_page(width=595, height=842)
+    writer = pymupdf.TextWriter(second.rect)
+    writer.append((72, 72), "Figure 4. Timing diagram")
+    writer.write_text(second)
+
+    scan = scan_pages(doc)
+    doc.close()
+
+    kinds = [(entry["page"], entry["kind"]) for entry in scan.figures]
+    assert (1, "raster") in kinds
+    assert (2, "caption") in kinds
+    assert scan.excluded_below_min_area == 0
+
+
+def test_scan_pages_orders_figures_by_page():
+    from datasheetindex.core.textfile import scan_pages
+
+    doc = pymupdf.open()
+    for _ in range(3):
+        page = doc.new_page(width=595, height=842)
+        writer = pymupdf.TextWriter(page.rect)
+        writer.append((72, 72), "Figure 1. Something")
+        writer.write_text(page)
+
+    pages = [cast(int, entry["page"]) for entry in scan_pages(doc).figures]
+    doc.close()
+
+    assert pages == sorted(pages)
