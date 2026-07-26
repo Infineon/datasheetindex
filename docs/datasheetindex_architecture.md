@@ -835,6 +835,33 @@ searchable and nothing is hidden. Both negatives are load-bearing — no note on
 a successful search, none on a caption-only document — because a note that
 appears unconditionally is one the agent learns to skip.
 
+#### How the tool text is divided, and why it is short
+
+A tool definition is re-sent on every request, so its length is a standing
+cost. The division that keeps it honest:
+
+- **The description answers two questions only** — when do I call this, and
+  what comes back. Nothing else belongs there.
+- **Everything about an argument lives on the argument**, in its JSON Schema
+  `description`. Guidance stays attached to what it describes, and a reader
+  scanning one parameter is not reading five paragraphs about the others.
+  `tests/test_defs.py` fails if any parameter has no description.
+- **No emphasis markers.** `IMPORTANT`, `CRITICAL`, `MUST`, `Do NOT` and
+  `CALL THIS FIRST` are all rejected by a test. They were written to stop
+  older models under-triggering; Anthropic's Claude 4.5/4.6 guidance is that
+  the same language now pushes the other way, and ordinary prose is the fix.
+- **Each description has a length budget**, set just above what the current
+  text needs, so drift back toward an essay fails a test rather than quietly
+  taxing every turn.
+
+This cut the five descriptions from 5750 characters to 2900. The information
+was preserved, not dropped: what left the prose moved into the parameters, so
+the full serialized surface fell 8389 → 7000 characters. Checked against a
+live model on the case the text exists for — an empty `search_text("SUMITOMO")`
+beside a figures row naming a supplier table — both the old and the new surface
+chose `inspect_page(page=5, detail="medium")` on 3 of 3 trials, and the new
+one names the text-layer cause in its reasoning.
+
 #### The image block carries two media-type keys
 
 `inspect_page` is the only tool returning a non-text block, and its envelope

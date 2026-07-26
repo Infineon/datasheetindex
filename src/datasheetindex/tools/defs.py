@@ -303,85 +303,91 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
         DatasheetToolDef(
             name="build_datasheet",
             description=(
-                "Build the enriched ToC JSON and page-matched text file for a "
-                "datasheet. CALL THIS FIRST with a pdf_source (local path or URL) "
-                "before using any other tool. Calling again with a different source "
-                "switches documents. Returns an artifact manifest with source info, "
-                "total pages, ToC quality score, and the full enriched Table of "
-                "Contents with section hierarchy, page ranges, table counts, "
-                "footnote markers, and cross-references.\n\n"
-                "The manifest also carries a 'figures' digest of the document's "
-                "figure content: total/raster/captioned counts, and a 'pages' "
-                "list of {page, figures, caption} rows, one per page carrying "
-                "figure entries -- each row's caption is that page's largest "
-                "figure, not merely its first. A caption names the kind of "
-                "content (table, schematic, plot, photo, block diagram, "
-                "pinout) followed immediately by its most identifying labels: "
-                "for a table, its row labels then its column headings; for a "
-                "plot, its axes and plotted quantity. Use it to decide where "
-                "inspect_page is worth calling.\n\n"
-                "IMPORTANT - raster tables are invisible to search_text: a "
-                "page whose content is rendered as a picture (e.g. a table "
-                "exported as an image) has no text layer, so search_text "
-                "returning zero hits does NOT mean the document does not "
-                "mention a term -- it may simply be pixels. A 'figures' row "
-                "naming a table, or naming row/column labels close to what "
-                "you are looking for, is the signal that such a page exists "
-                "and is worth opening with inspect_page before concluding a "
-                "term is absent.\n\n"
-                "A row can also name a page with no raster image on it, "
-                "because entries are also created for 'Figure N' mentions in "
-                "the page text. That is a useful signal rather than noise: it "
-                "usually means the figure is drawn as vector art, which the "
-                "index cannot enumerate or give you coordinates for. Such a "
-                "page is worth a full-page inspect_page even though no region "
-                "is offered. The digest is bounded (at most "
-                "40 page rows, one caption each, 'truncated' says when more "
-                "exist); the complete figures array, with normalized regions "
-                "for inspect_page(region=...), is in the ToC JSON at "
-                "json_path.\n\n"
-                "output_dir is optional -- omit it unless you need artifacts at a "
-                "specific path; the library picks a writable default.\n\n"
-                "IMPORTANT - include_summaries: Leave as False (default) unless "
-                "the user explicitly requests summaries. Generating summaries "
-                "makes one LLM call per ToC section, which is slow and "
-                "expensive. The ToC, text file, and other tools already provide "
-                "enough context for most tasks.\n\n"
-                "IMPORTANT - model: Do NOT set this unless summaries are "
-                "requested or ToC quality is very poor. When needed, use one of "
-                "the models available on the LiteLLM gateway: gpt-4.1 "
-                "(recommended default), gpt-5-mini, gpt-5-nano, gpt-4.1-nano, "
-                "gpt-4o-mini, gpt-5, gpt-5.1, gpt-5.2. Do NOT invent or guess "
-                "model names.\n\n"
-                "IMPORTANT - figure captioning cost: Figure captioning runs by "
-                "default (caption_figures=True) whenever vision-capable LLM "
-                "credentials are configured -- it is a no-op otherwise. Each "
-                "captioned figure is one VLM call, so raising "
-                "max_figure_captions raises cost proportionally; leave it at "
-                "its default unless a document is known to need more."
+                "Load a datasheet -- building its enriched ToC JSON and "
+                "page-matched text file -- and return the manifest. Call this "
+                "before the other tools; calling it again with a different "
+                "pdf_source switches documents.\n\n"
+                "The manifest carries the source, total pages, ToC quality, and "
+                "the enriched Table of Contents -- section hierarchy, page "
+                "ranges, table counts, footnote markers, cross-references -- "
+                "plus a 'figures' digest: total/raster/captioned counts and up "
+                "to 40 {page, figures, caption} rows ('truncated' says when "
+                "more exist), each row carrying that page's largest figure. A "
+                "caption names the kind of content "
+                "(table, schematic, plot, photo, block diagram, pinout) and "
+                "then its most identifying labels: a table's row labels then "
+                "column headings, a plot's axes and plotted quantity. Use it to "
+                "choose pages worth inspect_page -- above all when search_text "
+                "finds nothing, since a captioned region is pixels no text "
+                "search can reach.\n\n"
+                "A row with no raster region comes from a 'Figure N' mention in "
+                "the page text, and usually means a vector-drawn figure the "
+                "index cannot give coordinates for: still worth a full-page "
+                "inspect_page. The complete figures array, with regions for "
+                "inspect_page(region=...), is in the ToC JSON at json_path."
             ),
             input_schema={
                 "type": "object",
                 "properties": {
-                    "pdf_source": {"type": "string"},
-                    "output_dir": {"type": "string"},
-                    "output_stem": {"type": "string"},
-                    "include_summaries": {"type": "boolean"},
-                    "model": {"type": "string"},
-                    "force_rebuild": {"type": "boolean"},
+                    "pdf_source": {
+                        "type": "string",
+                        "description": "Local path or http(s) URL of the PDF.",
+                    },
+                    "output_dir": {
+                        "type": "string",
+                        "description": (
+                            "Where to write the artifacts. Omit for a writable default."
+                        ),
+                    },
+                    "output_stem": {
+                        "type": "string",
+                        "description": (
+                            "Base filename for the artifacts. Omit to derive it "
+                            "from the source."
+                        ),
+                    },
+                    "include_summaries": {
+                        "type": "boolean",
+                        "description": (
+                            "Add an LLM summary to every ToC node. Off by "
+                            "default, and best left off unless the user asks: it "
+                            "costs one LLM call per section, and the ToC and page "
+                            "text are usually enough. Requires 'model'."
+                        ),
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": (
+                            "Model for summaries and the weak-ToC fallback. Omit "
+                            "unless summaries are requested or the ToC is poor. "
+                            "The gateway serves gpt-4.1 (the usual choice), "
+                            "gpt-5-mini, gpt-5-nano, gpt-4.1-nano, gpt-4o-mini, "
+                            "gpt-5, gpt-5.1, gpt-5.2; a name outside this list "
+                            "will not resolve."
+                        ),
+                    },
+                    "force_rebuild": {
+                        "type": "boolean",
+                        "description": (
+                            "Rebuild even when artifacts on disk already match "
+                            "this source."
+                        ),
+                    },
                     "caption_figures": {
                         "type": "boolean",
                         "description": (
                             "Name raster figure regions with a vision model. "
-                            "Default true; no-op without credentials."
+                            "Default true; a no-op without credentials."
                         ),
                     },
                     "max_figure_captions": {
                         "type": "integer",
                         "minimum": 0,
                         "description": (
-                            "Per-document ceiling on caption calls "
-                            f"(default {DEFAULT_MAX_FIGURE_CAPTIONS})."
+                            "Ceiling on caption calls per document (default "
+                            f"{DEFAULT_MAX_FIGURE_CAPTIONS}). Each distinct "
+                            "picture costs one vision call, so a higher ceiling "
+                            "costs proportionally more."
                         ),
                     },
                 },
@@ -392,29 +398,34 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
         DatasheetToolDef(
             name="get_section_text",
             description=(
-                "Read the extracted text for a page range (inclusive, 1-indexed). "
-                "Use when you know WHERE to read -- pass start_page/end_page from "
-                "ToC nodes, or from search_text hits when the ToC is empty, to "
-                "read specific sections. For a single page use the "
-                "same value for both. Prefer reading whole sections rather than "
-                "page-by-page. The text opens with a position header -- "
-                "'=== Page X of N ===' for a single page, '=== Pages X-Y of N ===' "
-                "for a range -- so you know where you are in the document. If a "
-                "'=== NOTE: ... ===' line follows the header, the range you "
-                "asked for cuts content the publisher marked as continued on "
-                "an adjacent page: re-read with that page included before "
-                "trusting values from it, since a section's ToC page range "
-                "does not always contain all of its content. The '===' "
-                "wrapping marks this as the tool's own signal, distinct from "
-                "a literal 'NOTE:' line that some datasheets carry in their "
-                "own body text. The absence of a note only means none was "
+                "Read the extracted text for a page range. Take start_page and "
+                "end_page from ToC nodes, or from search_text hits when the ToC "
+                "is empty, and prefer whole sections over page-by-page reads.\n\n"
+                "The text opens with '=== Page X of N ===' or "
+                "'=== Pages X-Y of N ==='. A '=== NOTE: ... ===' line after it "
+                "means the range cuts content the publisher marked as continued "
+                "on an adjacent page -- re-read including that page before "
+                "trusting values from it, since a section's ToC range does not "
+                "always hold all of its content. The '===' wrapper is what marks "
+                "the line as the tool's own signal rather than a literal 'NOTE:' "
+                "in the datasheet's body text. Absence of a note means none was "
                 "detected; it is not a guarantee of completeness."
             ),
             input_schema={
                 "type": "object",
                 "properties": {
-                    "start_page": {"type": "integer", "minimum": 1},
-                    "end_page": {"type": "integer", "minimum": 1},
+                    "start_page": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "1-indexed, inclusive.",
+                    },
+                    "end_page": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": (
+                            "1-indexed, inclusive. Same as start_page for one page."
+                        ),
+                    },
                 },
                 "required": ["start_page", "end_page"],
             },
@@ -423,20 +434,16 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
         DatasheetToolDef(
             name="search_text",
             description=(
-                "Search the full extracted text and return page-aware snippets "
-                "with surrounding context. Use when you know WHAT to look for -- a "
-                "parameter name, value, or keyword -- to locate it across the "
-                "datasheet before reading specific sections. 'query' may be a "
-                "single string or a list of strings to search several terms in one "
-                "call. Each result includes the ToC 'breadcrumb' of the section "
-                "containing the match; list searches also tag each result with the "
-                "matching 'pattern'. Omit 'page' to search all.\n"
-                "LIMITATION - this searches the extracted text layer only. A "
-                "table, schematic or label placed as an image has no text layer, "
-                "so a term inside it cannot be found here: the absence of a match "
-                "does not prove the document lacks the term. On an empty result, "
-                "check the 'figures' digest from build_datasheet for a page whose "
-                "caption describes what you want, then read it with inspect_page."
+                "Locate a term across the datasheet: returns page-aware snippets "
+                "with surrounding context, each tagged with the ToC 'breadcrumb' "
+                "of the section holding the match (and, for a list query, the "
+                "'pattern' that matched).\n\n"
+                "Searches the extracted text layer only. A table, schematic or "
+                "label placed as an image has no text layer, so a term inside it "
+                "cannot be found here: the absence of a match does not prove the "
+                "document lacks the term. On an empty result, check the 'figures' "
+                "digest from build_datasheet for a page whose caption describes "
+                "what you want, then read it with inspect_page."
             ),
             input_schema={
                 "type": "object",
@@ -453,8 +460,14 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                         "minimum": 1,
                         "description": "1-indexed page to search. Omit to search all.",
                     },
-                    "case_sensitive": {"type": "boolean"},
-                    "max_results": {"type": "integer"},
+                    "case_sensitive": {
+                        "type": "boolean",
+                        "description": "Default false.",
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Default 20.",
+                    },
                 },
                 "required": ["query"],
             },
@@ -463,30 +476,35 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
         DatasheetToolDef(
             name="inspect_page",
             description=(
-                "Render a PDF page as a PNG image for visual inspection. Use when "
-                "extracted text is garbled or insufficient -- tables with complex "
-                "layouts, block diagrams, pin-out figures, timing diagrams. "
-                "Optionally crop with top/bottom/left/right percentages (0.0-1.0). "
-                "Pick `detail` to control vision-token cost: 'low' for layout "
-                "overview, 'medium' (recommended default) for body text and table "
-                "cells, 'high' for footnotes / subscripts / dense schematics."
+                "Render a page as a PNG image and look at it. Use when the "
+                "extracted text is garbled or missing -- complex table layouts, "
+                "block diagrams, pin-outs, timing diagrams, and any page whose "
+                "content is a picture rather than text."
             ),
             input_schema={
                 "type": "object",
                 "properties": {
-                    "page": {"type": "integer", "minimum": 1},
+                    "page": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "1-indexed.",
+                    },
                     "region": {
                         "type": "object",
                         "description": (
-                            "Crop region with top/bottom/left/right (0.0-1.0)"
+                            "Crop to top/bottom/left/right, each 0.0-1.0. A "
+                            "figures entry's 'region' can be passed straight "
+                            "through."
                         ),
                     },
                     "detail": {
                         "type": "string",
                         "enum": ["low", "medium", "high"],
                         "description": (
-                            "Vision-token-cost tier. low=75 dpi, "
-                            "medium=100 dpi (recommended), high=150 dpi."
+                            "Vision-token cost tier: 'low' (75 dpi) for layout, "
+                            "'medium' (100 dpi, the usual choice) for body text "
+                            "and table cells, 'high' (150 dpi) for footnotes, "
+                            "subscripts and dense schematics."
                         ),
                     },
                     "dpi": {
@@ -501,17 +519,20 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
         DatasheetToolDef(
             name="extract_table_markdown",
             description=(
-                "Re-extract a single page as layout-aware Markdown with proper "
-                "table formatting. Use when get_section_text shows a garbled or "
-                "misaligned table and you need clean | delimited rows for parameter "
-                "extraction. Cheaper than inspect_page (text tokens vs vision "
-                "tokens) but slower (~3s per page). Pass the 1-indexed page number "
-                "from the PAGE marker."
+                "Re-extract one page as layout-aware Markdown with proper table "
+                "formatting. Use when get_section_text shows a garbled or "
+                "misaligned table and you want clean pipe-delimited rows. Costs "
+                "fewer tokens than inspect_page (text, not vision) but takes "
+                "about 3s per page."
             ),
             input_schema={
                 "type": "object",
                 "properties": {
-                    "page": {"type": "integer", "minimum": 1},
+                    "page": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "1-indexed, as in the PAGE markers.",
+                    },
                 },
                 "required": ["page"],
             },

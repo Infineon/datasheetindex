@@ -815,3 +815,61 @@ def test_search_note_is_absent_for_a_caption_only_document(tmp_path):
 
     assert payload["results"] == []
     assert "note" not in payload
+
+
+def test_tool_descriptions_stay_within_a_budget():
+    """Tool definitions are re-sent on every request, so length is a real cost.
+
+    These budgets are not aspirational -- they are set just above what the
+    current text needs, so a description drifting back toward an essay fails
+    here rather than quietly taxing every turn. Raising one is allowed; doing
+    it deliberately is the point. `build_datasheet` gets the largest budget
+    because it is the only tool that has to explain the manifest it returns.
+    """
+    budgets = {
+        "build_datasheet": 1300,
+        "get_section_text": 800,
+        "search_text": 700,
+        "inspect_page": 400,
+        "extract_table_markdown": 400,
+    }
+    oversize = {
+        d.name: len(d.description)
+        for d in create_datasheet_tool_defs()
+        if len(d.description) > budgets[d.name]
+    }
+    assert not oversize, f"over budget: {oversize} (budgets {budgets})"
+
+
+def test_every_tool_parameter_carries_a_description():
+    """A parameter explained nowhere is one the agent has to guess at.
+
+    Guidance about an argument belongs on the argument, not in the tool's
+    prose: it stays attached to what it describes, and the description is
+    free to answer only "when do I call this, and what comes back".
+    """
+    undocumented = [
+        f"{d.name}.{param}"
+        for d in create_datasheet_tool_defs()
+        for param, schema in d.input_schema["properties"].items()
+        if not schema.get("description")
+    ]
+    assert undocumented == []
+
+
+def test_tool_descriptions_do_not_shout():
+    """Claude 4.5/4.6 respond to emphasis by over-triggering, not by obeying.
+
+    The published guidance is explicit: prompts written to stop an older model
+    under-triggering ("CRITICAL: You MUST use this tool when...") now push the
+    other way, and the fix is ordinary prose. These five markers are the ones
+    this surface actually accumulated.
+    """
+    shouting = {"IMPORTANT", "CRITICAL", "MUST", "CALL THIS FIRST", "Do NOT"}
+    found = {
+        f"{d.name}: {marker}"
+        for d in create_datasheet_tool_defs()
+        for marker in shouting
+        if marker in d.description
+    }
+    assert found == set()
