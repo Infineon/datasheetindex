@@ -251,6 +251,22 @@ def test_notes_are_framing_and_excluded_from_chars_shown():
     assert len(fm.text) > 200
 
 
+def test_max_pages_zero_raises():
+    doc = _doc_with_lines(3)
+    with pytest.raises(ValueError, match="max_pages"):
+        build_front_matter(doc, max_pages=0)
+    doc.close()
+
+
+def test_max_pages_bool_raises():
+    doc = _doc_with_lines(3)
+    with pytest.raises(ValueError, match="max_pages"):
+        # bool is a subclass of int -- True would silently become a cap
+        # of 1 if this were not rejected explicitly.
+        build_front_matter(doc, max_pages=True)
+    doc.close()
+
+
 @pytest.mark.real_pdf
 def test_real_pdf_contains_product_name():
     """Preamble from real datasheet should contain the product name."""

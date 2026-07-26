@@ -142,7 +142,20 @@ def build_front_matter(
     ``sum(13 + digits(n) for n in 1..P) + (2 * P - 1)`` -- 31 at the default
     ``max_pages=2``. Note lines add roughly 120 characters each; that is an
     estimate, not a bound, since they embed page numbers and counts.
+
+    Raises ``ValueError`` unless ``max_pages`` is an integer ``>= 1``: zero
+    pages read makes ``_page_phrase`` produce the nonsensical "pages 1-0", so
+    it is rejected here rather than reaching that string. ``bool`` is
+    rejected explicitly -- it is an ``int`` subclass, so ``True`` would
+    silently become a cap of 1. ``max_chars`` needs no such guard:
+    ``max_chars=0`` still yields a coherent result, a marker plus the
+    truncation note.
     """
+    if not isinstance(max_pages, int) or isinstance(max_pages, bool):
+        raise ValueError("max_pages must be an integer >= 1")
+    if max_pages < 1:
+        raise ValueError("max_pages must be an integer >= 1")
+
     total_pages = len(doc)
     pages_read = max(0, min(max_pages, total_pages))
     texts = [_extract_page_text(doc[i]) for i in range(pages_read)]
