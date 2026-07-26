@@ -47,8 +47,30 @@ def sha256_text(text: str) -> str:
     Used to hash artifact content *after it has been read*, which is what makes
     a straddled or crash-mixed pair of deliverables fail validation rather than
     be served as a coherent artifact.
+
+    The caller must have read that text with newline translation disabled
+    (``Path.read_text(..., newline="")``), or this digest silently stops
+    agreeing with ``sha256_file`` of the same path. A plain ``read_text()``
+    opens in universal-newline mode and rewrites ``\\r\\n`` and lone ``\\r``
+    bytes to ``\\n`` on the way in; text this function is meant to compare
+    against a raw-byte hash must reach it unmodified. Use
+    :func:`read_artifact_text` to read artifact files for exactly this reason.
     """
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def read_artifact_text(path: str | Path) -> str:
+    """Read an artifact file's text for hashing or parsing, byte-faithfully.
+
+    ``newline=""`` disables universal-newline translation, so the returned
+    string encodes back to exactly the bytes on disk. Without it, a CR byte
+    in the file (``\\r\\n`` or a lone ``\\r``) is silently rewritten to ``\\n``,
+    and ``sha256_text`` of the result can never again agree with
+    ``sha256_file`` of the same path -- the artifact would fail reuse
+    validation forever. Every read of a deliverable that is later hashed and
+    compared against a recorded ``sha256_file`` value must go through this.
+    """
+    return Path(path).read_text(encoding="utf-8", newline="")
 
 
 def atomic_write_text(path: Path, content: str) -> None:
@@ -59,11 +81,17 @@ def atomic_write_text(path: Path, content: str) -> None:
     replace stays on one filesystem. The temp name is unique per writing thread
     so concurrent writers to the same destination do not share a temp path and
     truncate each other's content.
+
+    Written with ``newline=""`` so ``content`` lands on disk byte-for-byte: the
+    default universal-newline write mode only rewrites bytes when
+    ``os.linesep`` is not ``"\\n"``, which is a no-op on Linux/macOS but would
+    turn a lone ``\\n`` into ``\\r\\n`` on Windows, corrupting a hash taken of
+    ``content`` before the write.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_name(f"{path.name}.{os.getpid()}.{uuid4().hex}.tmp")
     try:
-        temp_path.write_text(content, encoding="utf-8")
+        temp_path.write_text(content, encoding="utf-8", newline="")
         os.replace(temp_path, path)
     except BaseException:
         temp_path.unlink(missing_ok=True)

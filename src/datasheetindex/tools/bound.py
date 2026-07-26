@@ -24,6 +24,7 @@ from datasheetindex._version import package_version
 from datasheetindex.core.artifact_cache import (
     ArtifactRecord,
     is_editable_install,
+    read_artifact_text,
     read_sidecar,
     remove_sidecar,
     reuse_blocker,
@@ -534,8 +535,8 @@ class DatasheetTools:
         json_path = directory / record.json_name
         text_path = directory / record.text_name
         try:
-            json_text = json_path.read_text(encoding="utf-8")
-            text_content = text_path.read_text(encoding="utf-8")
+            json_text = read_artifact_text(json_path)
+            text_content = read_artifact_text(text_path)
         except (OSError, UnicodeDecodeError):
             logger.debug("Not reusing on-disk artifacts: %s", "artifact_unreadable")
             return None

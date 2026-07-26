@@ -827,6 +827,58 @@ def test_a_malformed_json_deliverable_triggers_deserialization_failed(
     assert again.json_path.exists()
 
 
+def test_a_carriage_return_in_the_extracted_text_still_reuses(
+    tmp_path, toc_pdf, not_editable, build_spy, monkeypatch, caplog
+):
+    """The reuse-level regression: a CR byte in the extracted text must not
+    permanently disable caching for the document that contains one.
+
+    Recorded (json/text) hashes come from ``sha256_file`` on the artifact as
+    written; a later reuse check re-reads the file and hashes the resulting
+    string with ``sha256_text``. Reading with ``Path.read_text()``'s default
+    universal-newline mode silently rewrites a lone ``\\r`` to ``\\n``, so the
+    two hashes can never agree again for any document whose extracted text
+    carries a CR byte -- the artifact fails validation and rebuilds on every
+    later call, forever. This hit 2 of 14 real datasheets in a live corpus run.
+
+    PyMuPDF's own text extraction always normalizes a literal CR to LF before
+    handing text back to Python -- confirmed directly: ``page.get_text()``
+    never returns a raw ``\\r`` no matter how it is inserted (``insert_text``,
+    ``TextWriter``, ``insert_textbox``) -- so no fixture PDF reaches this bug
+    through real extraction alone. The CR is injected one layer up, at
+    ``_extract_page_text``, the seam ``scan_pages`` composes into the text
+    artifact ``atomic_write_text`` puts on disk. Everything downstream of that
+    seam -- composing the artifact, writing it, recording its hash, and later
+    reading it back for the reuse check -- is the real production code path;
+    only the origin of the CR byte is synthetic.
+    """
+    from datasheetindex.core.textfile import _extract_page_text as original_extract
+
+    def extract_with_cr(page):
+        return original_extract(page) + "\rV\rCC = 3.3 V"
+
+    monkeypatch.setattr(
+        "datasheetindex.core.textfile._extract_page_text", extract_with_cr
+    )
+
+    out = tmp_path / "out"
+    with DatasheetTools(str(toc_pdf)) as tools:
+        first = tools.build_datasheet(output_dir=str(out))
+    assert first.text_path is not None
+    assert "\r" in first.text_path.read_bytes().decode("utf-8"), (
+        "the fixture must actually carry a CR on disk, or this test proves "
+        "nothing about the bug"
+    )
+
+    with caplog.at_level("DEBUG", logger="datasheetindex.tools.bound"):
+        with DatasheetTools(str(toc_pdf)) as tools:
+            second = tools.build_datasheet(output_dir=str(out))
+
+    assert len(build_spy) == 1, "a CR in the extracted text forced a rebuild"
+    assert "hash_mismatch" not in caplog.text
+    assert second.text_content == first.text_content
+
+
 def test_switching_back_to_a_prior_document_reuses_its_artifacts(
     tmp_path, toc_pdf, other_toc_pdf, not_editable, build_spy
 ):
