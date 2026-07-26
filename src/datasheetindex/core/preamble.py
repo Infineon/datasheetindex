@@ -26,10 +26,16 @@ DEFAULT_MAX_PAGES = 2
 #: 5000 across 21 documents: 13 fit whole -- the widest, the PSoC 6 at 4746
 #: characters, uses 95% of the budget -- and 8 are cut, six TI datasheets
 #: (5332-7404 characters on pages 1-2) and two onsemi PCNs. It stays at 5000
-#: for what it keeps: on the cut documents the specifications are inside the
-#: budget and what falls past it is page 2's table of contents, revision
-#: history and copyright footer. A caller wanting the rest raises `max_chars`,
-#: and the NOTE line names the cut so the choice is informed.
+#: for what it keeps, with one qualification: six of the eight cut documents
+#: keep their specifications inside the budget, and what falls past the cut
+#: there is page 2's table of contents, revision history and copyright footer.
+#: The other two do lose specifications -- the MSP430F5529 its Device
+#: Information package table and the tail of its general description, the
+#: onsemi IPCN26979Z the continuation of a qualification-test table. See
+#: "Decisions already settled by measurement" in
+#: `docs/datasheetindex_architecture.md` before weighing a raise. A caller
+#: wanting the rest raises `max_chars`, and the NOTE line names the cut so the
+#: choice is informed.
 DEFAULT_MAX_CHARS = 5000
 
 # A line opening with a bullet glyph, or with a dash that is *not* followed by
@@ -167,10 +173,16 @@ def _page_note(*, pages_read: int, total_pages: int) -> str:
 def _page_signals(text: str) -> _PageSignals:
     """Per-page evidence: bullet lines and a features heading.
 
-    Reported, not acted on. The two separate a real datasheet's front matter
-    from a product-change notice's cover letter across the 21-document corpus
-    (34 and 43 bullets with a features heading on the PSoC 6; 0 and none on the
-    TI PCN's page 1). Two signals were designed and rejected on measurement: a
+    Reported, not acted on. Across the 21-document corpus they separate a
+    product-change notice's cover letter from a real datasheet's front matter in
+    one direction only: all seven notices score 0 bullets and no features
+    heading on page 1, and 13 of the 14 datasheets report a page-1 features
+    heading -- but the Infineon IRF540N is a datasheet that scores 0 and none on
+    both pages, indistinguishable from a cover letter here. The separation rests
+    on ``has_features_heading``: page-1 ``bullets`` is 0 on three of the
+    fourteen datasheets (Diodes AH1751, Infineon IRF540N, Microchip ATmega328P),
+    so the PSoC 6's 34 and 43 illustrate the count rather than measure what it
+    discriminates. Two signals were designed and rejected on measurement: a
     unit density, noisy in both directions (it misses "150-MHz" and "40
     microamp", and false-positives on part numbers like "CY8C62x8/A"), and a
     legal-vocabulary count, which fired on TI datasheet page footers and scored

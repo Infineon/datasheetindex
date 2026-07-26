@@ -117,7 +117,7 @@ default to cover them would spend the budget of every document on the tail of
 a few.
 
 **Unit density is deliberately not a signal.** A count of numeric-plus-unit
-tokens looks like the obvious fourth signal. A naive ASCII pattern undercounts
+tokens looks like the obvious third signal. A naive ASCII pattern undercounts
 badly -- 5 matches on PSoC page 1 -- because it misses `150-MHz` (hyphen
 separator), `1.1-V`, and `40 uA` (micro sign, which needs both U+00B5 and
 U+03BC). The corrected pattern then false-positives on part numbers, which
@@ -125,10 +125,17 @@ datasheets are full of: `8/A` from `CY8C62x8/A`, `4F` from `Cortex-M4F`. No
 count for a corrected pattern is quoted here on purpose: the pattern was never
 kept, so the figure cannot be re-derived, and an unreproducible number in a
 tracked doc is worse than none. Noisy in both directions, and `bullets` plus
-`has_features_heading` already separate the two document classes across the
-corpus on their own (34 and 43 bullets with a features heading each on the PSoC
-6 front matter; 0 bullets and no heading on every product-change notice's page
-1). Add it later if a consumer needs it, calibrated against part-number forms.
+`has_features_heading` already do as much separating as has been asked of them:
+all seven product-change notices score 0 bullets and no features heading on page
+1, and 13 of the 14 datasheets report a page-1 features heading. That separation
+runs in one direction only -- the Infineon IRF540N is a datasheet scoring 0
+bullets and no heading on *both* pages, indistinguishable from a cover letter on
+these two signals -- and it is `has_features_heading` that carries it: page-1
+`bullets` is 0 on three of the fourteen datasheets (Diodes AH1751, Infineon
+IRF540N, Microchip ATmega328P), so the PSoC 6's 34 and 43 illustrate what the
+count looks like on a dense features page rather than measure what it
+discriminates. Add unit density later if a consumer needs it, calibrated against
+part-number forms.
 
 **A legal-vocabulary count was designed, built, measured and then not
 shipped.** A third signal, `legal_hits`, counted disclaimer vocabulary

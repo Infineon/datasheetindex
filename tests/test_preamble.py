@@ -347,8 +347,13 @@ def test_signals_on_a_bulleted_features_page():
     assert signals["has_features_heading"] is True
 
 
-def test_signals_on_a_legal_cover_page():
-    """A cover letter shows itself by what it lacks: bullets and a heading."""
+def test_a_cover_letter_scores_no_bullets_and_no_features_heading():
+    """A cover letter shows itself by what it lacks, not by what it says.
+
+    The disclaimer prose is kept deliberately: it is realistic cover-letter
+    text, and pinning that it yields no bullets and no heading is the whole
+    claim now that no signal scores its vocabulary.
+    """
     text = (
         "Product Change Notification\n"
         "TI requires acknowledgement of receipt of this notification "
@@ -415,6 +420,12 @@ def test_features_heading_ignores_a_leading_section_number(line, expected):
 
 
 def test_build_front_matter_populates_signals_per_page():
+    """Page 1 carries both signals; page 2 is prose that carries neither.
+
+    The page-2 disclaimer sentence is now just prose -- nothing counts its
+    vocabulary -- and it stays because a page with neither signal is what the
+    per-page assertions need.
+    """
     doc = pymupdf.open()
     page = doc.new_page()
     page.insert_textbox(
