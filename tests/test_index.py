@@ -1441,6 +1441,18 @@ def test_negative_max_figure_captions_raises(tmp_path):
     with DatasheetIndex(str(pdf)) as index:
         with pytest.raises(ValueError, match="max_figure_captions"):
             index.build(output_dir=str(tmp_path / "out"), max_figure_captions=-1)
+        with pytest.raises(ValueError, match="max_figure_captions"):
+            # bool is a subclass of int -- True would silently become a cap
+            # of 1 if this were not rejected explicitly.
+            index.build(output_dir=str(tmp_path / "out"), max_figure_captions=True)
+        with pytest.raises(ValueError, match="max_figure_captions"):
+            # A non-int (e.g. float) must be rejected here rather than
+            # reaching candidates[:2.5] and raising TypeError deep inside
+            # figure_captions.py.
+            index.build(
+                output_dir=str(tmp_path / "out"),
+                max_figure_captions=2.5,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+            )
 
 
 def test_caption_figures_true_with_no_model_does_not_raise(tmp_path):
