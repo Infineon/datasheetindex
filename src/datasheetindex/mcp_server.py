@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import importlib
+import inspect
 import sys
 from typing import Any
 
@@ -83,6 +84,30 @@ SERVER_INSTRUCTIONS = (
 )
 
 
+def _text_error(message: str) -> dict[str, Any]:
+    """A neutral error envelope carrying one text block."""
+    return {"content": [{"type": "text", "text": message}], "is_error": True}
+
+
+def _schema_violation(schema: dict[str, Any], arguments: dict[str, Any]) -> str | None:
+    """The first schema violation in ``arguments``, or ``None`` if it validates.
+
+    Mirrors what mcp 1.x's ``@server.call_tool()`` wrapper does before dispatch
+    (``jsonschema.validate`` against the tool's ``inputSchema``, reported as
+    ``Input validation error: {e.message}``), so the 2.x branch tells an agent
+    the same thing about the same bad call. ``jsonschema`` is not a declared
+    dependency of this package but ships with ``mcp`` on both majors; the import
+    is local because this module is importable without the ``[mcp]`` extra.
+    """
+    import jsonschema
+
+    try:
+        jsonschema.validate(instance=arguments, schema=schema)
+    except jsonschema.ValidationError as exc:
+        return exc.message
+    return None
+
+
 def _build_mcp_server(
     session: DatasheetToolSession, server_cls: Any, types_module: Any
 ):
@@ -96,13 +121,22 @@ def _build_mcp_server(
     we could declare. Pinning either way would break the other consumer; see the
     ``[mcp]`` extra's comment in ``pyproject.toml``.
 
-    The split is narrow and confined to handler registration. mcp 1.x registers
-    via ``@server.list_tools()`` / ``@server.call_tool()`` decorators and takes
+    The split is confined to handler registration. mcp 1.x registers via
+    ``@server.list_tools()`` / ``@server.call_tool()`` decorators and takes
     unwrapped returns; mcp 2.x takes ``on_list_tools`` / ``on_call_tool``
     constructor callables that return ``ListToolsResult`` / ``CallToolResult``.
-    Everything else is already shared: ``run()``, ``create_initialization_options()``
-    and ``_envelope_to_content`` are identical across both, and ``mimeType=`` is
-    still accepted as an alias in 2.x (where the field is ``mime_type``).
+    ``run()``, ``create_initialization_options()`` and ``_envelope_to_content``
+    are identical across both, and ``mimeType=`` is still accepted as an alias in
+    2.x (where the field is ``mime_type``).
+
+    **The 2.x callable is not wrapped by the framework, so guards 1.x applied for
+    us have to be applied here.** ``@server.call_tool()`` validated ``arguments``
+    against ``inputSchema`` before dispatch and converted a raised exception into
+    ``isError``; the 2.x callable gets the raw request and its exceptions escape
+    as JSON-RPC *protocol* errors. Both are reproduced explicitly in
+    ``_on_call_tool`` -- schema validation via ``_schema_violation``, and an
+    unknown name returned rather than raised -- so the observable behaviour of a
+    bad call is identical on both majors. Do not "simplify" either away.
 
     Drop the 1.x branch once ``claude-agent-sdk`` lifts its ``mcp<2`` pin -- at
     which point ``pyproject.toml`` can require ``mcp[cli]>=2``.
@@ -155,17 +189,52 @@ def _build_mcp_server(
 
         return server
 
+    # Positive probe for 2.x rather than a bare `else`. The extra is
+    # deliberately unbounded, so a future major dropping this API arrives
+    # unannounced -- exactly how 2.0.0 did -- and falling through would raise an
+    # unexpected-keyword TypeError naming neither the version nor the fix.
+    if "on_list_tools" not in inspect.signature(server_cls.__init__).parameters:
+        raise RuntimeError(
+            "unsupported mcp version: mcp.server.lowlevel.Server exposes neither "
+            "the 1.x decorator API (list_tools) nor the 2.x constructor handlers "
+            "(on_list_tools). Pin mcp to a supported release, or teach "
+            "_build_mcp_server the new API."
+        )
+
     async def _on_list_tools(_ctx: Any, _params: Any) -> Any:
         return types_module.ListToolsResult(tools=_tool_models())
 
     async def _on_call_tool(_ctx: Any, params: Any) -> Any:
-        envelope = await _invoke(params.name, params.arguments)
+        # 2.x hands us the raw request: there is no framework wrapper between
+        # the wire and this callable, so the two guards mcp 1.x applies before
+        # dispatch have to be applied here or they are simply lost. Both must
+        # produce a *result*, never an exception -- an escaping error becomes a
+        # JSON-RPC protocol error the agent cannot read and recover from, and
+        # upstream emits it with the invalid error code 0.
+        definition = by_name.get(params.name)
+        arguments = params.arguments or {}
+        if definition is None:
+            envelope = _text_error(f"unknown tool: {params.name}")
+        else:
+            violation = _schema_violation(definition.input_schema, arguments)
+            if violation is not None:
+                envelope = _text_error(f"Input validation error: {violation}")
+            else:
+                envelope = await definition.handler(arguments)
+
+        content = _envelope_to_content(envelope, types_module)
+        is_error = bool(envelope.get("is_error"))
+        if is_error and not content:
+            # Same defence as the 1.x branch's ``_error_message`` fallback: an
+            # error result carrying no text at all says less than "it failed".
+            content = [
+                types_module.TextContent(
+                    type="text", text=_error_message(params.name, envelope)
+                )
+            ]
         # 2.x carries the flag on the result, so the handler's own error text is
         # returned verbatim instead of being reconstructed from an exception.
-        return types_module.CallToolResult(
-            content=_envelope_to_content(envelope, types_module),
-            is_error=bool(envelope.get("is_error")),
-        )
+        return types_module.CallToolResult(content=content, is_error=is_error)
 
     return server_cls(
         name="datasheetindex",

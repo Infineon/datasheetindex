@@ -173,6 +173,83 @@ def test_call_tool_before_build_is_tool_error():
     assert "No datasheet loaded" in result.content[0].text
 
 
+def test_invalid_arguments_get_a_schema_diagnostic():
+    """Bad arguments must be named by the schema, not by a Python traceback.
+
+    mcp 1.x validates against ``inputSchema`` inside its ``@server.call_tool()``
+    wrapper before our handler runs. The 2.x ``on_call_tool`` callable has no
+    such wrapper, so without an explicit check the request reaches the handler
+    and the agent is told ``KeyError: 'query'`` instead of what to fix. These
+    tools exist to steer an LLM through a datasheet, so the diagnostic *is* the
+    product -- the two majors must not disagree about it.
+    """
+    types = pytest.importorskip("mcp.types")
+    from datasheetindex.mcp_server import create_local_mcp_server
+
+    server = create_local_mcp_server().mcp_server
+
+    missing = _call(server, types, "search_text", {})
+    assert _is_error(missing) is True
+    assert "Input validation error" in missing.content[0].text
+    assert "'query' is a required property" in missing.content[0].text
+
+    wrong_type = _call(
+        server, types, "get_section_text", {"start_page": "abc", "end_page": 1}
+    )
+    assert _is_error(wrong_type) is True
+    assert "Input validation error" in wrong_type.content[0].text
+    assert "'abc' is not of type 'integer'" in wrong_type.content[0].text
+
+
+def test_unknown_tool_is_a_tool_error_not_a_protocol_error():
+    """An unknown name is a recoverable tool error on both majors.
+
+    On 1.x the framework converts our raised ``ValueError`` into
+    ``isError=True``. On 2.x nothing catches it, so it escapes as a JSON-RPC
+    *protocol* error -- which a 1.x client surfaces as a raised ``McpError``
+    rather than a result the agent can read and recover from, and which upstream
+    emits with the invalid error code 0. So the 2.x branch must return the error
+    rather than raise it.
+    """
+    types = pytest.importorskip("mcp.types")
+    from datasheetindex.mcp_server import create_local_mcp_server
+
+    server = create_local_mcp_server().mcp_server
+
+    result = _call(server, types, "bogus_tool", {})
+    assert _is_error(result) is True
+    assert "unknown tool: bogus_tool" in result.content[0].text
+
+
+def test_unrecognised_mcp_api_fails_with_a_message_naming_the_problem():
+    """A future major that matches neither API must say so, not TypeError.
+
+    The ``[mcp]`` extra is deliberately unbounded (see ``pyproject.toml``), so
+    an ``mcp`` 3.0 dropping ``on_list_tools`` would arrive here unannounced --
+    exactly how 2.0.0 arrived. Falling through to the 2.x constructor would
+    raise an unexpected-keyword ``TypeError`` naming neither the version nor the
+    fix, which is the failure mode that made the original break take so long to
+    read.
+    """
+    from datasheetindex.mcp_server import _build_mcp_server
+    from datasheetindex.tools.defs import create_datasheet_tool_session
+
+    class _FutureServer:
+        def __init__(self, name, *, version="", instructions=None):
+            self.name = name
+
+    # The real session, not a stand-in: it needs no mcp, and typing the
+    # parameter honestly is what makes `ty` cover this call site.
+    session = create_datasheet_tool_session()
+    try:
+        with pytest.raises(RuntimeError, match="unsupported mcp version"):
+            _build_mcp_server(
+                session, _FutureServer, types_module=types.SimpleNamespace()
+            )
+    finally:
+        session.close()
+
+
 def test_run_dispatches_transport_and_closes_session(monkeypatch):
     pytest.importorskip("mcp")
     from datasheetindex.mcp_server import create_local_mcp_server
@@ -425,6 +502,11 @@ def test_streamable_http_roundtrip_with_real_client(tmp_path):
                         )
                         assert _is_error(build) is False
                         return
+            except AssertionError:
+                # A failed assertion means we reached the server and it answered
+                # wrongly. Retrying would bury a real cross-major failure under
+                # 20s of polling and then report it as "could not reach server".
+                raise
             except Exception as exc:  # server not up yet / transient
                 last = exc
         raise AssertionError(f"could not reach streamable-http server: {last!r}")
