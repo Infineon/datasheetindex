@@ -521,6 +521,123 @@ def test_stdio_roundtrip_with_real_client(tmp_path):
     asyncio.run(asyncio.wait_for(go(), timeout=60))
 
 
+@pytest.mark.integration
+def test_stdio_wire_carries_only_json_even_on_the_sequential_scan(tmp_path):
+    """Nothing but JSON-RPC may reach stdout, including at process teardown.
+
+    PyMuPDF's ``find_tables()`` calls ``_warn_layout_once()``, which ``print()``s
+    a layout-package advertisement to **stdout** -- the JSON-RPC channel. Our
+    parallel scan is immune because ``structure._subprocess_init`` puts worker
+    stdout on devnull, but the sequential path (``DATASHEETINDEX_PARALLEL=0``,
+    and the fallback after a pool failure or scan timeout) runs ``find_tables()``
+    in-process, straight onto the wire.
+
+    Two things make this worth an integration test rather than a unit one:
+
+    * It only reproduces end to end. ``engine.classic_tables()`` sets
+      ``pymupdf._get_layout = None``, which *satisfies* the notice's trigger
+      rather than avoiding it, so the condition is live in exactly the
+      configuration the server runs in.
+    * **The corruption can arrive after the last response.** Under mcp 2.x,
+      ``stdio_server`` dup2s a private fd for the wire, so the ``print`` lands in
+      ``sys.stdout``'s block buffer instead; the interpreter's final flush then
+      dumps it onto the restored fd 1 *after* teardown. A test that only checked
+      the responses it asked for would pass while the wire was corrupt, so this
+      reads to EOF after the process exits.
+    """
+    pytest.importorskip("mcp")
+    import os
+    import subprocess
+    import sys
+    import threading
+    import time
+
+    pdf = tmp_path / "t.pdf"
+    _make_pdf(pdf)
+
+    env = {**os.environ, "DATASHEETINDEX_PARALLEL": "0"}
+    proc = subprocess.Popen(
+        [sys.executable, *_SERVER_ARGS],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        env=env,
+    )
+    lines: list[str] = []
+
+    def _drain():
+        assert proc.stdout is not None
+        for raw_line in proc.stdout:
+            lines.append(raw_line.rstrip("\n"))
+
+    reader = threading.Thread(target=_drain, daemon=True)
+    reader.start()
+
+    def _send(payload):
+        assert proc.stdin is not None
+        proc.stdin.write(json.dumps(payload) + "\n")
+        proc.stdin.flush()
+
+    try:
+        _send(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {"name": "wire-probe", "version": "1"},
+                },
+            }
+        )
+        _send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        _send(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "build_datasheet",
+                    "arguments": {
+                        "pdf_source": str(pdf),
+                        "output_dir": str(tmp_path / "out"),
+                    },
+                },
+            }
+        )
+        # Collect on a thread: stdin must stay open until the build answers, or
+        # the server shuts down mid-call and this asserts over an empty wire.
+        for _ in range(120):
+            if any('"id":2' in ln or '"id": 2' in ln for ln in lines):
+                break
+            time.sleep(0.5)
+        assert proc.stdin is not None
+        proc.stdin.close()
+        proc.wait(timeout=60)
+        reader.join(timeout=30)  # drains the teardown flush, which lands last
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+    assert any('"id":2' in ln or '"id": 2' in ln for ln in lines), (
+        f"build_datasheet never answered; wire was: {lines}"
+    )
+
+    offending = []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            json.loads(line)
+        except json.JSONDecodeError:
+            offending.append(line)
+
+    assert not offending, f"non-JSON written to the stdio wire: {offending}"
+
+
 def _free_port() -> int:
     """Pick an available localhost port (small TOCTOU window, fine for tests)."""
     import socket

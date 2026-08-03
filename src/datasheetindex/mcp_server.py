@@ -53,6 +53,41 @@ def _preload_layout_model() -> None:
         pass  # optional dependency; extract_table_markdown reports the error
 
 
+def _silence_pymupdf_stdout_notice() -> None:
+    """Stop PyMuPDF printing its layout advertisement onto the JSON-RPC wire.
+
+    ``find_tables()`` calls ``pymupdf._warn_layout_once()``, which ``print()``s
+    "Consider using the pymupdf_layout package..." to **stdout** -- the channel
+    the stdio transport carries JSON-RPC on -- once per process, unless the
+    ``[layout]`` extra is installed. Our table scan calls ``find_tables()`` on
+    every page, and ``engine.classic_tables()`` sets ``pymupdf._get_layout =
+    None``, which *satisfies* the notice's trigger rather than avoiding it.
+
+    The parallel scan is already immune: ``structure._subprocess_init`` puts
+    worker stdin/stdout on devnull. The sequential path
+    (``DATASHEETINDEX_PARALLEL=0``, and the fallback after a pool failure or
+    scan timeout) runs in-process, so the line lands on the wire and the client's
+    JSON parse fails. Under mcp 2.x it surfaces *after* the last response: that
+    transport dup2s a private fd for the wire, so the text sits in
+    ``sys.stdout``'s block buffer until the interpreter's final flush writes it
+    to the restored fd 1.
+
+    ``no_recommend_layout()`` is PyMuPDF's own supported opt-out (the env var
+    ``PYMUPDF_SUGGEST_LAYOUT_ANALYZER=0`` is the other). Preferred over wrapping
+    the server in ``redirect_stdout``, which would swallow unrelated output and
+    leave the cause in place. This touches ``pymupdf._recommend_layout``, not the
+    ``_get_layout`` table-engine hook, so it is not ``core.engine``'s to own.
+
+    Applied for stdio only. On the HTTP transports stdout is not the wire, and
+    silencing another library's advice there would be gratuitous.
+    """
+    import pymupdf
+
+    silence = getattr(pymupdf, "no_recommend_layout", None)
+    if silence is not None:
+        silence()
+
+
 def _envelope_to_content(envelope: dict[str, Any], types_module: Any) -> list[Any]:
     """Translate a neutral ``{"content": [...]}`` envelope into MCP content blocks."""
     blocks: list[Any] = []
@@ -350,6 +385,8 @@ class LocalMcpServer:
         _preload_layout_model()
         try:
             if transport == "stdio":
+                # stdout IS the wire here; nothing else may write to it.
+                _silence_pymupdf_stdout_notice()
                 anyio.run(self._serve_stdio)
             elif transport == "streamable-http":
                 self._serve_streamable_http()
