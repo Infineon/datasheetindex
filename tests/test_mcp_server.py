@@ -27,22 +27,67 @@ def _make_pdf(path, text="Supply voltage 4.5V to 5.5V"):
     doc.close()
 
 
-def _drive(server, request):
-    """Invoke a low-level Server request handler and return the result payload."""
-    handler = server.request_handlers[type(request)]
-    return asyncio.run(handler(request)).root
+# --- Cross-major drivers ------------------------------------------------------
+# mcp 1.x registers handlers in a `request_handlers` dict keyed by request type
+# and wraps results in a ServerResult root; mcp 2.x exposes them via
+# `get_request_handler(method)` and returns the result directly. The helpers
+# below hide that so every behavioural test below is written once and asserts
+# the same thing on both majors -- which is the whole point of the dual-support
+# branch in `_build_mcp_server`.
+#
+# The 2.x handler is called with a ``None`` request context. That is not a stub
+# standing in for behaviour: our handlers close over the tool session and never
+# read the context, so passing one would add setup (a live ServerSession) that
+# proves nothing. If a handler ever starts using it, this raises rather than
+# silently passing.
+
+
+def _is_v2(server):
+    return hasattr(server, "get_request_handler")
 
 
 def _list_tools(server, types):
-    return _drive(server, types.ListToolsRequest(method="tools/list")).tools
+    if _is_v2(server):
+        entry = server.get_request_handler("tools/list")
+        return asyncio.run(entry.handler(None, None)).tools
+    request = types.ListToolsRequest(method="tools/list")
+    handler = server.request_handlers[type(request)]
+    return asyncio.run(handler(request)).root.tools
 
 
 def _call(server, types, name, arguments):
+    if _is_v2(server):
+        entry = server.get_request_handler("tools/call")
+        params = entry.params_type.model_validate(
+            {"name": name, "arguments": arguments}
+        )
+        return asyncio.run(entry.handler(None, params))
     request = types.CallToolRequest(
         method="tools/call",
         params=types.CallToolRequestParams(name=name, arguments=arguments),
     )
-    return _drive(server, request)
+    handler = server.request_handlers[type(request)]
+    return asyncio.run(handler(request)).root
+
+
+def _is_error(result):
+    """``CallToolResult.isError`` (mcp 1.x) / ``.is_error`` (mcp 2.x)."""
+    return result.is_error if hasattr(result, "is_error") else result.isError
+
+
+def _mime(block):
+    """``ImageContent.mimeType`` (mcp 1.x) / ``.mime_type`` (mcp 2.x)."""
+    return block.mime_type if hasattr(block, "mime_type") else block.mimeType
+
+
+def _input_schema(tool):
+    """``Tool.inputSchema`` (mcp 1.x) / ``.input_schema`` (mcp 2.x).
+
+    Only the *attribute* was renamed. ``mcp_server`` still constructs with
+    ``inputSchema=``, which 2.x accepts as an alias -- so this asymmetry is
+    real and the production code needs no branch for it.
+    """
+    return tool.input_schema if hasattr(tool, "input_schema") else tool.inputSchema
 
 
 def test_create_local_mcp_server_stores_config():
@@ -70,7 +115,7 @@ def test_serves_neutral_tool_defs_verbatim():
     assert set(served) == set(neutral)
     for name, d in neutral.items():
         assert served[name].description == d.description
-        assert served[name].inputSchema == d.input_schema
+        assert _input_schema(served[name]) == d.input_schema
 
 
 def test_call_tool_end_to_end(tmp_path):
@@ -87,34 +132,34 @@ def test_call_tool_end_to_end(tmp_path):
         "build_datasheet",
         {"pdf_source": str(pdf), "output_dir": str(tmp_path / "out")},
     )
-    assert build.isError is False
+    assert _is_error(build) is False
     assert build.content[0].type == "text"
     manifest = json.loads(build.content[0].text)
     assert manifest["total_pages"] == 1
     assert "toc" in manifest
 
     section = _call(server, types, "get_section_text", {"start_page": 1, "end_page": 1})
-    assert section.isError is False
+    assert _is_error(section) is False
     assert "Supply voltage" in json.loads(section.content[0].text)["text"]
 
     search = _call(server, types, "search_text", {"query": "5.5v"})
-    assert search.isError is False
+    assert _is_error(search) is False
     assert json.loads(search.content[0].text)["results"][0]["page"] == 1
 
     # list-valued query is forwarded unchanged
     multi = _call(server, types, "search_text", {"query": ["5.5v", "voltage"]})
-    assert multi.isError is False
+    assert _is_error(multi) is False
 
     image = _call(server, types, "inspect_page", {"page": 1})
-    assert image.isError is False
+    assert _is_error(image) is False
     assert image.content[0].type == "image"
-    assert image.content[0].mimeType == "image/png"
+    assert _mime(image.content[0]) == "image/png"
 
     # extract_table_markdown goes through the adapter too. It needs the optional
     # pymupdf4llm; with it, isError is False and we get markdown text; without it,
     # the handler returns a clean tool error. Either way the adapter path runs.
     table = _call(server, types, "extract_table_markdown", {"page": 1})
-    assert isinstance(table.isError, bool)
+    assert isinstance(_is_error(table), bool)
     assert table.content[0].type == "text"
 
 
@@ -124,7 +169,7 @@ def test_call_tool_before_build_is_tool_error():
 
     server = create_local_mcp_server().mcp_server
     result = _call(server, types, "search_text", {"query": "anything"})
-    assert result.isError is True
+    assert _is_error(result) is True
     assert "No datasheet loaded" in result.content[0].text
 
 
@@ -311,7 +356,7 @@ def test_stdio_roundtrip_with_real_client(tmp_path):
                     "build_datasheet",
                     {"pdf_source": str(pdf), "output_dir": str(tmp_path / "out")},
                 )
-                assert build.isError is False
+                assert _is_error(build) is False
                 search = await session.call_tool("search_text", {"query": "5.5v"})
                 block = search.content[0]
                 assert isinstance(block, TextContent)
@@ -361,11 +406,12 @@ def test_streamable_http_roundtrip_with_real_client(tmp_path):
         for _ in range(40):
             await asyncio.sleep(0.5)
             try:
-                async with streamable_http_client(f"http://127.0.0.1:{port}/mcp") as (
-                    read,
-                    write,
-                    _,
-                ):
+                async with streamable_http_client(
+                    f"http://127.0.0.1:{port}/mcp"
+                ) as streams:
+                    # mcp 1.x yields (read, write, get_session_id); 2.x yields
+                    # (read, write). Take the two we use either way.
+                    read, write = streams[0], streams[1]
                     async with ClientSession(read, write) as session:
                         await session.initialize()
                         tools = await session.list_tools()
@@ -377,7 +423,7 @@ def test_streamable_http_roundtrip_with_real_client(tmp_path):
                                 "output_dir": str(tmp_path / "out"),
                             },
                         )
-                        assert build.isError is False
+                        assert _is_error(build) is False
                         return
             except Exception as exc:  # server not up yet / transient
                 last = exc

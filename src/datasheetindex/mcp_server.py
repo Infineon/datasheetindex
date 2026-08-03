@@ -69,27 +69,47 @@ def _envelope_to_content(envelope: dict[str, Any], types_module: Any) -> list[An
     return blocks
 
 
+#: Served verbatim on both mcp majors, so it lives here rather than inline in one
+#: branch -- an agent's first impression of this server must not depend on which
+#: version of the SDK the resolver happened to pick.
+SERVER_INSTRUCTIONS = (
+    "Extract technical parameters from PDF datasheets. Call "
+    "build_datasheet FIRST with a pdf_source (local path or URL) to load "
+    "a document -- it returns the full enriched ToC for navigation "
+    "planning. Then use get_section_text to read page ranges, search_text "
+    "to locate keywords, inspect_page for visual content, and "
+    "extract_table_markdown for a clean Markdown table when "
+    "get_section_text shows a garbled one."
+)
+
+
 def _build_mcp_server(
     session: DatasheetToolSession, server_cls: Any, types_module: Any
 ):
-    """Register the neutral tool session's defs onto a low-level MCP ``Server``."""
-    by_name = {d.name: d for d in session.defs}
-    server = server_cls(
-        name="datasheetindex",
-        version=package_version(),
-        instructions=(
-            "Extract technical parameters from PDF datasheets. Call "
-            "build_datasheet FIRST with a pdf_source (local path or URL) to load "
-            "a document -- it returns the full enriched ToC for navigation "
-            "planning. Then use get_section_text to read page ranges, search_text "
-            "to locate keywords, inspect_page for visual content, and "
-            "extract_table_markdown for a clean Markdown table when "
-            "get_section_text shows a garbled one."
-        ),
-    )
+    """Register the neutral tool session's defs onto a low-level MCP ``Server``.
 
-    @server.list_tools()
-    async def _list_tools() -> list[Any]:
+    Supports **both mcp majors** from one code path, because our two consumers
+    disagree about which one to install: ``claude-agent-sdk`` still requires
+    ``mcp<2``, while an unpinned ``uvx --from datasheetindex[mcp]`` -- how the
+    registry entry installs -- resolves ``mcp>=2``. Only one ``mcp`` can be
+    present, so the branch is on the *installed* API rather than on a constraint
+    we could declare. Pinning either way would break the other consumer; see the
+    ``[mcp]`` extra's comment in ``pyproject.toml``.
+
+    The split is narrow and confined to handler registration. mcp 1.x registers
+    via ``@server.list_tools()`` / ``@server.call_tool()`` decorators and takes
+    unwrapped returns; mcp 2.x takes ``on_list_tools`` / ``on_call_tool``
+    constructor callables that return ``ListToolsResult`` / ``CallToolResult``.
+    Everything else is already shared: ``run()``, ``create_initialization_options()``
+    and ``_envelope_to_content`` are identical across both, and ``mimeType=`` is
+    still accepted as an alias in 2.x (where the field is ``mime_type``).
+
+    Drop the 1.x branch once ``claude-agent-sdk`` lifts its ``mcp<2`` pin -- at
+    which point ``pyproject.toml`` can require ``mcp[cli]>=2``.
+    """
+    by_name = {d.name: d for d in session.defs}
+
+    def _tool_models() -> list[Any]:
         return [
             types_module.Tool(
                 name=d.name,
@@ -99,22 +119,61 @@ def _build_mcp_server(
             for d in session.defs
         ]
 
-    @server.call_tool()
-    async def _call_tool(name: str, arguments: dict[str, Any] | None) -> list[Any]:
+    async def _invoke(name: str, arguments: dict[str, Any] | None) -> dict[str, Any]:
         definition = by_name.get(name)
         if definition is None:
             raise ValueError(f"unknown tool: {name}")
-        envelope = await definition.handler(arguments or {})
-        if envelope.get("is_error"):
-            content = envelope.get("content") or []
-            # Error envelopes are text-only today; fall back defensively if a
-            # future handler surfaces a non-text first block.
-            message = (content[0].get("text") if content else None) or f"{name} failed"
-            # Surface a tool-level failure as an MCP tool error (isError=True).
-            raise RuntimeError(message)
-        return _envelope_to_content(envelope, types_module)
+        return await definition.handler(arguments or {})
 
-    return server
+    def _error_message(name: str, envelope: dict[str, Any]) -> str:
+        content = envelope.get("content") or []
+        # Error envelopes are text-only today; fall back defensively if a
+        # future handler surfaces a non-text first block.
+        return (content[0].get("text") if content else None) or f"{name} failed"
+
+    # mcp 1.x is identified by the decorator method whose absence is exactly what
+    # breaks this module on 2.x -- so the probe names the thing it is guarding.
+    if hasattr(server_cls, "list_tools"):
+        server = server_cls(
+            name="datasheetindex",
+            version=package_version(),
+            instructions=SERVER_INSTRUCTIONS,
+        )
+
+        @server.list_tools()
+        async def _list_tools() -> list[Any]:
+            return _tool_models()
+
+        @server.call_tool()
+        async def _call_tool(name: str, arguments: dict[str, Any] | None) -> list[Any]:
+            envelope = await _invoke(name, arguments)
+            if envelope.get("is_error"):
+                # 1.x has no is_error on the handler's return, so a tool-level
+                # failure is signalled by raising; the framework sets isError.
+                raise RuntimeError(_error_message(name, envelope))
+            return _envelope_to_content(envelope, types_module)
+
+        return server
+
+    async def _on_list_tools(_ctx: Any, _params: Any) -> Any:
+        return types_module.ListToolsResult(tools=_tool_models())
+
+    async def _on_call_tool(_ctx: Any, params: Any) -> Any:
+        envelope = await _invoke(params.name, params.arguments)
+        # 2.x carries the flag on the result, so the handler's own error text is
+        # returned verbatim instead of being reconstructed from an exception.
+        return types_module.CallToolResult(
+            content=_envelope_to_content(envelope, types_module),
+            is_error=bool(envelope.get("is_error")),
+        )
+
+    return server_cls(
+        name="datasheetindex",
+        version=package_version(),
+        instructions=SERVER_INSTRUCTIONS,
+        on_list_tools=_on_list_tools,
+        on_call_tool=_on_call_tool,
+    )
 
 
 class LocalMcpServer:
