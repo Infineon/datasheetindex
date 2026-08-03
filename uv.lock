@@ -243,6 +243,7 @@ llm = [
     { name = "python-dotenv" },
 ]
 mcp = [
+    { name = "jsonschema" },
     { name = "mcp", extra = ["cli"] },
 ]
 
@@ -261,6 +262,7 @@ sdk = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", marker = "extra == 'llm'", specifier = ">=0.27.0" },
+    { name = "jsonschema", marker = "extra == 'mcp'", specifier = ">=4.20.0" },
     { name = "mcp", extras = ["cli"], marker = "extra == 'mcp'", specifier = ">=1.26.0" },
     { name = "openai", marker = "extra == 'llm'", specifier = ">=2.16.0" },
     { name = "pymupdf", specifier = ">=1.25.0" },

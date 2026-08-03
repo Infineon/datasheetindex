@@ -221,6 +221,85 @@ def test_unknown_tool_is_a_tool_error_not_a_protocol_error():
     assert "unknown tool: bogus_tool" in result.content[0].text
 
 
+def _server_over(handler, *, name="boom", schema=None):
+    """A real low-level server whose only tool runs ``handler``.
+
+    Builds genuine ``DatasheetToolDef`` / ``DatasheetToolSession`` values rather
+    than stand-ins -- both are plain frozen dataclasses, so there is nothing to
+    fake -- which keeps the call correctly typed and drives the same
+    ``_build_mcp_server`` path the real session takes.
+    """
+    from datasheetindex.mcp_server import _build_mcp_server, _load_mcp_modules
+    from datasheetindex.tools.defs import DatasheetToolDef, DatasheetToolSession
+
+    definition = DatasheetToolDef(
+        name=name,
+        description="a tool that exists to misbehave",
+        input_schema=schema or {"type": "object"},
+        handler=handler,
+    )
+    session = DatasheetToolSession(defs=[definition], close=lambda: None)
+    server_cls, types_module = _load_mcp_modules()
+    return _build_mcp_server(session, server_cls, types_module)
+
+
+def test_handler_exception_becomes_a_tool_error():
+    """A raising handler must produce a result, not escape as a protocol error.
+
+    This is mcp 1.x's *third* pre-dispatch guard -- ``except Exception as e:
+    return self._make_error_result(str(e))`` -- and it is the one most likely to
+    matter later: no shipped handler raises today (all five catch internally),
+    but a sixth tool, or one line moved outside an existing ``try``, changes
+    shape on 2.x only. 1.x's text is exactly ``str(e)``, so matching it keeps the
+    two majors byte-identical here as everywhere else.
+    """
+    types = pytest.importorskip("mcp.types")
+
+    async def _raises(_args):
+        raise RuntimeError("handler blew up")
+
+    result = _call(_server_over(_raises), types, "boom", {})
+    assert _is_error(result) is True
+    assert "handler blew up" in result.content[0].text
+
+
+def test_url_elicitation_still_propagates():
+    """The catch-all must not swallow the protocol's own control-flow signal.
+
+    ``UrlElicitationRequiredError`` is not a failure: the runner converts it into
+    a ``-32042`` response that drives URL elicitation. mcp 1.x re-raises it
+    immediately *before* its catch-all for exactly this reason, so a blanket
+    ``except Exception`` here would silently turn a protocol feature into a tool
+    error. Nothing we ship raises it today -- this guards the catch-all added for
+    the test above, and it passes both before and after that change by design.
+    """
+    types = pytest.importorskip("mcp.types")
+    from mcp.shared.exceptions import UrlElicitationRequiredError
+
+    async def _elicits(_args):
+        raise UrlElicitationRequiredError([], "needs a URL")
+
+    with pytest.raises(UrlElicitationRequiredError):
+        _call(_server_over(_elicits), types, "boom", {})
+
+
+def test_error_envelope_without_content_still_carries_a_message():
+    """An error result with no content block says less than "it failed".
+
+    Not reachable through any shipped handler -- every one emits a text block --
+    but 1.x's ``_error_message`` fallback predates this branch, so dropping it on
+    the 2.x path would recreate the asymmetry this module exists to remove.
+    """
+    types = pytest.importorskip("mcp.types")
+
+    async def _empty(_args):
+        return {"content": [], "is_error": True}
+
+    result = _call(_server_over(_empty), types, "boom", {})
+    assert _is_error(result) is True
+    assert result.content[0].text == "boom failed"
+
+
 def test_unrecognised_mcp_api_fails_with_a_message_naming_the_problem():
     """A future major that matches neither API must say so, not TypeError.
 

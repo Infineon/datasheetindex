@@ -22,7 +22,12 @@ layout = ["pymupdf4llm>=1.27.0"]
 # time, so the version is negotiated by whatever else is in the environment --
 # not by a constraint we can usefully declare here. Revisit once the SDK lifts
 # its pin; see `_build_mcp_server`.
-mcp = ["mcp[cli]>=1.26.0"]
+#
+# `jsonschema` is declared even though it resolves anyway as a core (non-extra)
+# requirement of `mcp` on both majors: `mcp_server._compile_validators` imports
+# it directly, so relying on someone else's dependency graph to supply it is an
+# implicit dependency waiting to break.
+mcp = ["mcp[cli]>=1.26.0", "jsonschema>=4.20.0"]
 
 [project.scripts]
 datasheetindex = "datasheetindex.cli:main_cli"
