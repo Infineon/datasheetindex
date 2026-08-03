@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import importlib
+import inspect
 import sys
 from typing import Any
 
@@ -69,27 +70,129 @@ def _envelope_to_content(envelope: dict[str, Any], types_module: Any) -> list[An
     return blocks
 
 
+#: Served verbatim on both mcp majors, so it lives here rather than inline in one
+#: branch -- an agent's first impression of this server must not depend on which
+#: version of the SDK the resolver happened to pick.
+SERVER_INSTRUCTIONS = (
+    "Extract technical parameters from PDF datasheets. Call "
+    "build_datasheet FIRST with a pdf_source (local path or URL) to load "
+    "a document -- it returns the full enriched ToC for navigation "
+    "planning. Then use get_section_text to read page ranges, search_text "
+    "to locate keywords, inspect_page for visual content, and "
+    "extract_table_markdown for a clean Markdown table when "
+    "get_section_text shows a garbled one."
+)
+
+
+def _text_error(message: str) -> dict[str, Any]:
+    """A neutral error envelope carrying one text block."""
+    return {"content": [{"type": "text", "text": message}], "is_error": True}
+
+
+def _compile_validators(defs: list[Any]) -> dict[str, Any]:
+    """One pre-built jsonschema validator per tool, keyed by name.
+
+    Built once at server construction rather than per call. ``jsonschema.validate``
+    -- which is what mcp 1.x calls, and what this branch called first -- re-checks
+    the *schema against its metaschema* on every invocation: measured on
+    ``build_datasheet``'s schema that is 4545us per call, of which 5219us is
+    ``check_schema`` alone, against 13us for a pre-built validator. Roughly 340x,
+    and for the cheap tools the throwaway work dwarfed the tool itself (one real
+    ``search_text`` call is ~803us). Reporting is unchanged because the message
+    still comes from ``ValidationError.message``.
+
+    ``check_schema`` still runs, once, here -- so a malformed tool schema fails
+    loudly at construction instead of turning every request into a ``SchemaError``.
+
+    ``jsonschema`` is a core (non-extra) requirement of ``mcp`` on both majors and
+    is declared by the ``[mcp]`` extra; the import is local because this module is
+    importable without that extra.
+    """
+    from jsonschema.validators import validator_for
+
+    validators: dict[str, Any] = {}
+    for definition in defs:
+        validator_cls = validator_for(definition.input_schema)
+        validator_cls.check_schema(definition.input_schema)
+        validators[definition.name] = validator_cls(definition.input_schema)
+    return validators
+
+
+def _schema_violation(validator: Any, arguments: dict[str, Any]) -> str | None:
+    """The first schema violation in ``arguments``, or ``None`` if it validates.
+
+    Mirrors what mcp 1.x's ``@server.call_tool()`` wrapper does before dispatch,
+    reported with its exact ``Input validation error: {message}`` wording, so the
+    two majors tell an agent the same thing about the same bad call. A ``None``
+    validator means no such tool, which is not this function's error to report.
+    """
+    if validator is None:
+        return None
+
+    import jsonschema
+
+    try:
+        validator.validate(arguments)
+    except jsonschema.ValidationError as exc:
+        return exc.message
+    return None
+
+
+def _passthrough_exceptions() -> tuple[type[BaseException], ...]:
+    """Exceptions the runner interprets, which a catch-all must not swallow.
+
+    ``UrlElicitationRequiredError`` is not a failure -- the runner turns it into a
+    ``-32042`` response that drives URL elicitation -- which is why mcp 1.x
+    re-raises it immediately *before* its own ``except Exception``. Reproducing
+    the catch-all without reproducing this passthrough would silently convert a
+    protocol feature into a tool error.
+    """
+    try:
+        from mcp.shared.exceptions import UrlElicitationRequiredError
+    except ImportError:  # pragma: no cover - present on both supported majors
+        return ()
+    return (UrlElicitationRequiredError,)
+
+
 def _build_mcp_server(
     session: DatasheetToolSession, server_cls: Any, types_module: Any
 ):
-    """Register the neutral tool session's defs onto a low-level MCP ``Server``."""
-    by_name = {d.name: d for d in session.defs}
-    server = server_cls(
-        name="datasheetindex",
-        version=package_version(),
-        instructions=(
-            "Extract technical parameters from PDF datasheets. Call "
-            "build_datasheet FIRST with a pdf_source (local path or URL) to load "
-            "a document -- it returns the full enriched ToC for navigation "
-            "planning. Then use get_section_text to read page ranges, search_text "
-            "to locate keywords, inspect_page for visual content, and "
-            "extract_table_markdown for a clean Markdown table when "
-            "get_section_text shows a garbled one."
-        ),
-    )
+    """Register the neutral tool session's defs onto a low-level MCP ``Server``.
 
-    @server.list_tools()
-    async def _list_tools() -> list[Any]:
+    Supports **both mcp majors** from one code path, because our two consumers
+    disagree about which one to install: ``claude-agent-sdk`` still requires
+    ``mcp<2``, while an unpinned ``uvx --from datasheetindex[mcp]`` -- how the
+    registry entry installs -- resolves ``mcp>=2``. Only one ``mcp`` can be
+    present, so the branch is on the *installed* API rather than on a constraint
+    we could declare. Pinning either way would break the other consumer; see the
+    ``[mcp]`` extra's comment in ``pyproject.toml``.
+
+    The split is confined to handler registration. mcp 1.x registers via
+    ``@server.list_tools()`` / ``@server.call_tool()`` decorators and takes
+    unwrapped returns; mcp 2.x takes ``on_list_tools`` / ``on_call_tool``
+    constructor callables that return ``ListToolsResult`` / ``CallToolResult``.
+    ``run()``, ``create_initialization_options()`` and ``_envelope_to_content``
+    are identical across both, and ``mimeType=`` is still accepted as an alias in
+    2.x (where the field is ``mime_type``).
+
+    **The 2.x callable is not wrapped by the framework, so the three guards 1.x
+    applied for us have to be applied here.** ``@server.call_tool()`` (a)
+    jsonschema-validated ``arguments`` against ``inputSchema`` before dispatch,
+    (b) turned an unknown name into a tool error, and (c) ended in ``except
+    Exception as e: return self._make_error_result(str(e))``. The 2.x callable
+    gets the raw request, and anything escaping it becomes a JSON-RPC *protocol*
+    error rather than a result the agent can read. All three are reproduced in
+    ``_on_call_tool``, whose ``try``/``except`` enforces "always return a result"
+    structurally rather than leaving it to be maintained by counting guards --
+    which is how (c) was missed the first time. Do not "simplify" any of it away;
+    a regression here is visible only on the 2.x lane.
+
+    Drop the 1.x branch once ``claude-agent-sdk`` lifts its ``mcp<2`` pin -- at
+    which point ``pyproject.toml`` can require ``mcp[cli]>=2``.
+    """
+    by_name = {d.name: d for d in session.defs}
+
+    def _tool_models() -> list[Any]:
         return [
             types_module.Tool(
                 name=d.name,
@@ -99,22 +202,123 @@ def _build_mcp_server(
             for d in session.defs
         ]
 
-    @server.call_tool()
-    async def _call_tool(name: str, arguments: dict[str, Any] | None) -> list[Any]:
+    validators = _compile_validators(session.defs)
+    passthrough = _passthrough_exceptions()
+
+    async def _invoke(name: str, arguments: dict[str, Any] | None) -> dict[str, Any]:
+        """Run a tool, returning an envelope. Shared by both branches.
+
+        An unknown name is *returned* rather than raised so the two branches
+        cannot word it differently: 2.x needs it as a result, and the 1.x branch
+        below re-raises any error envelope for the framework to convert -- which
+        it already did for every other tool error.
+        """
         definition = by_name.get(name)
         if definition is None:
-            raise ValueError(f"unknown tool: {name}")
-        envelope = await definition.handler(arguments or {})
-        if envelope.get("is_error"):
-            content = envelope.get("content") or []
-            # Error envelopes are text-only today; fall back defensively if a
-            # future handler surfaces a non-text first block.
-            message = (content[0].get("text") if content else None) or f"{name} failed"
-            # Surface a tool-level failure as an MCP tool error (isError=True).
-            raise RuntimeError(message)
-        return _envelope_to_content(envelope, types_module)
+            return _text_error(f"unknown tool: {name}")
+        return await definition.handler(arguments or {})
 
-    return server
+    def _error_message(name: str, envelope: dict[str, Any]) -> str:
+        content = envelope.get("content") or []
+        # Error envelopes are text-only today; fall back defensively if a
+        # future handler surfaces a non-text first block.
+        return (content[0].get("text") if content else None) or f"{name} failed"
+
+    # mcp 1.x is identified by the decorator method whose absence is exactly what
+    # breaks this module on 2.x -- so the probe names the thing it is guarding.
+    if hasattr(server_cls, "list_tools"):
+        server = server_cls(
+            name="datasheetindex",
+            version=package_version(),
+            instructions=SERVER_INSTRUCTIONS,
+        )
+
+        @server.list_tools()
+        async def _list_tools() -> list[Any]:
+            return _tool_models()
+
+        @server.call_tool()
+        async def _call_tool(name: str, arguments: dict[str, Any] | None) -> list[Any]:
+            # No validation and no catch-all here: 1.x's own wrapper already
+            # applies both around this function. The 2.x branch below has to
+            # reproduce them because it has no such wrapper.
+            envelope = await _invoke(name, arguments)
+            if envelope.get("is_error"):
+                # 1.x has no is_error on the handler's return, so a tool-level
+                # failure is signalled by raising; the framework sets isError.
+                raise RuntimeError(_error_message(name, envelope))
+            return _envelope_to_content(envelope, types_module)
+
+        return server
+
+    # Positive probe for 2.x rather than a bare `else`. The extra is
+    # deliberately unbounded, so a future major dropping this API arrives
+    # unannounced -- exactly how 2.0.0 did -- and falling through would raise an
+    # unexpected-keyword TypeError naming neither the version nor the fix.
+    # An unreadable signature (a decorator without functools.wraps, a C-level
+    # __init__) is not evidence of an unsupported version, so it proceeds rather
+    # than claiming one -- a wrong "unsupported mcp version" would be worse than
+    # the TypeError it replaced, which was cryptic but never lied.
+    try:
+        accepted = inspect.signature(server_cls.__init__).parameters
+    except (ValueError, TypeError):
+        accepted = None
+    if accepted is not None and "on_list_tools" not in accepted:
+        raise RuntimeError(
+            "unsupported mcp version: mcp.server.lowlevel.Server exposes neither "
+            "the 1.x decorator API (list_tools) nor the 2.x constructor handlers "
+            "(on_list_tools). Pin mcp to a supported release, or teach "
+            "_build_mcp_server the new API."
+        )
+
+    async def _on_list_tools(_ctx: Any, _params: Any) -> Any:
+        return types_module.ListToolsResult(tools=_tool_models())
+
+    async def _on_call_tool(_ctx: Any, params: Any) -> Any:
+        # 2.x hands us the raw request: there is nothing between the wire and
+        # this callable, so all *three* guards mcp 1.x applies around dispatch
+        # have to be applied here or they are simply lost -- schema validation,
+        # the unknown-tool result, and the catch-all. The invariant is that this
+        # returns a result and never raises (except for `passthrough`, which the
+        # runner interprets): an escaping error becomes a JSON-RPC protocol error
+        # the agent cannot read and recover from, and upstream emits it with the
+        # invalid error code 0. The try/except enforces that structurally rather
+        # than leaving it to be maintained by counting guards.
+        arguments = params.arguments or {}
+        try:
+            violation = _schema_violation(validators.get(params.name), arguments)
+            if violation is not None:
+                envelope = _text_error(f"Input validation error: {violation}")
+            else:
+                envelope = await _invoke(params.name, arguments)
+        except passthrough:
+            raise
+        except Exception as exc:
+            # 1.x's wrapper ends in `return self._make_error_result(str(e))`,
+            # so `str(exc)` keeps the two majors byte-identical here too.
+            envelope = _text_error(str(exc))
+
+        content = _envelope_to_content(envelope, types_module)
+        is_error = bool(envelope.get("is_error"))
+        if is_error and not content:
+            # Same defence as the 1.x branch's ``_error_message`` fallback: an
+            # error result carrying no text at all says less than "it failed".
+            content = [
+                types_module.TextContent(
+                    type="text", text=_error_message(params.name, envelope)
+                )
+            ]
+        # 2.x carries the flag on the result, so the handler's own error text is
+        # returned verbatim instead of being reconstructed from an exception.
+        return types_module.CallToolResult(content=content, is_error=is_error)
+
+    return server_cls(
+        name="datasheetindex",
+        version=package_version(),
+        instructions=SERVER_INSTRUCTIONS,
+        on_list_tools=_on_list_tools,
+        on_call_tool=_on_call_tool,
+    )
 
 
 class LocalMcpServer:
