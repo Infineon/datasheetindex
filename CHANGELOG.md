@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.27.1] - 2026-08-03
+
+### Fixed
+- **PyMuPDF's layout advertisement no longer lands on the stdio server's JSON-RPC wire.** `find_tables()` calls `pymupdf._warn_layout_once()`, which `print()`s "Consider using the pymupdf_layout package..." to **stdout** -- the channel the stdio transport carries JSON-RPC on -- once per process, unless the `[layout]` extra is installed. Our table scan calls `find_tables()` on every page, and `engine.classic_tables()` sets `pymupdf._get_layout = None`, which *satisfies* the notice's trigger rather than avoiding it. `LocalMcpServer.run` now calls PyMuPDF's own supported opt-out, `no_recommend_layout()`, before serving stdio.
+- **Scope: the sequential scan only, and it was never the default.** The parallel path has been immune since the Windows pool work -- `structure._subprocess_init` puts worker stdin/stdout on devnull -- so this reproduces on `DATASHEETINDEX_PARALLEL=0` and on the fallback after a pool failure or scan timeout. It also cannot affect the internal registry entry, which installs `datasheetindex[llm,mcp,layout]`: with `pymupdf.layout` importable the notice never fires at all. Applied for stdio only; on the HTTP transports stdout is not the wire, and silencing another library's advice there would be gratuitous.
+- **It surfaces *after* the last response under mcp 2.x, which is what made it easy to miss.** That transport dup2s a private fd for the wire (its own fix for this class of problem), so the text sits in `sys.stdout`'s block buffer until the interpreter's final flush writes it to the restored fd 1 -- i.e. mcp 2.x defers the corruption past its own teardown rather than preventing it. The regression test therefore reads to EOF *after* the process exits; one that only checked the responses it asked for would pass while the wire was corrupt. It fails on 0.27.0 with `non-JSON written to the stdio wire: ['Consider using the pymupdf_layout package...']`.
+- **Not a PyMuPDF defect, but a questionable default:** an advisory on stdout rather than stderr or `warnings.warn` writes into the caller's data channel. It is deliberate, fires at most once per process, and ships two documented opt-outs (`no_recommend_layout()` and `PYMUPDF_SUGGEST_LAYOUT_ANALYZER=0`), both verified. `no_recommend_layout()` is preferred over wrapping the server in `redirect_stdout`, which would swallow unrelated output and leave the cause in place.
+
 ## [0.27.0] - 2026-08-03
 
 ### Fixed
