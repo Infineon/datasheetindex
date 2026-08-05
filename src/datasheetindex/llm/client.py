@@ -7,6 +7,7 @@ import logging
 import os
 import time
 import weakref
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol, cast
 
@@ -71,6 +72,35 @@ class _ResponsesApi(Protocol):
         """Create an LLM response."""
 
 
+class _ChatMessage(Protocol):
+    @property
+    def content(self) -> str | None:
+        """The assistant's reply, or None when the model produced no text."""
+
+
+class _ChatChoice(Protocol):
+    @property
+    def message(self) -> _ChatMessage:
+        """The message of this choice."""
+
+
+class _ChatCompletion(Protocol):
+    @property
+    def choices(self) -> Sequence[_ChatChoice]:
+        """The completion's choices; we always request and read the first."""
+
+
+class _ChatCompletionsApi(Protocol):
+    def create(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, object]],
+        **kwargs: object,
+    ) -> _ChatCompletion:
+        """Create a chat completion."""
+
+
 def _close_resource(resource: object | None) -> None:
     close = getattr(resource, "close", None)
     if callable(close):
@@ -80,6 +110,18 @@ def _close_resource(resource: object | None) -> None:
 _RETRY_MAX_ATTEMPTS = 5
 _RETRY_BASE_DELAY = 4.0
 _RETRY_MAX_DELAY = 60.0
+
+#: Ceiling on one figure caption. The caption prompt asks for under 60 words,
+#: which lands around 90 tokens; measured over 16 real figure regions the
+#: median is 71-102 and gpt-4.1's worst case is 197. It exists for the models
+#: that do not honour the word limit on a dense figure: qwen3.6-27b answered a
+#: 128-pin TQFP pinout by enumerating all 128 pins, 667 tokens. Truncation is
+#: not a new failure mode here -- the caption prompt already orders its output
+#: for it ("your text may be truncated, so identifying labels must come before
+#: any description of structure"), so a clipped caption keeps the part that
+#: earns its place in the index. Set above every compliant answer observed, so
+#: it binds on runaways only.
+VISION_MAX_TOKENS = 300
 
 
 def _is_retryable(exc: Exception) -> bool:
@@ -193,10 +235,22 @@ class _ManagedLlmClient:
     """Callable wrapper that owns and closes its underlying HTTP client."""
 
     def __init__(
-        self, responses_api: _ResponsesApi, http_client: object, model: str
+        self,
+        responses_api: _ResponsesApi,
+        http_client: object,
+        model: str,
+        *,
+        chat_api: _ChatCompletionsApi,
+        vision_model: str | None = None,
     ) -> None:
         self._responses_api = responses_api
+        self._chat_api = chat_api
         self._model = model
+        #: The text model unless a deployment names a different one. Vision is
+        #: the one call whose model is worth separating: it is the only
+        #: per-figure cost, and the cheapest capable model on a gateway is
+        #: rarely the one you want writing summaries.
+        self._vision_model = vision_model or model
         self._finalizer = weakref.finalize(self, _close_resource, http_client)
 
     def __call__(self, system: str, user: str) -> str:
@@ -224,7 +278,33 @@ class _ManagedLlmClient:
     def describe_image(
         self, system: str, image_base64: str, *, media_type: str = "image/png"
     ) -> str:
-        """Describe one image, as Responses-API structured input.
+        """Describe one image, over **Chat Completions** rather than Responses.
+
+        The transport is deliberate and measured, not a stylistic preference.
+        The Responses API is a bridge for any gateway model that is not natively
+        an OpenAI one, and on a LiteLLM gateway that bridge can misfile the
+        model's answer as a *reasoning* item carrying ``reasoning_text``.
+        ``output_text`` reads only ``output_text`` chunks, so the caption comes
+        back as the empty string with the text sitting right there in the
+        payload. Measured against the self-hosted ``qwen3.6-27b`` (vLLM) on the
+        prod gateway over 16 real figure regions: **8 of 16 captions empty**,
+        reproduced three times, and a *different* 8 each run -- it is per-call
+        sampling, not a property of a figure. Chat Completions is not a
+        workaround for that bridge; it bypasses it. Same model, same images,
+        same prompt: 0 empty in 112 calls, and the raw message has no reasoning
+        channel at all.
+
+        An empty caption is worse here than it sounds: ``caption_figures_in_place``
+        counts a blank reply as ``failed``, which marks the artifact incomplete,
+        so a coin-flip transport would re-caption the document on every build
+        forever.
+
+        The path is single for every model, not branched by model name. gpt-4.1
+        was re-measured over the same 16 regions on this transport and is
+        indistinguishable from the Responses path -- 1084 median input tokens
+        either way, which is also the check that nested ``detail`` is honoured
+        (see below); a name-based branch would buy nothing and would need a
+        list of model names to maintain.
 
         Sent at ``detail="high"``, reversing the ``"low"`` this call used
         before. ``"low"`` downscales to 512x512 before the model ever sees
@@ -245,25 +325,32 @@ class _ManagedLlmClient:
         2.4k to 21.5k input tokens per document at the default cap of 20. It
         is paid once per document and then cached on disk by the existing
         artifact reuse.
+
+        Note that ``image_url`` is an **object** here. On the Responses API it
+        is a plain string; the two forms are not interchangeable, and the wrong
+        one type-checks and then fails at the gateway.
         """
-        response = self._responses_api.create(
-            model=self._model,
-            instructions=system,
-            input=[
+        response = self._chat_api.create(
+            model=self._vision_model,
+            messages=[
+                {"role": "system", "content": system},
                 {
                     "role": "user",
                     "content": [
-                        {"type": "input_text", "text": system},
+                        {"type": "text", "text": system},
                         {
-                            "type": "input_image",
-                            "image_url": f"data:{media_type};base64,{image_base64}",
-                            "detail": "high",
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{media_type};base64,{image_base64}",
+                                "detail": "high",
+                            },
                         },
                     ],
-                }
+                },
             ],
+            max_tokens=VISION_MAX_TOKENS,
         )
-        return response.output_text
+        return response.choices[0].message.content or ""
 
     def close(self) -> None:
         """Release the underlying HTTP client once the callable is no longer needed."""
@@ -305,8 +392,29 @@ def _parse_max_retries_env(value: str | None) -> int:
     return parsed
 
 
+def _vision_model_env() -> str | None:
+    """The model figure captioning should use, when a deployment names one.
+
+    ``None`` -- the default -- means vision follows ``model``, which is exactly
+    the behaviour before this knob existed.
+
+    Env rather than a hardcoded name because the cheapest capable vision model
+    on a gateway is a property of *that deployment*, not of this library. The
+    one that motivated the knob, ``qwen3.6-27b``, is a self-hosted alias that
+    exists on one internal gateway: it is absent from that gateway's own
+    staging tier (which serves ``qwen3.5-27b``) and means nothing to an outside
+    user pointing ``LITELLM_BASE_URL`` at some other endpoint. Baking it in
+    would break both of them to save one line of configuration.
+    """
+    value = os.environ.get("DATASHEETINDEX_VISION_MODEL")
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
+
+
 def create_llm_client(model: str = "gpt-4.1") -> LlmCallable:
-    """Create a sync LLM callable backed by the OpenAI Responses API.
+    """Create a sync LLM callable backed by the OpenAI-compatible gateway.
 
     Reads ``LITELLM_BASE_URL`` and ``LITELLM_MASTER_KEY`` from the
     environment (loading ``.env`` via python-dotenv if available).
@@ -314,6 +422,10 @@ def create_llm_client(model: str = "gpt-4.1") -> LlmCallable:
     endpoints and can be enabled with ``LITELLM_TLS_VERIFY=true``.
     Request timeout and retry policy can be tuned with
     ``LITELLM_TIMEOUT_SECONDS`` and ``LITELLM_MAX_RETRIES``.
+
+    Text calls use the Responses API; figure captioning uses Chat Completions
+    and, when ``DATASHEETINDEX_VISION_MODEL`` is set, a different model. See
+    ``_ManagedLlmClient.describe_image`` for why the transports differ.
 
     Returns a ``(system: str, user: str) -> str`` callable. The returned object
     also exposes ``close()`` for explicit cleanup when the caller owns it.
@@ -355,8 +467,10 @@ def create_llm_client(model: str = "gpt-4.1") -> LlmCallable:
         # **kwargs -- even though it accepts every field we pass. Cast at the
         # SDK boundary rather than weaken _ResponsesApi for our own callers.
         responses_api=cast("_ResponsesApi", client.responses),
+        chat_api=cast("_ChatCompletionsApi", client.chat.completions),
         http_client=http_client,
         model=model,
+        vision_model=_vision_model_env(),
     )
 
 

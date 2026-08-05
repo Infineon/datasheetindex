@@ -502,6 +502,58 @@ decision a future reader would otherwise redo.
   entry the scan reaches first in the array's own document order -- never a
   dict or set's -- so the digest stays byte-stable across runs. On the PCN this
   changes exactly one row (page 5).
+- **Captioning goes over Chat Completions, not the Responses API, and the
+  reason is a measured 50% silent caption loss.** On an OpenAI-compatible
+  gateway the Responses API is a *bridge* for any model the gateway does not
+  serve natively, and that bridge can file the model's answer as a `reasoning`
+  item carrying `reasoning_text`. `output_text` concatenates only `output_text`
+  chunks, so the caption arrives as the empty string with its text sitting in
+  the same payload. Measured with the shipping client against a self-hosted
+  `qwen3.6-27b` (vLLM) over 16 real figure regions: **8 of 16 captions empty**,
+  reproduced three times, and a **different 8 each run** -- it is per-call
+  sampling, not a property of any figure. Chat Completions does not work around
+  the bridge, it bypasses it: same model, same images, same prompt, **0 empty in
+  112 calls**, and the raw message carries no reasoning channel at all. The
+  severity is higher than "some captions missing": `caption_figures_in_place`
+  scores a blank reply as `failed`, which marks the artifact incomplete, so a
+  coin-flip transport re-captions the document on every future build forever --
+  the cache-poisoning failure the `blank`/`failed` split exists to prevent.
+  **One path for every model, not a branch on model name.** gpt-4.1 was
+  re-measured over the same 16 regions on Chat Completions and is
+  indistinguishable from the Responses path (1084 median input tokens either
+  way, which doubles as the check that the nested `image_url` object's
+  `detail: "high"` is honoured -- `"low"` would show as roughly a tenth of
+  that). Note the two forms are not interchangeable: `image_url` is a plain
+  string on Responses and an object here, and the wrong one type-checks and
+  fails at the gateway.
+- **Any benchmark of this must vary the prompt per call.** The gateway caches
+  identical Chat Completions payloads -- verified by repeats returning the same
+  completion `id` and `created` plus an `x-litellm-cache-key` response header.
+  An unvaried repeat measures a replay, which cannot reveal a per-call coin
+  flip and reports a latency that is not the model's. The live regression test
+  in `tests/test_figure_captions_live.py` appends an attempt number for exactly
+  this reason.
+- **The caption call caps output at 300 tokens, because prompt compliance is
+  not uniform across models.** Over the same 16 regions the median reply is
+  71-102 tokens and gpt-4.1's worst case is 197, comfortably inside the
+  prompt's "under 60 words". qwen answered a 128-pin TQFP pinout by enumerating
+  all 128 pins -- **667 tokens** against gpt-4.1's 134 on the same image.
+  Truncation is not a new failure mode: the caption prompt already orders its
+  output for it ("your text may be truncated, so identifying labels must come
+  before any description of structure"), so a clipped caption keeps the part
+  that earns its place in the index. The cap sits above every compliant answer
+  measured, so it binds on runaways only.
+- **The vision model is a setting, not a default.** `DATASHEETINDEX_VISION_MODEL`
+  overrides the model for figure captioning alone; unset, captioning follows the
+  same model as summaries and the ToC fallback. It exists because captioning is
+  the only per-figure cost in a build and the cheapest capable vision model is a
+  property of the *gateway*, not of this library -- the self-hosted model that
+  motivated the knob meters at $0 input / $0.13 per MTok output against gpt-4.1's
+  $2 / $8, roughly 250x cheaper per document at the default cap of 20, at
+  caption quality a side-by-side over 16 real regions found competitive. Naming
+  such a model in the source would be wrong twice over: it is absent from its own
+  gateway's staging tier, and it means nothing to anyone pointing
+  `LITELLM_BASE_URL` somewhere else.
 
 ### Deliverable 2: Page-Matched Text File
 

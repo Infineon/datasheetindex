@@ -66,8 +66,10 @@ uv sync --extra mcp
 uv pip install claude-agent-sdk
 ```
 
-For LLM-backed ToC fallback and summaries, configure `LITELLM_BASE_URL` and
-`LITELLM_MASTER_KEY` (see `.env.example`).
+For LLM-backed ToC fallback, summaries and figure captions, configure
+`LITELLM_BASE_URL` and `LITELLM_MASTER_KEY` (see `.env.example`). Optionally set
+`DATASHEETINDEX_VISION_MODEL` to caption figures with a different -- typically
+cheaper -- model than the one used for summaries.
 
 `claude-agent-sdk` is only required for the SDK-flavored handoff
 (`create_datasheet_tools_server`). The tool logic itself is framework-neutral --
