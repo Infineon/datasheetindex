@@ -327,6 +327,7 @@ def test_build_options_to_dict_covers_every_dataclass_field():
         model=None,
         caption_figures=True,
         max_figure_captions=20,
+        vision_model=None,
     )
 
     assert set(options.to_dict()) == {f.name for f in fields(_BuildOptions)}
@@ -464,6 +465,38 @@ def test_reused_quality_carries_details_the_deliverable_drops(
     assert second.toc_quality is not None
     assert second.toc_quality.details == first.toc_quality.details
     assert second.toc_quality.details != ""
+
+
+def test_changing_the_vision_model_blocks_reuse(
+    tmp_path, toc_pdf, not_editable, build_spy, monkeypatch
+):
+    """Captioning with a different model must not serve the old model's captions.
+
+    ``model`` has always been in the cache key because it changes what is in
+    the artifact; ``DATASHEETINDEX_VISION_MODEL`` changes the same thing and was
+    not, so switching it served the previous model's captions from disk in
+    silence. That is worst for the person most likely to touch the knob --
+    someone switching *because* the captions were not good enough, who would
+    see no change and conclude it does nothing.
+
+    ``not_editable`` is required: on-disk reuse is off in an editable checkout,
+    so without it this passes for the wrong reason (every call rebuilds).
+    """
+    out = str(tmp_path / "out")
+    monkeypatch.delenv("DATASHEETINDEX_VISION_MODEL", raising=False)
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+    assert len(build_spy) == 1
+
+    # Unchanged environment: the artifact is still good.
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+    assert len(build_spy) == 1, "an unchanged environment must still reuse"
+
+    monkeypatch.setenv("DATASHEETINDEX_VISION_MODEL", "some-other-vision-model")
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+    assert len(build_spy) == 2, "a changed vision model must rebuild"
 
 
 def test_reuse_populates_every_field_the_tools_read(

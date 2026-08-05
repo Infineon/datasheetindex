@@ -301,7 +301,15 @@ def caption_figures_in_place(
                 "Figure caption failed on page %s", entry["page"], exc_info=True
             )
             return None
-        return (reply or "").strip() or None
+        caption = (reply or "").strip()
+        if not caption:
+            # A raise was always logged; an empty *reply* was not, and the two
+            # are indistinguishable downstream -- both become ``failed``. That
+            # silence is how a transport returning empty captions for half of
+            # them hid until someone measured 16 regions five times. The client
+            # logs *why* (model, finish_reason); this logs *where*.
+            logger.warning("Figure caption came back empty on page %s", entry["page"])
+        return caption or None
 
     with ThreadPoolExecutor(max_workers=_DISPATCH_WORKERS) as pool:
         # map preserves input order, so results are applied in candidate order

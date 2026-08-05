@@ -97,6 +97,10 @@ _LLM_ENV_VARS = (
     "LITELLM_TLS_VERIFY",
     "LITELLM_TIMEOUT_SECONDS",
     "LITELLM_MAX_RETRIES",
+    # Not a credential, but the same hermeticity argument: a developer who has
+    # pointed figure captioning at their gateway's own vision model would
+    # otherwise run every test against a different model than CI does.
+    "DATASHEETINDEX_VISION_MODEL",
 )
 
 

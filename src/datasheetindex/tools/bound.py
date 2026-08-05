@@ -43,7 +43,11 @@ from datasheetindex.core.structure import (
 from datasheetindex.core.textfile import TextSearchMatch, extract_section_text
 from datasheetindex.core.textfile import search_text as search_text_content
 from datasheetindex.index import DatasheetIndex
-from datasheetindex.llm.client import close_llm_client, get_vision_client
+from datasheetindex.llm.client import (
+    close_llm_client,
+    get_vision_client,
+    vision_model_env,
+)
 from datasheetindex.llm.figure_captions import (
     DEFAULT_MAX_FIGURE_CAPTIONS,
     validate_max_figure_captions,
@@ -67,6 +71,23 @@ class _BuildOptions:
     model: str | None
     caption_figures: bool
     max_figure_captions: int
+    #: ``DATASHEETINDEX_VISION_MODEL`` as configured, or ``None`` when unset.
+    #:
+    #: In the key because it changes the captions in the artifact, and ``model``
+    #: -- the other thing that does -- has always been keyed. Without it,
+    #: pointing captioning at a different model served the previous model's
+    #: captions from disk with nothing said, so the knob looked inert to the
+    #: person most likely to reach for it: someone switching *because* the
+    #: captions were not good enough. Verified before the fix by simulating a
+    #: non-editable install (on-disk reuse is off in an editable checkout, so
+    #: this is not reachable from a source tree).
+    #:
+    #: The **env value**, not the resolved model, and the distinction is what
+    #: keeps this from being a duplicate: when it is ``None`` the vision model
+    #: *is* ``model``, which the field above already keys. Recording a resolved
+    #: default here instead would key the same fact twice and drift when the
+    #: default moves.
+    vision_model: str | None
 
     def to_dict(self) -> dict[str, object]:
         """The cache key, as recorded in the sidecar.
@@ -392,6 +413,7 @@ class DatasheetTools:
             model=model,
             caption_figures=caption_figures,
             max_figure_captions=max_figure_captions,
+            vision_model=vision_model_env(),
         )
         # One resolver for the whole call, closed however the call exits. Both
         # gates and the rebuild ask it, so a walk through all three opens one

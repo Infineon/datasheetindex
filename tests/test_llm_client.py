@@ -28,12 +28,55 @@ class _TrackedHttpxClient:
         self.closed = True
 
 
+class _FakeResponses:
+    def create(self, **kwargs):
+        raise AssertionError("describe_image must not use the Responses API")
+
+
+class _FakeChat:
+    """Records the request and returns one chat-completion-shaped reply."""
+
+    def __init__(
+        self,
+        content: str | None = "a schematic of the output stage",
+        *,
+        finish_reason: str | None = "stop",
+        choices: int = 1,
+    ):
+        self.captured: dict = {}
+        self._content = content
+        self._finish_reason = finish_reason
+        self._choices = choices
+
+    def create(self, **kwargs):
+        self.captured.update(kwargs)
+        return types.SimpleNamespace(
+            choices=[
+                types.SimpleNamespace(
+                    message=types.SimpleNamespace(content=self._content),
+                    finish_reason=self._finish_reason,
+                )
+            ]
+            * self._choices
+        )
+
+
 def _patch_fake_clients(
     monkeypatch,
     seen_httpx_kwargs: dict[str, object],
     seen_openai_kwargs: dict[str, object],
     httpx_clients: list[_TrackedHttpxClient] | None = None,
-) -> None:
+) -> _FakeChat:
+    """Install fake ``httpx``/``openai`` modules; return the chat fake.
+
+    The chat fake is returned rather than discarded so a test can assert what
+    ``create_llm_client`` wired into it. Before it was real, ``chat.completions``
+    was a stub returning ``None`` -- which meant no test had ever reached
+    ``describe_image`` through the factory, and the two lines that connect the
+    vision path could both have been deleted with the suite still green.
+    """
+    chat = _FakeChat()
+
     class _FakeOpenAI:
         def __init__(self, **kwargs):
             seen_openai_kwargs.clear()
@@ -41,6 +84,7 @@ def _patch_fake_clients(
             self.responses = types.SimpleNamespace(
                 create=lambda **_kwargs: types.SimpleNamespace(output_text="ok")
             )
+            self.chat = types.SimpleNamespace(completions=chat)
 
     def _fake_httpx_client(**kwargs):
         seen_httpx_kwargs.clear()
@@ -54,6 +98,7 @@ def _patch_fake_clients(
     fake_openai = types.SimpleNamespace(OpenAI=_FakeOpenAI)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
     monkeypatch.setitem(sys.modules, "openai", fake_openai)
+    return chat
 
 
 def test_create_llm_client_raises_without_env(monkeypatch):
@@ -231,6 +276,9 @@ def test_get_structured_output_client_exposes_schema_calls(monkeypatch):
                     )
                 )
             )
+            self.chat = types.SimpleNamespace(
+                completions=types.SimpleNamespace(create=lambda **_kwargs: None)
+            )
 
     def _fake_httpx_client(**_kwargs):
         return _TrackedHttpxClient()
@@ -387,33 +435,37 @@ def test_get_vision_client_detects_describe_image():
     assert get_vision_client(None) is None
 
 
-def test_describe_image_sends_responses_api_shaped_input():
-    # image_url is a PLAIN STRING on the Responses API. The far more commonly
-    # documented Chat Completions form nests it as {"url": ...}; that variant
-    # type-checks and fails at the gateway.
+def _image_part(captured: dict) -> dict:
+    user = next(m for m in captured["messages"] if m["role"] == "user")
+    return next(p for p in user["content"] if p["type"] == "image_url")
+
+
+def test_describe_image_uses_chat_completions_not_responses():
+    # Not a style choice. On a LiteLLM gateway the Responses API is a bridge
+    # for any non-OpenAI model, and that bridge can file the model's answer as
+    # a reasoning item -- which output_text ignores, yielding an empty caption
+    # with the text sitting in the payload. Measured against qwen3.6-27b over
+    # 16 real figure regions: 8 to 12 of 16 empty over five runs, a different
+    # subset each run. Chat Completions bypasses the bridge: 0 empty in 144.
+    #
+    # image_url is an OBJECT here. On the Responses API it is a plain string;
+    # the wrong form type-checks and fails at the gateway.
     from datasheetindex.llm.client import _ManagedLlmClient
 
-    captured = {}
-
-    class FakeResponses:
-        def create(self, **kwargs):
-            captured.update(kwargs)
-
-            class Out:
-                output_text = "a schematic of the output stage"
-
-            return Out()
-
-    client = _ManagedLlmClient(FakeResponses(), object(), "gpt-4.1")
+    chat = _FakeChat()
+    client = _ManagedLlmClient(_FakeResponses(), object(), "gpt-4.1", chat_api=chat)
     result = client.describe_image("describe it", "QUJD", media_type="image/png")
 
     assert result == "a schematic of the output stage"
-    content = captured["input"][0]["content"]
-    text_part = next(p for p in content if p["type"] == "input_text")
-    image_part = next(p for p in content if p["type"] == "input_image")
+    system = next(m for m in chat.captured["messages"] if m["role"] == "system")
+    user = next(m for m in chat.captured["messages"] if m["role"] == "user")
+    text_part = next(p for p in user["content"] if p["type"] == "text")
+    assert system["content"] == "describe it"
     assert text_part["text"] == "describe it"
-    assert image_part["image_url"] == "data:image/png;base64,QUJD"
-    assert isinstance(image_part["image_url"], str)
+    assert _image_part(chat.captured)["image_url"] == {
+        "url": "data:image/png;base64,QUJD",
+        "detail": "high",
+    }
 
 
 def test_describe_image_requests_high_detail():
@@ -425,23 +477,169 @@ def test_describe_image_requests_high_detail():
     # actually read.
     from datasheetindex.llm.client import _ManagedLlmClient
 
-    captured = {}
+    chat = _FakeChat()
+    _ManagedLlmClient(
+        _FakeResponses(), object(), "gpt-4.1", chat_api=chat
+    ).describe_image("s", "QUJD")
 
-    class FakeResponses:
-        def create(self, **kwargs):
-            captured.update(kwargs)
+    assert _image_part(chat.captured)["image_url"]["detail"] == "high"
 
-            class Out:
-                output_text = "x"
 
-            return Out()
+def test_describe_image_caps_output_tokens():
+    # A model that ignores the prompt's 60-word limit is the reason: qwen
+    # answered a 128-pin pinout by listing all 128 pins (667 tokens) where
+    # gpt-4.1 used 134. The cap is above every compliant answer measured, so
+    # it binds on runaways only.
+    from datasheetindex.llm.client import VISION_MAX_TOKENS, _ManagedLlmClient
 
-    _ManagedLlmClient(FakeResponses(), object(), "gpt-4.1").describe_image("s", "QUJD")
+    chat = _FakeChat()
+    _ManagedLlmClient(
+        _FakeResponses(), object(), "gpt-4.1", chat_api=chat
+    ).describe_image("s", "QUJD")
 
-    image_part = next(
-        p for p in captured["input"][0]["content"] if p["type"] == "input_image"
+    assert chat.captured["max_tokens"] == VISION_MAX_TOKENS
+
+
+def test_describe_image_returns_empty_string_when_the_model_says_nothing():
+    # The SDK types content as str | None. None must not reach the caller as
+    # the literal "None": caption_figures_in_place strips the reply and treats
+    # a blank one as a failed call, which is the correct outcome here.
+    from datasheetindex.llm.client import _ManagedLlmClient
+
+    client = _ManagedLlmClient(
+        _FakeResponses(), object(), "gpt-4.1", chat_api=_FakeChat(content=None)
     )
-    assert image_part["detail"] == "high"
+
+    assert client.describe_image("s", "QUJD") == ""
+
+
+def test_describe_image_uses_the_vision_model_when_one_is_configured():
+    from datasheetindex.llm.client import _ManagedLlmClient
+
+    chat = _FakeChat()
+    _ManagedLlmClient(
+        _FakeResponses(), object(), "gpt-4.1", chat_api=chat, vision_model="qwen"
+    ).describe_image("s", "QUJD")
+
+    assert chat.captured["model"] == "qwen"
+
+
+def test_describe_image_follows_the_text_model_without_a_vision_model():
+    from datasheetindex.llm.client import _ManagedLlmClient
+
+    chat = _FakeChat()
+    _ManagedLlmClient(
+        _FakeResponses(), object(), "gpt-4.1", chat_api=chat
+    ).describe_image("s", "QUJD")
+
+    assert chat.captured["model"] == "gpt-4.1"
+
+
+@pytest.mark.parametrize(
+    ("env_value", "expected"),
+    [
+        ("qwen3.6-27b", "qwen3.6-27b"),
+        # Unset and empty must both mean "follow the text model". An empty
+        # value is what an absent entry in a Kubernetes ConfigMap or a
+        # commented-out .env line leaves behind, and it must be a no-op rather
+        # than a request for the model named "".
+        ("", None),
+        ("   ", None),
+    ],
+)
+def test_vision_model_env_reads_the_knob(monkeypatch, env_value, expected):
+    from datasheetindex.llm.client import vision_model_env
+
+    monkeypatch.setenv("DATASHEETINDEX_VISION_MODEL", env_value)
+    assert vision_model_env() == expected
+
+
+def test_vision_model_env_is_none_when_unset(monkeypatch):
+    from datasheetindex.llm.client import vision_model_env
+
+    monkeypatch.delenv("DATASHEETINDEX_VISION_MODEL", raising=False)
+    assert vision_model_env() is None
+
+
+def test_create_llm_client_wires_chat_completions_and_the_vision_model(monkeypatch):
+    # The join between the two halves, which each have their own tests and
+    # neither of which covers this: that the factory hands _ManagedLlmClient
+    # ``client.chat.completions`` (not ``client.responses``) and the resolved
+    # env knob. Both are single lines a refactor can drop silently.
+    monkeypatch.setenv("LITELLM_BASE_URL", "https://example.com")
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "secret")
+    monkeypatch.setenv("DATASHEETINDEX_VISION_MODEL", "qwen3.6-27b")
+    _install_fake_dotenv(monkeypatch)
+    chat = _patch_fake_clients(monkeypatch, {}, {})
+
+    from datasheetindex.llm.client import create_llm_client, get_vision_client
+
+    vision = get_vision_client(create_llm_client(model="gpt-4.1"))
+    assert vision is not None
+    vision.describe_image("describe it", "QUJD")
+
+    assert chat.captured["model"] == "qwen3.6-27b"
+    assert _image_part(chat.captured)["image_url"]["detail"] == "high"
+
+
+def test_create_llm_client_vision_follows_the_text_model_without_the_knob(monkeypatch):
+    monkeypatch.setenv("LITELLM_BASE_URL", "https://example.com")
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "secret")
+    monkeypatch.delenv("DATASHEETINDEX_VISION_MODEL", raising=False)
+    _install_fake_dotenv(monkeypatch)
+    chat = _patch_fake_clients(monkeypatch, {}, {})
+
+    from datasheetindex.llm.client import create_llm_client, get_vision_client
+
+    vision = get_vision_client(create_llm_client(model="gpt-4.1"))
+    assert vision is not None
+    vision.describe_image("describe it", "QUJD")
+
+    assert chat.captured["model"] == "gpt-4.1"
+
+
+def test_describe_image_logs_why_a_caption_came_back_empty(caplog):
+    # The silence is what let the transport bug hide: an empty reply and a
+    # render failure both reached the caller as "failed". The two things that
+    # tell the causes apart are the model and finish_reason, so both must be in
+    # the message. "length" with no text is the reasoning-model case --
+    # gpt-5-mini billed 300 of 300 tokens as reasoning and wrote nothing.
+    import logging
+
+    from datasheetindex.llm.client import _ManagedLlmClient
+
+    client = _ManagedLlmClient(
+        _FakeResponses(),
+        object(),
+        "gpt-4.1",
+        chat_api=_FakeChat(content=None, finish_reason="length"),
+        vision_model="gpt-5-mini",
+    )
+
+    with caplog.at_level(logging.WARNING, logger="datasheetindex.llm.client"):
+        assert client.describe_image("s", "QUJD") == ""
+
+    assert "gpt-5-mini" in caplog.text
+    assert "length" in caplog.text
+
+
+def test_describe_image_returns_empty_when_the_gateway_sends_no_choices(caplog):
+    # A content filter or an error envelope can return a well-formed 200 with
+    # an empty choices list. The caller already degrades an empty caption to a
+    # failed call; an IndexError would instead surface a traceback whose text
+    # says nothing about captioning.
+    import logging
+
+    from datasheetindex.llm.client import _ManagedLlmClient
+
+    client = _ManagedLlmClient(
+        _FakeResponses(), object(), "gpt-4.1", chat_api=_FakeChat(choices=0)
+    )
+
+    with caplog.at_level(logging.WARNING, logger="datasheetindex.llm.client"):
+        assert client.describe_image("s", "QUJD") == ""
+
+    assert "no choices" in caplog.text
 
 
 @pytest.mark.usefixtures("_has_env")
