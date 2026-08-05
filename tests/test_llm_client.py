@@ -548,17 +548,17 @@ def test_describe_image_follows_the_text_model_without_a_vision_model():
     ],
 )
 def test_vision_model_env_reads_the_knob(monkeypatch, env_value, expected):
-    from datasheetindex.llm.client import _vision_model_env
+    from datasheetindex.llm.client import vision_model_env
 
     monkeypatch.setenv("DATASHEETINDEX_VISION_MODEL", env_value)
-    assert _vision_model_env() == expected
+    assert vision_model_env() == expected
 
 
 def test_vision_model_env_is_none_when_unset(monkeypatch):
-    from datasheetindex.llm.client import _vision_model_env
+    from datasheetindex.llm.client import vision_model_env
 
     monkeypatch.delenv("DATASHEETINDEX_VISION_MODEL", raising=False)
-    assert _vision_model_env() is None
+    assert vision_model_env() is None
 
 
 def test_create_llm_client_wires_chat_completions_and_the_vision_model(monkeypatch):

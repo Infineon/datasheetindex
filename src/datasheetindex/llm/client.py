@@ -449,7 +449,7 @@ def _parse_max_retries_env(value: str | None) -> int:
     return parsed
 
 
-def _vision_model_env() -> str | None:
+def vision_model_env() -> str | None:
     """The model figure captioning should use, when a deployment names one.
 
     ``None`` -- the default -- means vision follows ``model``, which is exactly
@@ -534,7 +534,7 @@ def create_llm_client(model: str = "gpt-4.1") -> LlmCallable:
         chat_api=cast("_ChatCompletionsApi", client.chat.completions),
         http_client=http_client,
         model=model,
-        vision_model=_vision_model_env(),
+        vision_model=vision_model_env(),
     )
 
 
