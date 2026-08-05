@@ -67,6 +67,10 @@ def test_describe_image_never_returns_an_empty_caption_over_repeated_calls():
 
     Runs against whatever this environment has configured, so it covers the
     default model and, where ``DATASHEETINDEX_VISION_MODEL`` is set, that one.
+    **It only has teeth against a model the gateway bridges**; on the default
+    gpt-4.1 it passes on the reverted code too. The resolved model is therefore
+    named in the failure message, so a green run is not mistaken for coverage
+    it did not provide. A hardcoded internal alias does not belong here.
     """
     import pymupdf
 
@@ -87,6 +91,7 @@ def test_describe_image_never_returns_an_empty_caption_over_repeated_calls():
     doc.close()
 
     client = create_llm_client()
+    resolved_model = getattr(client, "_vision_model", None)
     try:
         vision_client = get_vision_client(client)
         assert vision_client is not None
@@ -100,4 +105,7 @@ def test_describe_image_never_returns_an_empty_caption_over_repeated_calls():
         close_llm_client(client)
 
     empty = [i for i, caption in enumerate(captions) if not caption.strip()]
-    assert not empty, f"empty captions at attempts {empty} of {len(captions)}"
+    assert not empty, (
+        f"model {resolved_model!r} returned empty captions at attempts {empty} "
+        f"of {len(captions)}"
+    )

@@ -348,6 +348,17 @@ deterministic `figures` array is unaffected either way. `caption_figures=False`
 or `max_figure_captions=0` turns it off explicitly and restores the
 pre-captioning artifact exactly.
 
+Two knobs bound the cost of each call. `DATASHEETINDEX_VISION_MODEL` names the
+model used for captioning alone -- unset, it follows the model used for
+summaries and the ToC fallback -- which is worth setting when your gateway
+serves a cheaper vision model, since captioning is the only per-figure cost in
+a build. Name a **non-reasoning** model: a reasoning model spends the whole
+output budget thinking and returns an empty caption. Each reply is capped at
+300 output tokens, above every compliant answer measured (the prompt asks for
+under 60 words, which lands near 90 tokens) and there to bound a model that
+answers a 128-pin pinout by listing all 128 pins. Truncation is anticipated by
+the prompt, which puts identifying labels before any description of structure.
+
 Images are sent to the vision model at `detail: "high"`, not the API's
 cheaper `"low"` (512x512-downscale) tier. Measured on a product-change-notice
 datasheet whose "Product Attributes" table is rendered entirely as a raster

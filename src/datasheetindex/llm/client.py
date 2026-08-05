@@ -1,4 +1,8 @@
-"""LLM client factory using OpenAI Responses API via LiteLLM gateway."""
+"""LLM client factory for an OpenAI-compatible gateway.
+
+Text calls use the Responses API; figure captioning uses Chat Completions.
+The split is measured, not stylistic -- see ``_ManagedLlmClient.describe_image``.
+"""
 
 from __future__ import annotations
 
@@ -83,11 +87,15 @@ class _ChatChoice(Protocol):
     def message(self) -> _ChatMessage:
         """The message of this choice."""
 
+    @property
+    def finish_reason(self) -> str | None:
+        """Why generation stopped; ``"length"`` means the cap bound."""
+
 
 class _ChatCompletion(Protocol):
     @property
     def choices(self) -> Sequence[_ChatChoice]:
-        """The completion's choices; we always request and read the first."""
+        """The completion's choices; we request one and read the first."""
 
 
 class _ChatCompletionsApi(Protocol):
@@ -333,6 +341,12 @@ class _ManagedLlmClient:
         response = self._chat_api.create(
             model=self._vision_model,
             messages=[
+                # The prompt is sent twice, deliberately. It is parity with the
+                # Responses shape this replaced (``instructions=`` *and* an
+                # ``input_text`` part), the measured 1074/1084 input tokens
+                # quoted above already include it, and it keeps the instruction
+                # visible to a model that weights the system role weakly.
+                # Deleting either copy changes every number in this docstring.
                 {"role": "system", "content": system},
                 {
                     "role": "user",
@@ -348,9 +362,52 @@ class _ManagedLlmClient:
                     ],
                 },
             ],
+            # ``max_tokens``, not ``max_completion_tokens``, and the choice was
+            # measured rather than inherited. Both names are accepted by every
+            # model this gateway serves -- gpt-4.1, the self-hosted qwen and
+            # gpt-5-mini all answered under either -- so the newer spelling buys
+            # no compatibility, while ``max_tokens`` is the one an
+            # OpenAI-compatible backend such as vLLM is certain to know.
+            #
+            # It is worth being clear about what *neither* name protects
+            # against: a **reasoning** model spends this budget on thinking
+            # before it writes anything. gpt-5-mini returned an empty caption
+            # with ``finish_reason="length"`` and 300 of 300 tokens billed as
+            # reasoning, identically under both spellings. So the guard against
+            # that is the log below and the note on
+            # ``DATASHEETINDEX_VISION_MODEL`` -- name a non-reasoning vision
+            # model -- not the parameter name.
             max_tokens=VISION_MAX_TOKENS,
         )
-        return response.choices[0].message.content or ""
+        if not response.choices:
+            # A well-formed 200 with no choices at all: a content filter or an
+            # error envelope. Returning "" keeps the caller's contract (an
+            # empty caption is scored as a failed call) instead of raising an
+            # IndexError whose text says nothing about captioning.
+            logger.warning(
+                "Figure caption returned no choices from model %s",
+                self._vision_model,
+            )
+            return ""
+        choice = response.choices[0]
+        caption = choice.message.content or ""
+        if not caption.strip():
+            # Never let this be silent again. The transport bug this call was
+            # rewritten to fix -- a well-formed 200 carrying no text -- took a
+            # five-run, 16-region measurement campaign to see precisely because
+            # nothing logged it; the caller only ever recorded "failed". The
+            # class of failure outlives the fix, so name the two things that
+            # distinguish its causes: the model, and whether the cap bound.
+            logger.warning(
+                "Figure caption came back empty from model %s (finish_reason=%s). "
+                "A reasoning model can spend the whole %d-token budget thinking "
+                "and return nothing; name a non-reasoning vision model in "
+                "DATASHEETINDEX_VISION_MODEL if that is what happened.",
+                self._vision_model,
+                getattr(choice, "finish_reason", None),
+                VISION_MAX_TOKENS,
+            )
+        return caption
 
     def close(self) -> None:
         """Release the underlying HTTP client once the callable is no longer needed."""
@@ -405,6 +462,13 @@ def _vision_model_env() -> str | None:
     staging tier (which serves ``qwen3.5-27b``) and means nothing to an outside
     user pointing ``LITELLM_BASE_URL`` at some other endpoint. Baking it in
     would break both of them to save one line of configuration.
+
+    **Name a non-reasoning model.** A reasoning model spends
+    ``VISION_MAX_TOKENS`` on thinking before it writes a caption: gpt-5-mini
+    returned an empty caption with ``finish_reason="length"`` and 300 of 300
+    tokens billed as reasoning. ``describe_image`` logs that case rather than
+    guessing at it, since raising the cap for one model would silently raise
+    the per-figure cost for every other.
     """
     value = os.environ.get("DATASHEETINDEX_VISION_MODEL")
     if value is None:
