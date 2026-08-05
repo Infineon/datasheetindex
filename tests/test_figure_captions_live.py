@@ -53,12 +53,12 @@ def test_describe_image_returns_a_single_line_for_a_real_render():
 def test_describe_image_never_returns_an_empty_caption_over_repeated_calls():
     """The regression guard for the transport, which a single call cannot be.
 
-    Captioning over the Responses API returned an *empty* caption for 8 of 16
-    real figure regions against the self-hosted ``qwen3.6-27b``, reproduced
-    three times with a different 8 each run: the gateway's bridge filed the
-    answer as a reasoning item, which ``output_text`` ignores. A one-shot test
-    passes half the time on a broken transport, which is worse than no test.
-    Six calls put that at 1 in 64.
+    Captioning over the Responses API returned an *empty* caption for 8 to 12
+    of 16 real figure regions against the self-hosted ``qwen3.6-27b`` over five
+    runs, a different subset each run: the gateway's bridge filed the answer as
+    a reasoning item, which ``output_text`` ignores. A one-shot test passes
+    roughly half the time on a broken transport, which is worse than no test.
+    Six calls put that at well under 1 in 64.
 
     **Each call must vary the prompt.** The gateway caches identical payloads
     (verified: repeats return the same completion id plus an

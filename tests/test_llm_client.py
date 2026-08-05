@@ -426,8 +426,8 @@ def test_describe_image_uses_chat_completions_not_responses():
     # for any non-OpenAI model, and that bridge can file the model's answer as
     # a reasoning item -- which output_text ignores, yielding an empty caption
     # with the text sitting in the payload. Measured against qwen3.6-27b over
-    # 16 real figure regions: 8 of 16 empty, a different 8 each run. Chat
-    # Completions bypasses the bridge: 0 empty in 112 calls.
+    # 16 real figure regions: 8 to 12 of 16 empty over five runs, a different
+    # subset each run. Chat Completions bypasses the bridge: 0 empty in 144.
     #
     # image_url is an OBJECT here. On the Responses API it is a plain string;
     # the wrong form type-checks and fails at the gateway.

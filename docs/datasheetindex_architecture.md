@@ -509,11 +509,11 @@ decision a future reader would otherwise redo.
   item carrying `reasoning_text`. `output_text` concatenates only `output_text`
   chunks, so the caption arrives as the empty string with its text sitting in
   the same payload. Measured with the shipping client against a self-hosted
-  `qwen3.6-27b` (vLLM) over 16 real figure regions: **8 of 16 captions empty**,
-  reproduced three times, and a **different 8 each run** -- it is per-call
+  `qwen3.6-27b` (vLLM) over 16 real figure regions: **8 to 12 of 16 captions
+  empty** over five runs, and a **different subset each run** -- it is per-call
   sampling, not a property of any figure. Chat Completions does not work around
   the bridge, it bypasses it: same model, same images, same prompt, **0 empty in
-  112 calls**, and the raw message carries no reasoning channel at all. The
+  144 calls**, and the raw message carries no reasoning channel at all. The
   severity is higher than "some captions missing": `caption_figures_in_place`
   scores a blank reply as `failed`, which marks the artifact incomplete, so a
   coin-flip transport re-captions the document on every future build forever --

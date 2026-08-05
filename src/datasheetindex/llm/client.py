@@ -287,11 +287,11 @@ class _ManagedLlmClient:
         ``output_text`` reads only ``output_text`` chunks, so the caption comes
         back as the empty string with the text sitting right there in the
         payload. Measured against the self-hosted ``qwen3.6-27b`` (vLLM) on the
-        prod gateway over 16 real figure regions: **8 of 16 captions empty**,
-        reproduced three times, and a *different* 8 each run -- it is per-call
-        sampling, not a property of a figure. Chat Completions is not a
+        prod gateway over 16 real figure regions: **8 to 12 of 16 captions
+        empty** over five runs, and a *different* subset each run -- it is
+        per-call sampling, not a property of a figure. Chat Completions is not a
         workaround for that bridge; it bypasses it. Same model, same images,
-        same prompt: 0 empty in 112 calls, and the raw message has no reasoning
+        same prompt: 0 empty in 144 calls, and the raw message has no reasoning
         channel at all.
 
         An empty caption is worse here than it sounds: ``caption_figures_in_place``
