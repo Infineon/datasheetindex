@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import types
 
@@ -66,6 +67,7 @@ def _patch_fake_clients(
     seen_httpx_kwargs: dict[str, object],
     seen_openai_kwargs: dict[str, object],
     httpx_clients: list[_TrackedHttpxClient] | None = None,
+    seen_responses_kwargs: dict[str, object] | None = None,
 ) -> _FakeChat:
     """Install fake ``httpx``/``openai`` modules; return the chat fake.
 
@@ -74,16 +76,27 @@ def _patch_fake_clients(
     was a stub returning ``None`` -- which meant no test had ever reached
     ``describe_image`` through the factory, and the two lines that connect the
     vision path could both have been deleted with the suite still green.
+
+    ``seen_responses_kwargs`` captures the *text* request the same way. Vision
+    is observable through the chat fake, but the ToC fallback and summaries go
+    out over the Responses API, so which model they name has to be read there.
     """
+
+    def _create_response(**kwargs):
+        if seen_responses_kwargs is not None:
+            # Cleared first, like seen_openai_kwargs below: a test that makes
+            # two text calls must read the second one, not a merge of both.
+            seen_responses_kwargs.clear()
+            seen_responses_kwargs.update(kwargs)
+        return types.SimpleNamespace(output_text="ok")
+
     chat = _FakeChat()
 
     class _FakeOpenAI:
         def __init__(self, **kwargs):
             seen_openai_kwargs.clear()
             seen_openai_kwargs.update(kwargs)
-            self.responses = types.SimpleNamespace(
-                create=lambda **_kwargs: types.SimpleNamespace(output_text="ok")
-            )
+            self.responses = types.SimpleNamespace(create=_create_response)
             self.chat = types.SimpleNamespace(completions=chat)
 
     def _fake_httpx_client(**kwargs):
@@ -559,6 +572,176 @@ def test_vision_model_env_is_none_when_unset(monkeypatch):
 
     monkeypatch.delenv("DATASHEETINDEX_VISION_MODEL", raising=False)
     assert vision_model_env() is None
+
+
+@pytest.mark.parametrize(
+    "env_value,expected",
+    [
+        ("gpt-5-mini", "gpt-5-mini"),
+        # Same contract as the vision knob: unset and empty both mean "use the
+        # built-in default", so a commented-out .env line or a blank entry in
+        # the MCP host's env block is a no-op rather than a request for the
+        # model named "".
+        ("", None),
+        ("   ", None),
+    ],
+)
+def test_text_model_env_reads_the_knob(monkeypatch, env_value, expected):
+    from datasheetindex.llm.client import text_model_env
+
+    monkeypatch.setenv("DATASHEETINDEX_MODEL", env_value)
+    assert text_model_env() == expected
+
+
+def test_text_model_env_is_none_when_unset(monkeypatch):
+    from datasheetindex.llm.client import text_model_env
+
+    monkeypatch.delenv("DATASHEETINDEX_MODEL", raising=False)
+    assert text_model_env() is None
+
+
+@pytest.mark.parametrize(
+    "reader_name,variable",
+    [
+        ("text_model_env", "DATASHEETINDEX_MODEL"),
+        ("vision_model_env", "DATASHEETINDEX_VISION_MODEL"),
+    ],
+)
+def test_each_env_reader_sees_dotenv_without_a_client(
+    monkeypatch, reader_name, variable
+):
+    """Each reader must load ``.env`` itself, with no client constructed first.
+
+    ``_BuildOptions`` -- the artifact cache key -- calls both readers before any
+    client exists, and ``load_dotenv`` used to run only inside the factory. The
+    key therefore recorded ``None`` for a ``.env``-configured model while the
+    build ran on the ``.env`` value.
+
+    Parametrized per reader on purpose. The end-to-end test in
+    ``tests/test_reuse.py`` cannot pin this one: the two readers are called on
+    adjacent lines, so whichever runs first loads ``.env`` for the other, and
+    dropping the load from just one of them leaves that test green.
+    """
+    import datasheetindex.llm.client as client_module
+
+    def _load_dotenv(*_args, **_kwargs):
+        if variable not in os.environ:
+            monkeypatch.setenv(variable, "from-dotenv")
+
+    monkeypatch.delenv(variable, raising=False)
+    monkeypatch.setitem(
+        sys.modules, "dotenv", types.SimpleNamespace(load_dotenv=_load_dotenv)
+    )
+
+    reader = getattr(client_module, reader_name)
+    assert reader() == "from-dotenv"
+
+
+def test_create_llm_client_uses_the_text_model_env_when_no_model_is_named(monkeypatch):
+    """The knob's whole point: the caller that names nothing is the common one.
+
+    ``build_datasheet`` omits ``model`` unless the agent asks for summaries or
+    judges the ToC poor, so the auto ToC fallback is what actually runs on the
+    default -- and before this knob that default was a hardcoded ``gpt-4.1``
+    with no deployment override anywhere. A gateway that does not serve
+    ``gpt-4.1`` had no way to make the fallback work.
+    """
+    monkeypatch.setenv("LITELLM_BASE_URL", "https://example.com")
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "secret")
+    monkeypatch.setenv("DATASHEETINDEX_MODEL", "some-gateway-model")
+    _install_fake_dotenv(monkeypatch)
+    seen_responses: dict[str, object] = {}
+    _patch_fake_clients(monkeypatch, {}, {}, seen_responses_kwargs=seen_responses)
+
+    from datasheetindex.llm.client import create_llm_client
+
+    create_llm_client()("system", "user")
+
+    assert seen_responses["model"] == "some-gateway-model"
+
+
+def test_an_explicit_model_wins_over_the_text_model_env(monkeypatch):
+    """Precedence is arg > env > default, and this is the half that can regress.
+
+    The ``model`` tool argument is per-call and per-document; the env var is the
+    deployment's default. Resolving the env var over an explicit argument would
+    make ``build_datasheet(model=...)`` inert wherever the knob happens to be
+    set, which is exactly where an agent asking for a different model is most
+    likely to be running.
+    """
+    monkeypatch.setenv("LITELLM_BASE_URL", "https://example.com")
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "secret")
+    monkeypatch.setenv("DATASHEETINDEX_MODEL", "deployment-default")
+    _install_fake_dotenv(monkeypatch)
+    seen_responses: dict[str, object] = {}
+    _patch_fake_clients(monkeypatch, {}, {}, seen_responses_kwargs=seen_responses)
+
+    from datasheetindex.llm.client import create_llm_client
+
+    create_llm_client(model="gpt-5.2")("system", "user")
+
+    assert seen_responses["model"] == "gpt-5.2"
+
+
+def test_create_llm_client_falls_back_to_the_default_model(monkeypatch):
+    monkeypatch.setenv("LITELLM_BASE_URL", "https://example.com")
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "secret")
+    monkeypatch.delenv("DATASHEETINDEX_MODEL", raising=False)
+    _install_fake_dotenv(monkeypatch)
+    seen_responses: dict[str, object] = {}
+    _patch_fake_clients(monkeypatch, {}, {}, seen_responses_kwargs=seen_responses)
+
+    from datasheetindex.llm.client import DEFAULT_TEXT_MODEL, create_llm_client
+
+    create_llm_client()("system", "user")
+
+    assert seen_responses["model"] == DEFAULT_TEXT_MODEL
+
+
+def test_the_vision_knob_still_wins_over_the_text_model_env(monkeypatch):
+    """Two knobs, and the specific one must not be swallowed by the general one.
+
+    With both set, text goes to one model and captions to the other. Nothing
+    else pins that the vision resolution reads the *env* text model rather than
+    the hardcoded default it used to fall back to.
+    """
+    monkeypatch.setenv("LITELLM_BASE_URL", "https://example.com")
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "secret")
+    monkeypatch.setenv("DATASHEETINDEX_MODEL", "text-only-model")
+    monkeypatch.setenv("DATASHEETINDEX_VISION_MODEL", "qwen3.6-27b")
+    _install_fake_dotenv(monkeypatch)
+    seen_responses: dict[str, object] = {}
+    chat = _patch_fake_clients(
+        monkeypatch, {}, {}, seen_responses_kwargs=seen_responses
+    )
+
+    from datasheetindex.llm.client import create_llm_client, get_vision_client
+
+    llm = create_llm_client()
+    llm("system", "user")
+    vision = get_vision_client(llm)
+    assert vision is not None
+    vision.describe_image("describe it", "QUJD")
+
+    assert seen_responses["model"] == "text-only-model"
+    assert chat.captured["model"] == "qwen3.6-27b"
+
+
+def test_vision_follows_the_text_model_env_when_no_vision_model_is_set(monkeypatch):
+    monkeypatch.setenv("LITELLM_BASE_URL", "https://example.com")
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "secret")
+    monkeypatch.setenv("DATASHEETINDEX_MODEL", "text-only-model")
+    monkeypatch.delenv("DATASHEETINDEX_VISION_MODEL", raising=False)
+    _install_fake_dotenv(monkeypatch)
+    chat = _patch_fake_clients(monkeypatch, {}, {})
+
+    from datasheetindex.llm.client import create_llm_client, get_vision_client
+
+    vision = get_vision_client(create_llm_client())
+    assert vision is not None
+    vision.describe_image("describe it", "QUJD")
+
+    assert chat.captured["model"] == "text-only-model"
 
 
 def test_create_llm_client_wires_chat_completions_and_the_vision_model(monkeypatch):

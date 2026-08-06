@@ -449,11 +449,102 @@ def _parse_max_retries_env(value: str | None) -> int:
     return parsed
 
 
+#: The text model when neither the caller nor the deployment names one.
+#:
+#: A last resort, not a recommendation: it is a name this library cannot know
+#: any given gateway serves. ``DATASHEETINDEX_MODEL`` is how a deployment that
+#: serves something else says so.
+DEFAULT_TEXT_MODEL = "gpt-4.1"
+
+
+def ensure_dotenv_loaded() -> None:
+    """Fold ``.env`` into the environment, if python-dotenv is installed.
+
+    Called by **both** model-name readers and by the factory, and that is
+    load-bearing rather than defensive. It used to live only inside
+    ``create_llm_client``, which made the answer to "what does this deployment
+    name?" depend on whether a client had been constructed yet -- and
+    ``_BuildOptions``, the artifact cache key, asks *before* any client exists.
+    A ``.env``-configured model therefore keyed as ``None`` while the build that
+    followed ran on the ``.env`` value, which both rebuilt every document on the
+    second call of a process and served the previous model's output after the
+    knob moved: precisely the silent staleness the key exists to prevent.
+
+    Not cached. ``load_dotenv`` does not override variables already set, so
+    repeating it is a no-op on everything the process was launched with, and a
+    cache would freeze the answer for a long-lived server across a ``.env`` edit.
+
+    Public, and called from ``tools/bound.py`` as well, because ``.env`` also
+    carries non-LLM settings (``DATASHEETINDEX_OUTPUT_DIR``): folding it in once
+    at the top of ``build_datasheet`` makes the load ordering-independent for
+    every ``DATASHEETINDEX_*`` variable rather than for the two the model
+    readers happen to touch. It lives here because python-dotenv is an ``[llm]``
+    extra, so the optional-import guard belongs beside the others.
+
+    Failures are swallowed. ``load_dotenv`` is not total -- a ``.env`` saved as
+    UTF-16 by a Windows editor raises ``UnicodeDecodeError``, an unreadable one
+    raises ``PermissionError`` -- and every ``create_llm_client`` caller already
+    catches those, so before this was hoisted the worst case was "no LLM". It
+    now runs on the plain ``build_datasheet`` path, which has no such guard, and
+    a build that wanted no LLM at all must not die on a file it never needed.
+
+    ``tests/conftest.py``'s ``_hermetic_llm_env`` neutralises this, which is why
+    the suite cannot see the bug above on its own -- do not "simplify" the
+    fixture's ``load_dotenv`` patch away.
+    """
+    try:
+        dotenv = importlib.import_module("dotenv")
+    except ImportError:
+        return
+    try:
+        dotenv.load_dotenv()
+    except (OSError, ValueError):
+        logger.debug(
+            "Could not read .env; continuing with the ambient environment",
+            exc_info=True,
+        )
+
+
+def text_model_env() -> str | None:
+    """The default model for the ToC fallback and summaries, when one is named.
+
+    ``None`` means ``DEFAULT_TEXT_MODEL``, which is the behaviour before this
+    knob existed.
+
+    The counterpart to ``vision_model_env`` at the other end of the same
+    question, and it exists because the two were asymmetric in a way that left
+    a hole rather than merely an inconsistency. Captioning had a deployment-level
+    override; text had only ``build_datasheet``'s ``model`` argument -- which the
+    agent is told to omit unless summaries are requested or the ToC is poor. So
+    the model that actually ran the *automatic* ToC fallback, the common path,
+    was a hardcoded name with no override anywhere, and a gateway not serving it
+    had no way to make the fallback work at all.
+
+    It reaches summaries only through the Python API. ``build_datasheet`` and
+    the CLI both reject ``include_summaries`` without an explicit ``model``, and
+    an explicit model outranks this, so on those two surfaces the knob decides
+    the ToC fallback and nothing else. Worth knowing before reading a summary
+    and wondering which model wrote it.
+
+    Deployment-level rather than per-call because which models a gateway serves
+    is a property of that deployment, not of this library or of any one
+    document -- the same argument ``vision_model_env`` makes. What *is* per-call
+    is whether this document is worth spending a better model on, and that stays
+    with the ``model`` argument, which wins over this.
+    """
+    ensure_dotenv_loaded()
+    value = os.environ.get("DATASHEETINDEX_MODEL")
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
+
+
 def vision_model_env() -> str | None:
     """The model figure captioning should use, when a deployment names one.
 
-    ``None`` -- the default -- means vision follows ``model``, which is exactly
-    the behaviour before this knob existed.
+    ``None`` -- the default -- means vision follows the resolved text model,
+    which is exactly the behaviour before this knob existed.
 
     Env rather than a hardcoded name because the cheapest capable vision model
     on a gateway is a property of *that deployment*, not of this library. The
@@ -470,6 +561,7 @@ def vision_model_env() -> str | None:
     guessing at it, since raising the cap for one model would silently raise
     the per-figure cost for every other.
     """
+    ensure_dotenv_loaded()
     value = os.environ.get("DATASHEETINDEX_VISION_MODEL")
     if value is None:
         return None
@@ -477,7 +569,7 @@ def vision_model_env() -> str | None:
     return value or None
 
 
-def create_llm_client(model: str = "gpt-4.1") -> LlmCallable:
+def create_llm_client(model: str | None = None) -> LlmCallable:
     """Create a sync LLM callable backed by the OpenAI-compatible gateway.
 
     Reads ``LITELLM_BASE_URL`` and ``LITELLM_MASTER_KEY`` from the
@@ -487,6 +579,12 @@ def create_llm_client(model: str = "gpt-4.1") -> LlmCallable:
     Request timeout and retry policy can be tuned with
     ``LITELLM_TIMEOUT_SECONDS`` and ``LITELLM_MAX_RETRIES``.
 
+    The text model resolves as ``model`` > ``DATASHEETINDEX_MODEL`` >
+    ``DEFAULT_TEXT_MODEL``: an explicit argument is a per-call decision and
+    outranks the deployment's default. ``model=None`` is therefore "resolve it",
+    not "use the built-in default" -- a caller with nothing to say must pass
+    nothing, or it silently overrides the deployment.
+
     Text calls use the Responses API; figure captioning uses Chat Completions
     and, when ``DATASHEETINDEX_VISION_MODEL`` is set, a different model. See
     ``_ManagedLlmClient.describe_image`` for why the transports differ.
@@ -494,12 +592,7 @@ def create_llm_client(model: str = "gpt-4.1") -> LlmCallable:
     Returns a ``(system: str, user: str) -> str`` callable. The returned object
     also exposes ``close()`` for explicit cleanup when the caller owns it.
     """
-    try:
-        dotenv = importlib.import_module("dotenv")
-    except ImportError:
-        pass
-    else:
-        dotenv.load_dotenv()
+    ensure_dotenv_loaded()
 
     base_url = os.environ.get("LITELLM_BASE_URL")
     api_key = os.environ.get("LITELLM_MASTER_KEY")
@@ -533,7 +626,10 @@ def create_llm_client(model: str = "gpt-4.1") -> LlmCallable:
         responses_api=cast("_ResponsesApi", client.responses),
         chat_api=cast("_ChatCompletionsApi", client.chat.completions),
         http_client=http_client,
-        model=model,
+        # Stripped: a name with stray whitespace is always a mistake, and
+        # sending it verbatim turns it into the gateway's error rather than
+        # ours. Matches what both env readers already do with their values.
+        model=(model or "").strip() or text_model_env() or DEFAULT_TEXT_MODEL,
         vision_model=vision_model_env(),
     )
 

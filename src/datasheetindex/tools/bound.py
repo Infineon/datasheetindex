@@ -45,7 +45,9 @@ from datasheetindex.core.textfile import search_text as search_text_content
 from datasheetindex.index import DatasheetIndex
 from datasheetindex.llm.client import (
     close_llm_client,
+    ensure_dotenv_loaded,
     get_vision_client,
+    text_model_env,
     vision_model_env,
 )
 from datasheetindex.llm.figure_captions import (
@@ -88,6 +90,22 @@ class _BuildOptions:
     #: default here instead would key the same fact twice and drift when the
     #: default moves.
     vision_model: str | None
+    #: ``DATASHEETINDEX_MODEL`` as configured, or ``None`` when unset.
+    #:
+    #: Here for the same reason as ``vision_model``, one layer up: the text
+    #: model writes the reconstructed ToC and the summaries, so moving it and
+    #: being served the previous model's output from disk is the identical
+    #: silent failure. The **env value** again, not the resolved model -- with
+    #: the knob unset, ``model`` above already keys what ran.
+    #:
+    #: Recorded as ``None`` whenever ``model`` is set, because an explicit model
+    #: outranks the env var: with one given, the knob cannot reach the artifact,
+    #: so keying it would invalidate a still-valid artifact every time an
+    #: unrelated deployment default moved. Keying it only where it can actually
+    #: decide the model keeps the map from key to effective model total in both
+    #: directions -- no two keys share an effective model, and no effective
+    #: model spans two keys.
+    text_model: str | None
 
     def to_dict(self) -> dict[str, object]:
         """The cache key, as recorded in the sidecar.
@@ -139,9 +157,9 @@ class _VisionResolver:
         try:
             from datasheetindex.llm.client import create_llm_client
 
-            candidate = create_llm_client(
-                **({"model": self._model} if self._model is not None else {})
-            )
+            # ``None`` asks the factory to resolve the deployment's default;
+            # it is not a model name of its own.
+            candidate = create_llm_client(model=self._model)
         except (ImportError, ValueError, OSError):
             candidate = None
         if candidate is not None:
@@ -388,12 +406,28 @@ class DatasheetTools:
         max_figure_captions: int = DEFAULT_MAX_FIGURE_CAPTIONS,
     ) -> DatasheetArtifacts:
         """Build and cache datasheet artifacts for later MCP queries."""
-        if include_summaries and model is None:
+        # Normalised exactly as ``create_llm_client`` resolves it, and once, so
+        # that "did the caller name a model?" has one answer on this path. The
+        # two disagreed while this read the raw string and the factory stripped
+        # it: ``model=" "`` is truthy but strips to nothing, so the factory
+        # resolved through ``DATASHEETINDEX_MODEL`` while the key below recorded
+        # ``text_model=None`` -- two different models sharing one cache key, and
+        # a stale artifact served. It also slipped past the summaries guard,
+        # which then wrote summaries from a model the caller never named.
+        named_model = (model or "").strip() or None
+        if include_summaries and named_model is None:
             raise ValueError("--include-summaries requires --model")
         # Validate before invalidating. ``build()`` would reject this cap too,
         # but only after ``_build_or_reuse`` has already removed the sidecar, so
         # a rejected call would destroy a valid cache on its way to raising.
         validate_max_figure_captions(max_figure_captions)
+
+        # Before anything reads a DATASHEETINDEX_* variable, and before the
+        # output-dir resolver in particular: ``.env`` must be folded in once, at
+        # the top, or the answer depends on which reader ran first. Doing it
+        # here rather than at each reader keeps that true for variables added
+        # later, which is the shape of bug this just fixed for the model names.
+        ensure_dotenv_loaded()
 
         # Resolve once so the cache key is the actual destination path -- two
         # successive calls with output_dir=None must miss the cache if the
@@ -410,15 +444,16 @@ class DatasheetTools:
             output_dir=resolved_output_dir,
             output_stem=output_stem,
             include_summaries=include_summaries,
-            model=model,
+            model=named_model,
             caption_figures=caption_figures,
             max_figure_captions=max_figure_captions,
             vision_model=vision_model_env(),
+            text_model=None if named_model else text_model_env(),
         )
         # One resolver for the whole call, closed however the call exits. Both
         # gates and the rebuild ask it, so a walk through all three opens one
         # client rather than three.
-        resolver = _VisionResolver(model)
+        resolver = _VisionResolver(named_model)
         try:
             return self._build_or_reuse(options, resolver, force_rebuild)
         finally:

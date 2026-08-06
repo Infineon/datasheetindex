@@ -231,7 +231,7 @@ class _FakeBuildDoc:
 def test_build_auto_llm_fallback_when_quality_low(monkeypatch, tmp_path):
     quality_calls = [0]
     fallback_calls: list[object] = []
-    llm_models: list[str] = []
+    llm_models: list[str | None] = []
     fake_llm: object | None = None
 
     def fake_open(_path: str):
@@ -255,7 +255,7 @@ def test_build_auto_llm_fallback_when_quality_low(monkeypatch, tmp_path):
 
     fake_llm = _FakeAutoLlm()
 
-    def fake_client(model: str):
+    def fake_client(model: str | None = None):
         llm_models.append(model)
         return fake_llm
 
@@ -325,7 +325,10 @@ def test_build_auto_llm_fallback_when_quality_low(monkeypatch, tmp_path):
 
     assert artifacts.toc_quality is not None
     assert artifacts.toc_quality.score == 0.8
-    assert llm_models == ["gpt-4.1"]
+    # None, not a model name: the automatic fallback names no model, so the
+    # factory resolves DATASHEETINDEX_MODEL and its own default. Asserting
+    # "gpt-4.1" here would re-pin a default the deployment is meant to move.
+    assert llm_models == [None]
     assert len(fallback_calls) == 1
     assert artifacts.json_data["toc"][0]["title"] == "Auto"
     assert fake_llm.closed is True
@@ -339,7 +342,7 @@ def test_build_auto_llm_fallback_keeps_original_when_candidate_too_thin(
 ):
     quality_calls = [0]
     fallback_calls: list[object] = []
-    llm_models: list[str] = []
+    llm_models: list[str | None] = []
 
     def fake_open(_path: str):
         return _FakeBuildDoc(pages=20)
@@ -372,7 +375,7 @@ def test_build_auto_llm_fallback_keeps_original_when_candidate_too_thin(
 
     fake_llm = _FakeAutoLlm()
 
-    def fake_client(model: str):
+    def fake_client(model: str | None = None):
         llm_models.append(model)
         return fake_llm
 
@@ -455,7 +458,10 @@ def test_build_auto_llm_fallback_keeps_original_when_candidate_too_thin(
 
     assert artifacts.toc_quality is not None
     assert artifacts.toc_quality.score == 0.2
-    assert llm_models == ["gpt-4.1"]
+    # None, not a model name: the automatic fallback names no model, so the
+    # factory resolves DATASHEETINDEX_MODEL and its own default. Asserting
+    # "gpt-4.1" here would re-pin a default the deployment is meant to move.
+    assert llm_models == [None]
     assert len(fallback_calls) == 1
     assert artifacts.json_data["toc"][0]["title"] == "Original"
     assert fake_llm.closed is True
@@ -570,7 +576,7 @@ def test_build_auto_llm_fallback_graceful_without_credentials(monkeypatch, tmp_p
         ),
     )
 
-    def _raise_missing_env(model):
+    def _raise_missing_env(model=None):
         raise ValueError("missing env")
 
     monkeypatch.setattr(
@@ -605,7 +611,7 @@ def test_build_llm_fallback_graceful_on_api_error(monkeypatch, tmp_path):
 
     fake_llm = _FakeAutoLlm()
 
-    def fake_client(model: str):
+    def fake_client(model: str | None = None):
         return fake_llm
 
     def fake_toc_from_text(_text, _total_pages, _llm_callable):

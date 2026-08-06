@@ -554,6 +554,24 @@ decision a future reader would otherwise redo.
   such a model in the source would be wrong twice over: it is absent from its own
   gateway's staging tier, and it means nothing to anyone pointing
   `LITELLM_BASE_URL` somewhere else.
+- **So is the text model, and for one call more than symmetry.**
+  `DATASHEETINDEX_MODEL` names the model for summaries and the ToC fallback;
+  unset, it is `gpt-4.1`. Before it existed the only way to name a text model
+  was `build_datasheet`'s `model` argument -- which the agent is told to omit
+  unless the user asked for a specific one -- so the *automatic* ToC fallback,
+  the path that runs without anyone deciding anything, was pinned to a name
+  this library cannot know a given gateway serves. A deployment whose gateway
+  did not serve it had no way to make the fallback work at all.
+
+  The two knobs sit at different levels on purpose, and the rule is where the
+  deciding information lives. Which models a gateway serves is deployment
+  knowledge, so both are env vars. Whether *this document* is worth a better
+  model is per-call knowledge, so the text model is also a tool argument, and
+  it wins over the env var. Nothing about a single document tells an agent
+  which vision model a gateway has, so there is no vision tool argument -- and
+  a wrong name there is the expensive failure: every caption call fails, the
+  artifact is marked incomplete, and the document is rebuilt on every request
+  until it is corrected.
 
 ### Deliverable 2: Page-Matched Text File
 

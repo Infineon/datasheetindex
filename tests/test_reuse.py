@@ -328,6 +328,7 @@ def test_build_options_to_dict_covers_every_dataclass_field():
         caption_figures=True,
         max_figure_captions=20,
         vision_model=None,
+        text_model=None,
     )
 
     assert set(options.to_dict()) == {f.name for f in fields(_BuildOptions)}
@@ -497,6 +498,221 @@ def test_changing_the_vision_model_blocks_reuse(
     with DatasheetTools(str(toc_pdf)) as tools:
         tools.build_datasheet(output_dir=out)
     assert len(build_spy) == 2, "a changed vision model must rebuild"
+
+
+def test_changing_the_text_model_blocks_reuse(
+    tmp_path, toc_pdf, not_editable, build_spy, monkeypatch
+):
+    """``DATASHEETINDEX_MODEL`` changes the artifact, so it must key the cache.
+
+    Same argument as the vision knob above, one layer up: the text model writes
+    the reconstructed ToC and the section summaries, so serving the previous
+    model's output from disk after the knob moves is the identical silent
+    failure. Keyed as the **env value** rather than the resolved model, so that
+    an unset knob stays keyed by ``model`` alone and does not record the same
+    fact twice.
+    """
+    out = str(tmp_path / "out")
+    monkeypatch.delenv("DATASHEETINDEX_MODEL", raising=False)
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+    assert len(build_spy) == 1
+
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+    assert len(build_spy) == 1, "an unchanged environment must still reuse"
+
+    monkeypatch.setenv("DATASHEETINDEX_MODEL", "some-other-text-model")
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+    assert len(build_spy) == 2, "a changed text model must rebuild"
+
+
+def test_a_dotenv_sourced_text_model_is_visible_to_the_cache_key(
+    tmp_path, toc_pdf, not_editable, build_spy, monkeypatch
+):
+    """The key must not read the environment before ``.env`` has been folded in.
+
+    ``load_dotenv`` used to run only inside ``create_llm_client``, while
+    ``_BuildOptions`` -- the key -- is built before any client exists. So on the
+    first build of a process a ``.env``-configured model keyed as ``None`` and
+    the build ran on the ``.env`` value: the second call rebuilt with nothing
+    changed, and a later session's first call matched the stale ``None`` sidecar
+    and served the previous model's ToC and summaries.
+
+    The stand-in for ``.env`` is a fake ``dotenv`` whose ``load_dotenv``
+    populates ``os.environ``, which is exactly what the real one does and what
+    the autouse hermetic fixture otherwise neutralises. Both builds run with it
+    installed, so a rebuild here can only come from the two reads disagreeing.
+    """
+    import sys
+    import types
+
+    def _load_dotenv(*_args, **_kwargs):
+        # Through monkeypatch, not os.environ directly: delenv on an
+        # already-absent name records nothing to restore, so a raw setdefault
+        # here escapes the test and reaches the integration tests, which opt out
+        # of the hermetic fixture and would then ask the gateway for a model
+        # named "from-dotenv". The no-override check keeps the real
+        # load_dotenv's semantics.
+        if "DATASHEETINDEX_MODEL" not in os.environ:
+            monkeypatch.setenv("DATASHEETINDEX_MODEL", "from-dotenv")
+
+    monkeypatch.delenv("DATASHEETINDEX_MODEL", raising=False)
+    monkeypatch.setitem(
+        sys.modules, "dotenv", types.SimpleNamespace(load_dotenv=_load_dotenv)
+    )
+
+    out = str(tmp_path / "out")
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+    assert len(build_spy) == 1
+    assert os.environ.get("DATASHEETINDEX_MODEL") == "from-dotenv", (
+        "the fake .env never loaded, so this test proves nothing"
+    )
+
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+    assert len(build_spy) == 1, (
+        "the second build keyed a model the first one did not record"
+    )
+
+
+def test_an_explicit_model_makes_the_text_model_env_irrelevant_to_the_key(
+    tmp_path, toc_pdf, not_editable, build_spy, monkeypatch
+):
+    """The negative half of the key: a knob that cannot decide must not rebuild.
+
+    With ``model`` given it outranks ``DATASHEETINDEX_MODEL``, so the env value
+    cannot reach the artifact. Keying it anyway would throw away every cached
+    artifact each time an unrelated deployment default moved -- a cost with no
+    corresponding correctness win.
+
+    The factory is stubbed because an explicit ``model`` makes ``build_datasheet``
+    construct a client eagerly, which raises without credentials; the hermetic
+    fixture guarantees there are none. What is under test is the cache key, not
+    the gateway.
+    """
+
+    def dummy_callable(_system, _user):
+        return "unused"
+
+    monkeypatch.setattr(
+        "datasheetindex.llm.client.create_llm_client",
+        lambda *_args, **_kwargs: dummy_callable,
+    )
+
+    out = str(tmp_path / "out")
+    monkeypatch.delenv("DATASHEETINDEX_MODEL", raising=False)
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=out, model="gpt-5")
+    assert len(build_spy) == 1
+
+    monkeypatch.setenv("DATASHEETINDEX_MODEL", "cannot-reach-this-artifact")
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=out, model="gpt-5")
+    assert len(build_spy) == 1, "a knob the explicit model overrides must not rebuild"
+
+
+def test_dotenv_is_folded_in_before_the_output_dir_is_resolved(
+    tmp_path, toc_pdf, monkeypatch
+):
+    """``.env`` must land before *any* DATASHEETINDEX_* read, not just the models.
+
+    ``resolve_default_output_dir`` reads ``DATASHEETINDEX_OUTPUT_DIR`` earlier in
+    ``build_datasheet`` than the model readers run, so loading ``.env`` at the
+    model readers left this one variable seeing a pre-``.env`` environment on
+    the first build of a process and a post-``.env`` one on the second. That is
+    the same defect as the model bug, one field over, and it is why the load
+    happens once at the top rather than inside each reader -- the ordering
+    question then stops existing for variables added later.
+
+    Not a model test: it is here because the guarantee is about ``.env``
+    ordering, and it is the cheapest variable to observe it with.
+    """
+    import sys
+    import types
+
+    env_dir = tmp_path / "from-dotenv"
+
+    def _load_dotenv(*_args, **_kwargs):
+        if "DATASHEETINDEX_OUTPUT_DIR" not in os.environ:
+            monkeypatch.setenv("DATASHEETINDEX_OUTPUT_DIR", str(env_dir))
+
+    monkeypatch.delenv("DATASHEETINDEX_OUTPUT_DIR", raising=False)
+    monkeypatch.setitem(
+        sys.modules, "dotenv", types.SimpleNamespace(load_dotenv=_load_dotenv)
+    )
+
+    with DatasheetTools(str(toc_pdf)) as tools:
+        artifacts = tools.build_datasheet()
+
+    assert artifacts.json_path is not None
+    assert env_dir in artifacts.json_path.parents, (
+        f"the first build ignored the .env output dir: {artifacts.json_path}"
+    )
+
+
+def test_a_whitespace_only_model_cannot_collide_in_the_cache_key(
+    tmp_path, toc_pdf, not_editable, build_spy, monkeypatch
+):
+    """The key and the factory must agree on what counts as naming a model.
+
+    ``create_llm_client`` strips its argument, so ``model=" "`` names nothing
+    and the env var decides. The key decided the same question with plain
+    truthiness, and ``" "`` is truthy -- so it recorded ``text_model=None``
+    while the build resolved through ``DATASHEETINDEX_MODEL``. Two different
+    models, one key: the second env value was served the first one's artifact.
+
+    This is the collision case, so it is a correctness test, not a
+    performance one -- unlike its sibling above, a failure here means a stale
+    artifact reached a caller.
+    """
+
+    def dummy_callable(_system, _user):
+        return "unused"
+
+    monkeypatch.setattr(
+        "datasheetindex.llm.client.create_llm_client",
+        lambda *_args, **_kwargs: dummy_callable,
+    )
+    out = str(tmp_path / "out")
+
+    monkeypatch.setenv("DATASHEETINDEX_MODEL", "model-a")
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=out, model=" ")
+    assert len(build_spy) == 1
+
+    monkeypatch.setenv("DATASHEETINDEX_MODEL", "model-b")
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=out, model=" ")
+    assert len(build_spy) == 2, "model-b was served model-a's artifact"
+
+
+def test_a_whitespace_only_model_does_not_satisfy_the_summaries_guard(
+    tmp_path, toc_pdf, monkeypatch
+):
+    """``include_summaries`` requires a model the caller actually named.
+
+    The factory is stubbed so that a *credential* ValueError cannot stand in
+    for the guard's: without it this passes whether the guard fires or not,
+    which is how the first attempt at this test proved nothing.
+    """
+
+    def dummy_callable(_system, _user):
+        return "unused"
+
+    monkeypatch.setattr(
+        "datasheetindex.llm.client.create_llm_client",
+        lambda *_args, **_kwargs: dummy_callable,
+    )
+    with DatasheetTools(str(toc_pdf)) as tools:
+        with pytest.raises(ValueError, match="requires --model"):
+            tools.build_datasheet(
+                output_dir=str(tmp_path / "out"),
+                model="   ",
+                include_summaries=True,
+            )
 
 
 def test_reuse_populates_every_field_the_tools_read(

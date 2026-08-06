@@ -67,9 +67,18 @@ uv pip install claude-agent-sdk
 ```
 
 For LLM-backed ToC fallback, summaries and figure captions, configure
-`LITELLM_BASE_URL` and `LITELLM_MASTER_KEY` (see `.env.example`). Optionally set
-`DATASHEETINDEX_VISION_MODEL` to caption figures with a different -- typically
-cheaper -- model than the one used for summaries.
+`LITELLM_BASE_URL` and `LITELLM_MASTER_KEY` (see `.env.example`). Two optional
+variables name the models, since which ones a gateway serves is a property of
+your deployment rather than of this library:
+
+| variable | names | default |
+|---|---|---|
+| `DATASHEETINDEX_MODEL` | summaries and the ToC fallback | `gpt-4.1` |
+| `DATASHEETINDEX_VISION_MODEL` | figure captions only | follows the text model |
+
+`build_datasheet`'s `model` argument overrides `DATASHEETINDEX_MODEL` for one
+call; the vision model is deployment-level only, and deliberately not a tool
+argument -- an agent has no way to know what a given gateway serves.
 
 `claude-agent-sdk` is only required for the SDK-flavored handoff
 (`create_datasheet_tools_server`). The tool logic itself is framework-neutral --

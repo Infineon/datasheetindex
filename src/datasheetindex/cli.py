@@ -39,7 +39,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Explicit LLM model for ToC fallback and summaries; without it, "
             "low-quality ToCs may still use the default auto-fallback model "
-            "when LLM credentials are available"
+            "(DATASHEETINDEX_MODEL, or gpt-4.1) when LLM credentials are "
+            "available"
         ),
     )
     build_parser.add_argument(
@@ -69,6 +70,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _run_build(args: argparse.Namespace) -> int:
     llm_callable = None
+    # Normalised the way create_llm_client resolves it, for the reason
+    # DatasheetTools.build_datasheet normalises: `--model "   "` is truthy, so
+    # it would satisfy the guard below and then strip to nothing in the factory,
+    # leaving summaries to a model nobody named.
+    args.model = (args.model or "").strip() or None
     if args.include_summaries and not args.model:
         print("Error: --include-summaries requires --model", file=sys.stderr)
         return 2

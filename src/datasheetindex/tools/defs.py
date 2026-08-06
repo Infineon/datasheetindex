@@ -359,11 +359,10 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                         "type": "string",
                         "description": (
                             "Model for summaries and the weak-ToC fallback. Omit "
-                            "unless summaries are requested or the ToC is poor. "
-                            "The gateway serves gpt-4.1 (the usual choice), "
-                            "gpt-5-mini, gpt-5-nano, gpt-4.1-nano, gpt-4o-mini, "
-                            "gpt-5, gpt-5.1, gpt-5.2; a name outside this list "
-                            "will not resolve."
+                            "it unless the user named a model: omitting it uses "
+                            "the model this deployment is configured with, and a "
+                            "name its gateway does not serve fails the call. Set "
+                            "DATASHEETINDEX_MODEL to change that default."
                         ),
                     },
                     "force_rebuild": {

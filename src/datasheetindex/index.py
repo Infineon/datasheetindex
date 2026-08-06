@@ -792,6 +792,10 @@ class DatasheetIndex:
         try:
             from datasheetindex.llm.client import create_llm_client
 
-            return create_llm_client(model="gpt-4.1")
+            # No model named: the factory resolves DATASHEETINDEX_MODEL and
+            # falls back to its own default. Naming one here would pin the
+            # automatic ToC fallback -- the path this method exists for -- to a
+            # model the deployment has no way to change.
+            return create_llm_client()
         except (ImportError, ValueError, OSError):
             return None

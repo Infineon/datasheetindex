@@ -34,7 +34,10 @@ def test_describe_image_returns_a_single_line_for_a_real_render():
     blocks = inspect_page(doc, page=1)
     doc.close()
 
-    client = create_llm_client(model="gpt-4.1")
+    # No model named, for the same reason its sibling below names none: this
+    # runs against whatever the environment has configured, and a hardcoded
+    # internal alias fails outright on a gateway that does not serve it.
+    client = create_llm_client()
     try:
         vision_client = get_vision_client(client)
         assert vision_client is not None
