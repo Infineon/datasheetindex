@@ -70,6 +70,11 @@ def build_tree(raw_toc: list[list], total_pages: int) -> list[TocNode]:
 
     Uses a stack to track the current nesting path. Each raw entry is
     ``[level, title, start_page]`` where level >= 1.
+
+    An entry whose ``start_page`` falls outside ``1..total_pages`` is dropped
+    and named in a WARNING, rather than taking the build down with it. A
+    malformed entry -- too short, or a level below 1 -- still raises: that is a
+    caller error, while an out-of-range page is a property of the PDF.
     """
     if not raw_toc:
         return []
@@ -77,9 +82,21 @@ def build_tree(raw_toc: list[list], total_pages: int) -> list[TocNode]:
     root_nodes: list[TocNode] = []
     # Stack holds (level, node) pairs for current ancestry
     stack: list[tuple[int, TocNode]] = []
+    dropped: list[str] = []
 
     for entry in raw_toc:
-        level, title, start_page = validate_toc_entry(entry)
+        level, title, start_page = parse_toc_entry(entry)
+        if not 1 <= start_page <= total_pages:
+            # Drop, do not clamp -- the precedent the LLM path already set: a
+            # plausible-looking wrong page is worse than a missing section.
+            # Both bounds matter, and the upper one more: compute_end_pages
+            # derives a node's end_page from its NEXT SIBLING's start_page, so
+            # a bookmark past the last page makes the section before it
+            # swallow the rest of the document. The entry is never pushed onto
+            # the stack, so any descendants re-parent onto the surviving
+            # ancestor -- their breadcrumbs change, their page ranges do not.
+            dropped.append(f"{title!r}@{start_page}")
+            continue
         node = TocNode(title=title, level=level, start_page=start_page)
 
         # Pop stack until we find the parent level
@@ -95,6 +112,15 @@ def build_tree(raw_toc: list[list], total_pages: int) -> list[TocNode]:
 
         stack.append((level, node))
 
+    if dropped:
+        logger.warning(
+            "Dropped %d of %d ToC bookmarks citing a page outside 1-%d: %s",
+            len(dropped),
+            len(raw_toc),
+            total_pages,
+            ", ".join(dropped),
+        )
+
     compute_end_pages(root_nodes, total_pages)
     assign_node_ids(root_nodes)
     assign_breadcrumbs(root_nodes)
@@ -102,8 +128,13 @@ def build_tree(raw_toc: list[list], total_pages: int) -> list[TocNode]:
     return root_nodes
 
 
-def validate_toc_entry(entry: list) -> tuple[int, str, int]:
-    """Validate and normalize a raw ToC entry."""
+def parse_toc_entry(entry: list) -> tuple[int, str, int]:
+    """Validate an entry's shape and level, and return its raw ``start_page``.
+
+    Split out of ``validate_toc_entry`` so ``build_tree`` can decide for itself
+    what to do with a page it cannot use. Everything this checks is a
+    caller error and still raises for both.
+    """
     if len(entry) < 3:
         raise ValueError("Each ToC entry must include [level, title, start_page]")
 
@@ -113,6 +144,19 @@ def validate_toc_entry(entry: list) -> tuple[int, str, int]:
 
     if level < 1:
         raise ValueError(f"Invalid ToC level {level}; expected >= 1")
+
+    return level, title, start_page
+
+
+def validate_toc_entry(entry: list) -> tuple[int, str, int]:
+    """Validate and normalize a raw ToC entry.
+
+    Strict: rejects a non-positive ``start_page``. ``build_tree`` no longer
+    calls this -- it drops such an entry instead -- but the contract is public
+    and unchanged for anyone validating an entry on its own.
+    """
+    level, title, start_page = parse_toc_entry(entry)
+
     if start_page < 1:
         raise ValueError(f"Invalid start_page {start_page}; expected >= 1")
 

@@ -2,6 +2,7 @@
 
 import concurrent.futures
 import json
+import logging
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,7 @@ from datasheetindex.core.structure import (
     enrich_with_table_counts,
     extract_toc,
     find_breadcrumb_for_page,
+    validate_toc_entry,
 )
 from datasheetindex.models import TocNode
 
@@ -56,6 +58,78 @@ def test_invalid_toc_level_raises():
     raw = [[0, "Overview", 1]]
     with pytest.raises(ValueError, match="Invalid ToC level"):
         build_tree(raw, total_pages=5)
+
+
+def test_build_tree_drops_unresolvable_bookmark():
+    """PyMuPDF reports -1 for an outline entry whose destination it cannot
+    resolve. That is a property of the PDF, so one such bookmark must not cost
+    the caller the whole index build."""
+    raw = [
+        [1, "Features", 1],
+        [1, "Broken Link", -1],
+        [1, "Electrical Characteristics", 5],
+    ]
+    nodes = build_tree(raw, total_pages=12)
+    assert [node.title for node in nodes] == ["Features", "Electrical Characteristics"]
+    assert nodes[0].end_page == 4
+
+
+def test_build_tree_drops_bookmark_past_last_page():
+    """The opposite direction of the same corruption, and the more dangerous
+    one: compute_end_pages derives end_page from the next sibling's start_page,
+    so a bookmark past the end makes the preceding section swallow the rest of
+    the document."""
+    raw = [
+        [1, "A", 1],
+        [1, "Past End", 999],
+        [1, "C", 5],
+    ]
+    nodes = build_tree(raw, total_pages=12)
+    assert [node.title for node in nodes] == ["A", "C"]
+    assert nodes[0].end_page == 4
+
+
+def test_build_tree_keeps_descendants_of_dropped_entry():
+    """Each child carries its own valid page, and losing real sections is the
+    worse failure. The child re-parents onto the surviving ancestor, so its
+    breadcrumb changes while its page range stays correct."""
+    raw = [
+        [1, "Chapter", 1],
+        [2, "Broken", -1],
+        [3, "Deep", 3],
+        [1, "Next", 6],
+    ]
+    nodes = build_tree(raw, total_pages=10)
+    assert [node.title for node in nodes] == ["Chapter", "Next"]
+    assert [child.title for child in nodes[0].nodes] == ["Deep"]
+    assert nodes[0].nodes[0].start_page == 3
+
+
+def test_build_tree_all_invalid_returns_empty():
+    """An empty tree is what lets index.build fall through to the LLM ToC
+    fallback -- the designed recovery for a document with no usable bookmarks."""
+    raw = [
+        [1, "Broken", -1],
+        [2, "Also Broken", -1],
+    ]
+    assert build_tree(raw, total_pages=5) == []
+
+
+def test_build_tree_names_dropped_entries_in_a_warning(caplog):
+    raw = [
+        [1, "Features", 1],
+        [1, "Broken Link", -1],
+    ]
+    with caplog.at_level(logging.WARNING, logger="datasheetindex.core.structure"):
+        build_tree(raw, total_pages=12)
+    assert "Broken Link" in caplog.text
+    assert "Features" not in caplog.text
+
+
+def test_validate_toc_entry_still_raises_on_bad_page():
+    """build_tree became tolerant; the validator's contract did not change."""
+    with pytest.raises(ValueError, match="Invalid start_page"):
+        validate_toc_entry([1, "Broken", -1])
 
 
 def test_flat_entries():
