@@ -544,12 +544,6 @@ decision a future reader would otherwise redo.
   model and prompt on two runs: `output` item types `["message"]` with 3727
   characters of `output_text`, then `["reasoning"]` with **0** -- both reporting
   `status: "completed"`, which is why nothing downstream could tell.
-- **Any benchmark of this must vary the prompt per call**, for the reason the
-  captioning bullet below already gives: the gateway caches identical payloads,
-  and a byte-identical repeat measures a replay rather than a second sample. The
-  first pass at this measurement did not, and its repeats came back in 0.2s
-  serving the same counts; only the first run of each cell and the distinct
-  per-chunk payloads within it were real evidence.
 - **On the PCN that meant no table of contents at all, silently, at double the
   cost.** The paths compound: the structured extractor parses `""`, raises, and
   aborts the run; `generate_toc_from_text` sees zero entries and retries the
@@ -575,7 +569,10 @@ decision a future reader would otherwise redo.
   An unvaried repeat measures a replay, which cannot reveal a per-call coin
   flip and reports a latency that is not the model's. The live regression test
   in `tests/test_figure_captions_live.py` appends an attempt number for exactly
-  this reason.
+  this reason. This applies to the text path too, and the first pass at the
+  0.30.0 measurement forgot it: its repeats came back in 0.2s serving identical
+  counts, so only the first run of each cell -- plus the distinct per-chunk
+  payloads within it -- was real evidence. The re-run varied the prompt.
 - **The caption call caps output at 300 tokens, because prompt compliance is
   not uniform across models.** Over the same 16 regions the median reply is
   71-102 tokens and gpt-4.1's worst case is 197, comfortably inside the
