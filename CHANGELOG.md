@@ -22,6 +22,19 @@ All notable changes to this project will be documented in this file.
 - **`StructuredLlmResult` keeps its field names.** `output_text`, `status` and `incomplete_details` are unchanged, so `_parse_structured_chunk_response` needed no edit and a consumer injecting its own `structured_json` callable is unaffected. Only where the values come from has changed.
 - **The text path sends its system prompt once.** `describe_image` deliberately sends it twice (system role *and* an `input_text` part) as parity with the Responses shape it replaced, and its measured token counts include that; copying it here would have inflated every ToC-fallback and summary call, which on a 15-chunk datasheet is 15 duplicated system prompts.
 
+## [0.29.0] - 2026-08-06
+
+Reconstructed from the release's commits (`2303932`, `0555f59`, `fcb12b5`) after
+the fact; it shipped and was tagged without an entry here.
+
+### Added
+- **`DATASHEETINDEX_MODEL` names the text model from the environment, as `DATASHEETINDEX_VISION_MODEL` already did for captioning.** The asymmetry was a hole rather than an inconsistency: the only other way to name a text model was `build_datasheet`'s `model` argument, which the tool description tells the agent to omit unless summaries are wanted or the ToC is poor. So the *automatic* ToC fallback -- the path that runs without anyone deciding anything -- was pinned to a hardcoded `gpt-4.1`, and a gateway not serving that name had no way to make it work. Resolution is `model` argument > env var > `DEFAULT_TEXT_MODEL`, so a per-call decision still outranks the deployment's default.
+- **`DATASHEETINDEX_MODEL` is part of the artifact cache key**, for the reason the vision knob is: the text model writes the reconstructed ToC and the summaries, so moving it and being served the previous model's output from disk is the same silent failure.
+
+### Fixed
+- **`.env` is folded in once at the top of `build_datasheet`.** `load_dotenv` previously ran only inside `create_llm_client`, while `_BuildOptions` -- the artifact cache key -- reads the environment before any client exists. A model configured in `.env` therefore keyed as `None` while the build ran on the `.env` value: every document rebuilt on the second call of a process, and the previous model's output was served after the knob moved.
+- **The registry entry requests a version range rather than one pinned release**, so a new install is not stranded on the version the entry was written against.
+
 ## [0.28.0] - 2026-08-05
 
 ### Fixed
