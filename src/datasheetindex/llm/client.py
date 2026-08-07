@@ -1,7 +1,9 @@
 """LLM client factory for an OpenAI-compatible gateway.
 
-Text calls use the Responses API; figure captioning uses Chat Completions.
-The split is measured, not stylistic -- see ``_ManagedLlmClient.describe_image``.
+Every call -- text, structured, and vision -- goes over **Chat Completions**.
+There is deliberately no second transport: see ``_ManagedLlmClient.describe_image``
+for the measurement that chose it, and ``_read_chat_reply`` for the guard that
+makes the failure it fixes visible rather than silent.
 """
 
 from __future__ import annotations
@@ -27,7 +29,13 @@ class LlmCallable(Protocol):
 
 @dataclass(frozen=True)
 class StructuredLlmResult:
-    """Structured Responses payload plus completion metadata."""
+    """Structured JSON payload plus completion metadata.
+
+    The field names predate the move to Chat Completions and are kept
+    deliberately -- ``toc_fallback`` reads them, and a consumer may inject its
+    own ``structured_json`` callable. ``status`` is ``None`` when the gateway
+    reports no completion signal, which says nothing about the payload.
+    """
 
     output_text: str
     status: str | None = None
@@ -56,24 +64,6 @@ class VisionLlmCallable(Protocol):
         self, system: str, image_base64: str, *, media_type: str = "image/png"
     ) -> str:
         """Describe one image in a single line."""
-
-
-class _ResponsesOutput(Protocol):
-    @property
-    def output_text(self) -> str:
-        """Concatenated text output of the response."""
-
-
-class _ResponsesApi(Protocol):
-    def create(
-        self,
-        *,
-        model: str,
-        instructions: str = "",
-        input: str | list[dict[str, object]],
-        **kwargs: object,
-    ) -> _ResponsesOutput:
-        """Create an LLM response."""
 
 
 class _ChatMessage(Protocol):
@@ -141,8 +131,66 @@ def _is_retryable(exc: Exception) -> bool:
     return "429" in msg or "rate" in msg or "too many" in msg
 
 
+def _read_chat_reply(
+    response: _ChatCompletion, model: str, *, what: str
+) -> tuple[str, str | None]:
+    """Pull the text out of a chat completion, and never let a blank one be silent.
+
+    Both failures handled here are well-formed 200s that carry no text, and both
+    used to be invisible. A caller sees only ``""``, which every consumer in this
+    package scores as "the model had nothing to say" -- indistinguishable from a
+    transport that swallowed the answer.
+
+    That distinction is not hypothetical. The bug that moved captioning onto this
+    transport (a gateway bridge misfiling the answer as a reasoning item, leaving
+    ``output_text`` empty with the text sitting in the payload) took a five-run,
+    16-region campaign to see *precisely because* nothing logged it. The class of
+    failure outlives its fix, so name the two things that separate its causes:
+    the model, and whether the token cap bound.
+
+    Returns the text and the ``finish_reason``; the latter is what
+    ``structured_json`` turns into a completion status.
+    """
+    if not response.choices:
+        # A well-formed 200 with no choices at all: a content filter or an error
+        # envelope. Returning "" keeps every caller's contract instead of raising
+        # an IndexError whose text says nothing about what was being asked for.
+        logger.warning("%s returned no choices from model %s", what, model)
+        return "", None
+
+    choice = response.choices[0]
+    content = choice.message.content or ""
+    finish_reason = getattr(choice, "finish_reason", None)
+
+    # Checked before the blank-content branch below, and that order is the whole
+    # point. A refusal arrives as ``content=None`` with the model's explanation
+    # in ``refusal`` and ``finish_reason="stop"`` -- so without this it logs
+    # "came back empty (finish_reason=stop)", which names the wrong cause in a
+    # message whose only job is to name the right one. OpenAI's structured-output
+    # guidance is to inspect ``refusal`` *before* parsing content, because a
+    # refusal deliberately does not follow the supplied schema.
+    #
+    # Read with getattr rather than declared on ``_ChatMessage``: the field is
+    # OpenAI's, and an OpenAI-compatible backend such as vLLM need not send it.
+    refusal = getattr(choice.message, "refusal", None)
+    if refusal:
+        logger.warning("%s was refused by model %s: %s", what, model, refusal)
+        return "", finish_reason
+
+    if not content.strip():
+        logger.warning(
+            "%s came back empty from model %s (finish_reason=%s). A reasoning "
+            "model can spend its whole token budget thinking and return nothing; "
+            "name a non-reasoning model if that is what happened.",
+            what,
+            model,
+            finish_reason,
+        )
+    return content, finish_reason
+
+
 def _call_with_retry(
-    responses_api: _ResponsesApi,
+    chat_api: _ChatCompletionsApi,
     model: str,
     system: str,
     user: str,
@@ -151,12 +199,14 @@ def _call_with_retry(
     last_exc: Exception | None = None
     for attempt in range(_RETRY_MAX_ATTEMPTS):
         try:
-            response = responses_api.create(
+            response = chat_api.create(
                 model=model,
-                instructions=system,
-                input=user,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
             )
-            return response.output_text
+            return _read_chat_reply(response, model, what="Text completion")[0]
         except Exception as exc:
             last_exc = exc
             if not _is_retryable(exc) or attempt == _RETRY_MAX_ATTEMPTS - 1:
@@ -174,17 +224,8 @@ def _call_with_retry(
     raise last_exc
 
 
-def _normalize_incomplete_details(details: object | None) -> object | None:
-    if details is None:
-        return None
-    model_dump = getattr(details, "model_dump", None)
-    if callable(model_dump):
-        return model_dump()
-    return details
-
-
 def _call_structured_with_retry(
-    responses_api: _ResponsesApi,
+    chat_api: _ChatCompletionsApi,
     model: str,
     system: str,
     user: str,
@@ -193,34 +234,75 @@ def _call_structured_with_retry(
     schema: dict[str, object],
     max_output_tokens: int | None = None,
 ) -> StructuredLlmResult:
-    """Call the Responses API with a strict JSON schema and retry if needed."""
+    """Call Chat Completions with a strict JSON schema and retry if needed.
+
+    ``StructuredLlmResult`` keeps the field names it had when this went over the
+    Responses API. That is on purpose: ``toc_fallback._parse_structured_chunk_response``
+    reads them, and a consumer may inject its own ``structured_json`` callable, so
+    the shape is closer to public than the underscore-free name suggests. Only
+    where the values come from has changed.
+
+    ``finish_reason`` is what now decides completion. ``"stop"`` is the whole of
+    success; anything else -- ``"length"`` above all -- is reported as an
+    incomplete status so the caller raises on a truncated chunk exactly as it did
+    before, rather than parsing half a JSON document.
+
+    ``max_tokens``, not ``max_completion_tokens``, for the reason ``describe_image``
+    records: both are accepted by the models this gateway serves, and ``max_tokens``
+    is the one an OpenAI-compatible backend such as vLLM is certain to know.
+
+    Expect to want to change that, because OpenAI now documents ``max_tokens`` as
+    deprecated in favour of ``max_completion_tokens`` and "not compatible with
+    o-series models". Re-measured against exactly those: through this gateway
+    **both spellings answer on gpt-4.1, qwen3.6-27b, o4-mini, gpt-5-mini and
+    gpt-5.2**, all ``finish_reason="stop"``. LiteLLM translates, so the
+    deprecation does not reach us and the vLLM argument still decides. What would
+    change the answer is talking to an o-series model *directly* rather than
+    through a gateway -- so re-measure before switching, do not switch on the
+    strength of the deprecation notice alone.
+    """
 
     last_exc: Exception | None = None
     for attempt in range(_RETRY_MAX_ATTEMPTS):
         try:
-            request: dict[str, object] = {
-                "model": model,
-                "instructions": system,
-                "input": user,
-                "text": {
-                    "format": {
-                        "type": "json_schema",
+            # Kept out of the call rather than built as one dict: unpacking a
+            # dict[str, object] erases the declared parameter types and the
+            # checker can no longer see that ``messages`` is a list.
+            optional: dict[str, object] = {}
+            if max_output_tokens is not None:
+                optional["max_tokens"] = max_output_tokens
+
+            response = chat_api.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
                         "name": name,
                         "strict": True,
                         "schema": schema,
-                    }
+                    },
                 },
-            }
-            if max_output_tokens is not None:
-                request["max_output_tokens"] = max_output_tokens
-
-            response = responses_api.create(**request)
+                **optional,
+            )
+            content, finish_reason = _read_chat_reply(
+                response, model, what="Structured completion"
+            )
+            # A missing finish_reason stays None rather than becoming
+            # "incomplete". ``_parse_structured_chunk_response`` already treats
+            # None as "this gateway does not report one, which says nothing
+            # about the payload" and parses anyway; mapping it to "incomplete"
+            # would throw away every good chunk from such a gateway.
+            if finish_reason is None:
+                return StructuredLlmResult(output_text=content)
+            completed = finish_reason == "stop"
             return StructuredLlmResult(
-                output_text=response.output_text,
-                status=getattr(response, "status", None),
-                incomplete_details=_normalize_incomplete_details(
-                    getattr(response, "incomplete_details", None)
-                ),
+                output_text=content,
+                status="completed" if completed else "incomplete",
+                incomplete_details=None if completed else {"reason": finish_reason},
             )
         except Exception as exc:
             last_exc = exc
@@ -244,14 +326,12 @@ class _ManagedLlmClient:
 
     def __init__(
         self,
-        responses_api: _ResponsesApi,
+        chat_api: _ChatCompletionsApi,
         http_client: object,
         model: str,
         *,
-        chat_api: _ChatCompletionsApi,
         vision_model: str | None = None,
     ) -> None:
-        self._responses_api = responses_api
         self._chat_api = chat_api
         self._model = model
         #: The text model unless a deployment names a different one. Vision is
@@ -262,7 +342,7 @@ class _ManagedLlmClient:
         self._finalizer = weakref.finalize(self, _close_resource, http_client)
 
     def __call__(self, system: str, user: str) -> str:
-        return _call_with_retry(self._responses_api, self._model, system, user)
+        return _call_with_retry(self._chat_api, self._model, system, user)
 
     def structured_json(
         self,
@@ -274,7 +354,7 @@ class _ManagedLlmClient:
         max_output_tokens: int | None = None,
     ) -> StructuredLlmResult:
         return _call_structured_with_retry(
-            self._responses_api,
+            self._chat_api,
             self._model,
             system,
             user,
@@ -286,9 +366,12 @@ class _ManagedLlmClient:
     def describe_image(
         self, system: str, image_base64: str, *, media_type: str = "image/png"
     ) -> str:
-        """Describe one image, over **Chat Completions** rather than Responses.
+        """Describe one image in a single line.
 
-        The transport is deliberate and measured, not a stylistic preference.
+        This is the call whose measurement chose **Chat Completions** for the
+        whole client, so the reasoning is recorded here rather than at the
+        transport it now explains.
+
         The Responses API is a bridge for any gateway model that is not natively
         an OpenAI one, and on a LiteLLM gateway that bridge can misfile the
         model's answer as a *reasoning* item carrying ``reasoning_text``.
@@ -312,7 +395,10 @@ class _ManagedLlmClient:
         indistinguishable from the Responses path -- 1084 median input tokens
         either way, which is also the check that nested ``detail`` is honoured
         (see below); a name-based branch would buy nothing and would need a
-        list of model names to maintain.
+        list of model names to maintain. The same argument is why the text and
+        structured calls were later folded onto this transport too: one path for
+        every model *and* every call shape, with no second protocol to keep
+        working.
 
         Sent at ``detail="high"``, reversing the ``"low"`` this call used
         before. ``"low"`` downscales to 512x512 before the model ever sees
@@ -335,8 +421,9 @@ class _ManagedLlmClient:
         artifact reuse.
 
         Note that ``image_url`` is an **object** here. On the Responses API it
-        is a plain string; the two forms are not interchangeable, and the wrong
-        one type-checks and then fails at the gateway.
+        was a plain string; the two forms are not interchangeable, and the wrong
+        one type-checks and then fails at the gateway. Worth keeping in mind if
+        this call is ever ported back.
         """
         response = self._chat_api.create(
             model=self._vision_model,
@@ -379,32 +466,17 @@ class _ManagedLlmClient:
             # model -- not the parameter name.
             max_tokens=VISION_MAX_TOKENS,
         )
-        if not response.choices:
-            # A well-formed 200 with no choices at all: a content filter or an
-            # error envelope. Returning "" keeps the caller's contract (an
-            # empty caption is scored as a failed call) instead of raising an
-            # IndexError whose text says nothing about captioning.
+        # An empty caption is worse here than the shared warning conveys, so the
+        # vision-specific advice stays: ``caption_figures_in_place`` scores a
+        # blank reply as ``failed``, which marks the artifact incomplete and
+        # re-captions the document on every build.
+        caption, finish_reason = _read_chat_reply(
+            response, self._vision_model, what="Figure caption"
+        )
+        if not caption.strip() and finish_reason == "length":
             logger.warning(
-                "Figure caption returned no choices from model %s",
-                self._vision_model,
-            )
-            return ""
-        choice = response.choices[0]
-        caption = choice.message.content or ""
-        if not caption.strip():
-            # Never let this be silent again. The transport bug this call was
-            # rewritten to fix -- a well-formed 200 carrying no text -- took a
-            # five-run, 16-region measurement campaign to see precisely because
-            # nothing logged it; the caller only ever recorded "failed". The
-            # class of failure outlives the fix, so name the two things that
-            # distinguish its causes: the model, and whether the cap bound.
-            logger.warning(
-                "Figure caption came back empty from model %s (finish_reason=%s). "
-                "A reasoning model can spend the whole %d-token budget thinking "
-                "and return nothing; name a non-reasoning vision model in "
-                "DATASHEETINDEX_VISION_MODEL if that is what happened.",
-                self._vision_model,
-                getattr(choice, "finish_reason", None),
+                "The %d-token vision budget bound before any caption text was "
+                "written; name a non-reasoning model in DATASHEETINDEX_VISION_MODEL.",
                 VISION_MAX_TOKENS,
             )
         return caption
@@ -585,9 +657,10 @@ def create_llm_client(model: str | None = None) -> LlmCallable:
     not "use the built-in default" -- a caller with nothing to say must pass
     nothing, or it silently overrides the deployment.
 
-    Text calls use the Responses API; figure captioning uses Chat Completions
-    and, when ``DATASHEETINDEX_VISION_MODEL`` is set, a different model. See
-    ``_ManagedLlmClient.describe_image`` for why the transports differ.
+    Every call goes over Chat Completions. Figure captioning uses a different
+    *model* when ``DATASHEETINDEX_VISION_MODEL`` is set, but never a different
+    transport -- see ``_ManagedLlmClient.describe_image`` for the measurement
+    behind that.
 
     Returns a ``(system: str, user: str) -> str`` callable. The returned object
     also exposes ``close()`` for explicit cleanup when the caller owns it.
@@ -619,11 +692,10 @@ def create_llm_client(model: str | None = None) -> LlmCallable:
         max_retries=max_retries,
     )
     return _ManagedLlmClient(
-        # The SDK's Responses.create spells out every request field as a named
+        # The SDK's Completions.create spells out every request field as a named
         # parameter, so it cannot structurally satisfy a protocol that forwards
         # **kwargs -- even though it accepts every field we pass. Cast at the
-        # SDK boundary rather than weaken _ResponsesApi for our own callers.
-        responses_api=cast("_ResponsesApi", client.responses),
+        # SDK boundary rather than weaken _ChatCompletionsApi for our own callers.
         chat_api=cast("_ChatCompletionsApi", client.chat.completions),
         http_client=http_client,
         # Stripped: a name with stray whitespace is always a mistake, and
