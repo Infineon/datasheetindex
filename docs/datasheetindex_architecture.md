@@ -502,8 +502,11 @@ decision a future reader would otherwise redo.
   entry the scan reaches first in the array's own document order -- never a
   dict or set's -- so the digest stays byte-stable across runs. On the PCN this
   changes exactly one row (page 5).
-- **Captioning goes over Chat Completions, not the Responses API, and the
-  reason is a measured 50% silent caption loss.** On an OpenAI-compatible
+- **Every LLM call goes over Chat Completions, not the Responses API, and the
+  reason is a measured 50% silent loss.** Captioning moved first, in 0.28.0, and
+  the text and structured calls followed in 0.30.0 once the same failure was
+  measured on them directly (see "One transport for every call shape" below). On
+  an OpenAI-compatible
   gateway the Responses API is a *bridge* for any model the gateway does not
   serve natively, and that bridge can file the model's answer as a `reasoning`
   item carrying `reasoning_text`. `output_text` concatenates only `output_text`
@@ -526,6 +529,46 @@ decision a future reader would otherwise redo.
   that). Note the two forms are not interchangeable: `image_url` is a plain
   string on Responses and an object here, and the wrong one type-checks and
   fails at the gateway.
+- **One transport for every call shape, and the text path was measured before it
+  moved.** 0.28.0 moved captioning alone and deferred the text calls, warning
+  against pointing a non-native model at the ToC fallback until the same work
+  was done. That work is 0.30.0, and the deferral was justified: running the
+  real ToC fallback over the Responses API against `qwen3.6-27b` on the prod
+  gateway, across the repo's own PSoC 6 (15 chunks) and TI PCN (1 chunk)
+  fixtures, **7-8 of 15 chunks came back with an empty `output_text` on the
+  PSoC and 1 of 1 on the PCN** -- on the structured *and* the free-text path.
+  gpt-4.1 over the same 90 calls: **0 empty**. So the bridge failure is a
+  property of the transport, not of image input. The same matrix on Chat
+  Completions: **0 empty in 192 calls**, and on the PCN `qwen3.6-27b` goes from
+  zero ToC entries to a working ToC. Caught in the act on a raw request, same
+  model and prompt on two runs: `output` item types `["message"]` with 3727
+  characters of `output_text`, then `["reasoning"]` with **0** -- both reporting
+  `status: "completed"`, which is why nothing downstream could tell.
+- **Any benchmark of this must vary the prompt per call**, for the reason the
+  captioning bullet below already gives: the gateway caches identical payloads,
+  and a byte-identical repeat measures a replay rather than a second sample. The
+  first pass at this measurement did not, and its repeats came back in 0.2s
+  serving the same counts; only the first run of each cell and the distinct
+  per-chunk payloads within it were real evidence.
+- **On the PCN that meant no table of contents at all, silently, at double the
+  cost.** The paths compound: the structured extractor parses `""`, raises, and
+  aborts the run; `generate_toc_from_text` sees zero entries and retries the
+  whole document with the free-text prompt **over the same transport**; that
+  returns `""` too; the assembled candidate is empty and
+  `_accept_llm_toc_candidate` drops it. Two full passes over the document are
+  paid for, no ToC is produced, and the only log line says "retrying". That
+  silence is why `_read_chat_reply` now logs the model and `finish_reason` on
+  any blank reply -- the same guard captioning got, for the same reason.
+- **Structured output survives the move, which was the one real risk.**
+  `text.format=json_schema` becomes `response_format={"type": "json_schema",
+  "json_schema": {...}}`, one level deeper, and strict-schema support across
+  gateway backends is not uniform. Verified on both models before shipping.
+  `finish_reason` replaces the Responses `status`: `"stop"` is completion,
+  anything else is reported as incomplete so a truncated chunk still raises
+  instead of parsing as half a document. A **missing** `finish_reason` stays
+  `None` rather than becoming "incomplete" -- `_parse_structured_chunk_response`
+  already reads `None` as "this gateway does not report one", and mapping the
+  absence to a failure would discard every good chunk such a gateway returns.
 - **Any benchmark of this must vary the prompt per call.** The gateway caches
   identical Chat Completions payloads -- verified by repeats returning the same
   completion `id` and `created` plus an `x-litellm-cache-key` response header.
@@ -1419,8 +1462,8 @@ Output: {"parameter": "Supply voltage VS relative", "symbol": "VVS_rel_max",
   table text, position-headed section reads, and visual escalation when needed
 - **Page alignment validation** — ensure JSON page numbers match text file markers
 - **Zero extra dependencies** — only PyMuPDF needed for the happy path (no pymupdf4llm, no pdfplumber)
-- **LLM as injectable callable** — the LLM fallback and summarizer accept a `llm_callable: (system, user) -> str` parameter rather than depending on a specific LLM client library. The consuming application provides its own LLM client (e.g., LiteLLM gateway with gpt-4.1 via the Responses API). This keeps the library dependency-free for the happy path while allowing LLM features when needed.
-- **Structured-output ToC fallback with candidate gating** — when the injected callable also exposes `structured_json(...)` (detected via `get_structured_output_client()`, an optional extension of the base callable protocol), `toc_fallback.py` requests the Responses API's `text.format=json_schema` mode per chunk instead of best-effort-parsing free text. Failure is isolated per chunk: an incomplete or malformed chunk response is logged and skipped, never fatal to the chunks around it, and a structured path that yields nothing at all (a model that rejects `json_schema`) degrades to the free-text prompt for the whole document. Deciding whether the surviving entries are good enough is a separate job from parsing them, and it belongs to the gate below. Either way, the regenerated ToC is only a *candidate*: `index.py` scores it with the same `assess_toc_quality()` used for the original and only replaces the original ToC if `_accept_llm_toc_candidate()` judges it clearly not worse (a strictly better score, no page-coverage regression, and — only when there is a real ToC to protect — enough entries for the document's size). This exists because `assess_toc_quality()`'s page-coverage term can score a single fallback node deceptively well once `build_tree()` extends its `end_page` to the document's last page — without gating, that thin result would silently replace a working original ToC. The gate deliberately does *not* punish a candidate for having fewer entries than the baseline: the score already weights entry count, coverage, and depth, so rejecting a higher-scoring candidate for being smaller than a bloated pseudo-ToC would keep the junk it was called in to replace.
+- **LLM as injectable callable** — the LLM fallback and summarizer accept a `llm_callable: (system, user) -> str` parameter rather than depending on a specific LLM client library. The consuming application provides its own LLM client (e.g., LiteLLM gateway with gpt-4.1 over Chat Completions). This keeps the library dependency-free for the happy path while allowing LLM features when needed.
+- **Structured-output ToC fallback with candidate gating** — when the injected callable also exposes `structured_json(...)` (detected via `get_structured_output_client()`, an optional extension of the base callable protocol), `toc_fallback.py` requests Chat Completions' `response_format={"type": "json_schema", ...}` mode per chunk instead of best-effort-parsing free text. Failure is isolated per chunk: an incomplete or malformed chunk response is logged and skipped, never fatal to the chunks around it, and a structured path that yields nothing at all (a model that rejects `json_schema`) degrades to the free-text prompt for the whole document. Deciding whether the surviving entries are good enough is a separate job from parsing them, and it belongs to the gate below. Either way, the regenerated ToC is only a *candidate*: `index.py` scores it with the same `assess_toc_quality()` used for the original and only replaces the original ToC if `_accept_llm_toc_candidate()` judges it clearly not worse (a strictly better score, no page-coverage regression, and — only when there is a real ToC to protect — enough entries for the document's size). This exists because `assess_toc_quality()`'s page-coverage term can score a single fallback node deceptively well once `build_tree()` extends its `end_page` to the document's last page — without gating, that thin result would silently replace a working original ToC. The gate deliberately does *not* punish a candidate for having fewer entries than the baseline: the score already weights entry count, coverage, and depth, so rejecting a higher-scoring candidate for being smaller than a bloated pseudo-ToC would keep the junk it was called in to replace.
 
 ### Lessons from Google's LangExtract
 

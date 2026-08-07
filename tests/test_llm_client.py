@@ -29,13 +29,46 @@ class _TrackedHttpxClient:
         self.closed = True
 
 
-class _FakeResponses:
+class _ForbiddenResponses:
+    """Wired in wherever a real ``client.responses`` would be.
+
+    Nothing in this package may use the Responses API any more -- text,
+    structured and vision all go over Chat Completions. Failing loudly here
+    turns that from a convention into something the suite enforces, so a
+    partial revert cannot pass green.
+    """
+
     def create(self, **kwargs):
-        raise AssertionError("describe_image must not use the Responses API")
+        raise AssertionError("no call may use the Responses API")
+
+
+def _chat_reply(
+    content: str | None,
+    *,
+    finish_reason: str | None = "stop",
+    choices: int = 1,
+):
+    """One chat-completion-shaped response object."""
+    return types.SimpleNamespace(
+        choices=[
+            types.SimpleNamespace(
+                message=types.SimpleNamespace(content=content),
+                finish_reason=finish_reason,
+            )
+        ]
+        * choices
+    )
 
 
 class _FakeChat:
-    """Records the request and returns one chat-completion-shaped reply."""
+    """Records every request and returns one chat-completion-shaped reply.
+
+    ``requests`` keeps them in order and ``captured`` is the most recent. Both
+    matter now that text and vision share this transport: a test that makes a
+    text call and then a caption call has to be able to tell the two requests
+    apart, which a single merged dict cannot do -- it would report the vision
+    model for both.
+    """
 
     def __init__(
         self,
@@ -44,21 +77,19 @@ class _FakeChat:
         finish_reason: str | None = "stop",
         choices: int = 1,
     ):
+        self.requests: list[dict] = []
         self.captured: dict = {}
         self._content = content
         self._finish_reason = finish_reason
         self._choices = choices
 
     def create(self, **kwargs):
-        self.captured.update(kwargs)
-        return types.SimpleNamespace(
-            choices=[
-                types.SimpleNamespace(
-                    message=types.SimpleNamespace(content=self._content),
-                    finish_reason=self._finish_reason,
-                )
-            ]
-            * self._choices
+        self.requests.append(kwargs)
+        self.captured = kwargs
+        return _chat_reply(
+            self._content,
+            finish_reason=self._finish_reason,
+            choices=self._choices,
         )
 
 
@@ -67,7 +98,6 @@ def _patch_fake_clients(
     seen_httpx_kwargs: dict[str, object],
     seen_openai_kwargs: dict[str, object],
     httpx_clients: list[_TrackedHttpxClient] | None = None,
-    seen_responses_kwargs: dict[str, object] | None = None,
 ) -> _FakeChat:
     """Install fake ``httpx``/``openai`` modules; return the chat fake.
 
@@ -77,18 +107,10 @@ def _patch_fake_clients(
     ``describe_image`` through the factory, and the two lines that connect the
     vision path could both have been deleted with the suite still green.
 
-    ``seen_responses_kwargs`` captures the *text* request the same way. Vision
-    is observable through the chat fake, but the ToC fallback and summaries go
-    out over the Responses API, so which model they name has to be read there.
+    Every request is now observable through it, text included. ``client.responses``
+    is wired to a fake that raises, so a call that reaches for the old transport
+    fails rather than quietly working.
     """
-
-    def _create_response(**kwargs):
-        if seen_responses_kwargs is not None:
-            # Cleared first, like seen_openai_kwargs below: a test that makes
-            # two text calls must read the second one, not a merge of both.
-            seen_responses_kwargs.clear()
-            seen_responses_kwargs.update(kwargs)
-        return types.SimpleNamespace(output_text="ok")
 
     chat = _FakeChat()
 
@@ -96,7 +118,7 @@ def _patch_fake_clients(
         def __init__(self, **kwargs):
             seen_openai_kwargs.clear()
             seen_openai_kwargs.update(kwargs)
-            self.responses = types.SimpleNamespace(create=_create_response)
+            self.responses = _ForbiddenResponses()
             self.chat = types.SimpleNamespace(completions=chat)
 
     def _fake_httpx_client(**kwargs):
@@ -279,18 +301,13 @@ def test_get_structured_output_client_exposes_schema_calls(monkeypatch):
 
     class _FakeOpenAI:
         def __init__(self, **_kwargs):
-            self.responses = types.SimpleNamespace(
-                create=lambda **kwargs: (
-                    seen_request.update(kwargs)
-                    or types.SimpleNamespace(
-                        output_text='{"entries":[]}',
-                        status="completed",
-                        incomplete_details=None,
+            self.responses = _ForbiddenResponses()
+            self.chat = types.SimpleNamespace(
+                completions=types.SimpleNamespace(
+                    create=lambda **kwargs: (
+                        seen_request.update(kwargs) or _chat_reply('{"entries":[]}')
                     )
                 )
-            )
-            self.chat = types.SimpleNamespace(
-                completions=types.SimpleNamespace(create=lambda **_kwargs: None)
             )
 
     def _fake_httpx_client(**_kwargs):
@@ -324,9 +341,12 @@ def test_get_structured_output_client_exposes_schema_calls(monkeypatch):
         max_output_tokens=123,
     )
 
-    assert seen_request["text"] == {
-        "format": {
-            "type": "json_schema",
+    # Chat Completions nests the schema one level deeper than the Responses API
+    # did (``response_format.json_schema.name``, not ``text.format.name``), and
+    # the wrong nesting is accepted by the SDK and rejected at the gateway.
+    assert seen_request["response_format"] == {
+        "type": "json_schema",
+        "json_schema": {
             "name": "probe-schema",
             "strict": True,
             "schema": {
@@ -334,9 +354,10 @@ def test_get_structured_output_client_exposes_schema_calls(monkeypatch):
                 "properties": {},
                 "additionalProperties": False,
             },
-        }
+        },
     }
-    assert seen_request["max_output_tokens"] == 123
+    # max_tokens, not max_output_tokens: the spelling vLLM is certain to know.
+    assert seen_request["max_tokens"] == 123
     assert result.output_text == '{"entries":[]}'
     assert result.status == "completed"
 
@@ -352,12 +373,12 @@ def test_call_with_retry_retries_on_429(monkeypatch):
     class _RateLimitError(Exception):
         status_code = 429
 
-    def fake_create(*, model, instructions, input):
+    def fake_create(*, model, messages):
         nonlocal call_count
         call_count += 1
         if call_count < 3:
             raise _RateLimitError("Too Many Requests")
-        return types.SimpleNamespace(output_text="success")
+        return _chat_reply("success")
 
     api = types.SimpleNamespace(create=fake_create)
     result = _call_with_retry(api, "model", "sys", "user")  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
@@ -381,11 +402,7 @@ def test_call_structured_with_retry_retries_on_429(monkeypatch):
         call_count += 1
         if call_count < 3:
             raise _RateLimitError("Too Many Requests")
-        return types.SimpleNamespace(
-            output_text='{"entries":[]}',
-            status="completed",
-            incomplete_details=None,
-        )
+        return _chat_reply('{"entries":[]}')
 
     api = types.SimpleNamespace(create=fake_create)
     result = _call_structured_with_retry(
@@ -407,7 +424,7 @@ def test_call_with_retry_raises_on_non_retryable(monkeypatch):
 
     monkeypatch.setattr("datasheetindex.llm.client._RETRY_BASE_DELAY", 0.01)
 
-    def fake_create(*, model, instructions, input):
+    def fake_create(*, model, messages):
         raise ValueError("bad input")
 
     api = types.SimpleNamespace(create=fake_create)
@@ -424,7 +441,7 @@ def test_call_with_retry_raises_after_max_attempts(monkeypatch):
     class _RateLimitError(Exception):
         status_code = 429
 
-    def fake_create(*, model, instructions, input):
+    def fake_create(*, model, messages):
         raise _RateLimitError("Too Many Requests")
 
     api = types.SimpleNamespace(create=fake_create)
@@ -466,7 +483,7 @@ def test_describe_image_uses_chat_completions_not_responses():
     from datasheetindex.llm.client import _ManagedLlmClient
 
     chat = _FakeChat()
-    client = _ManagedLlmClient(_FakeResponses(), object(), "gpt-4.1", chat_api=chat)
+    client = _ManagedLlmClient(chat, object(), "gpt-4.1")
     result = client.describe_image("describe it", "QUJD", media_type="image/png")
 
     assert result == "a schematic of the output stage"
@@ -481,6 +498,83 @@ def test_describe_image_uses_chat_completions_not_responses():
     }
 
 
+def test_text_calls_send_the_system_prompt_exactly_once():
+    # describe_image deliberately sends the prompt twice (system role AND an
+    # input_text part) -- parity with the Responses shape it replaced, and its
+    # measured token counts include it. That is vision-specific. Copying it to
+    # the text path would silently inflate every ToC-fallback and summary call,
+    # which on a 15-chunk datasheet is 15 duplicated system prompts.
+    from datasheetindex.llm.client import _ManagedLlmClient
+
+    chat = _FakeChat(content="ok")
+    _ManagedLlmClient(chat, object(), "gpt-4.1")("the system prompt", "the user text")
+
+    messages = chat.captured["messages"]
+    assert [m["role"] for m in messages] == ["system", "user"]
+    assert messages[0]["content"] == "the system prompt"
+    assert messages[1]["content"] == "the user text"
+
+
+def test_text_calls_log_when_the_reply_comes_back_empty(caplog):
+    # The point of the whole exercise. A well-formed 200 carrying no text used
+    # to reach the ToC fallback as "", which it scores as "no entries" and
+    # answers by retrying the entire document over the same transport -- two
+    # full passes, no ToC, and one log line that says "retrying" and nothing
+    # about why. The model and finish_reason are what separate the causes.
+    import logging
+
+    from datasheetindex.llm.client import _ManagedLlmClient
+
+    client = _ManagedLlmClient(
+        _FakeChat(content="", finish_reason="length"), object(), "some-gateway-model"
+    )
+
+    with caplog.at_level(logging.WARNING, logger="datasheetindex.llm.client"):
+        assert client("s", "u") == ""
+
+    assert "some-gateway-model" in caplog.text
+    assert "length" in caplog.text
+
+
+def test_structured_calls_report_truncation_as_an_incomplete_status():
+    # finish_reason is the only completion signal Chat Completions gives, so it
+    # is what now feeds StructuredLlmResult.status. toc_fallback raises on a
+    # non-"completed" status rather than parsing half a JSON document, and that
+    # behaviour must survive the transport change.
+    from datasheetindex.llm.client import _ManagedLlmClient
+
+    client = _ManagedLlmClient(
+        _FakeChat(content='{"entries": [', finish_reason="length"),
+        object(),
+        "gpt-4.1",
+    )
+
+    result = client.structured_json("s", "u", name="n", schema={"type": "object"})
+
+    assert result.status == "incomplete"
+    assert result.incomplete_details == {"reason": "length"}
+
+
+def test_structured_calls_leave_status_unset_when_the_gateway_omits_it():
+    # A gateway that reports no finish_reason says nothing about the payload,
+    # and _parse_structured_chunk_response already treats None that way and
+    # parses anyway. Mapping the absence to "incomplete" would discard every
+    # good chunk such a gateway returns.
+    from datasheetindex.llm.client import _ManagedLlmClient
+
+    client = _ManagedLlmClient(
+        _FakeChat(content='{"entries": []}', finish_reason=None),
+        object(),
+        "gpt-4.1",
+    )
+
+    result = client.structured_json("s", "u", name="n", schema={"type": "object"})
+
+    assert result.status is None
+    assert result.incomplete_details is None
+    assert result.output_text == '{"entries": []}'
+
+
 def test_describe_image_requests_high_detail():
     # Measured on the PCN's page-5 table: at "low" (512x512 downscale) the
     # model confidently invented row headings it never received; at "high"
@@ -491,9 +585,7 @@ def test_describe_image_requests_high_detail():
     from datasheetindex.llm.client import _ManagedLlmClient
 
     chat = _FakeChat()
-    _ManagedLlmClient(
-        _FakeResponses(), object(), "gpt-4.1", chat_api=chat
-    ).describe_image("s", "QUJD")
+    _ManagedLlmClient(chat, object(), "gpt-4.1").describe_image("s", "QUJD")
 
     assert _image_part(chat.captured)["image_url"]["detail"] == "high"
 
@@ -506,9 +598,7 @@ def test_describe_image_caps_output_tokens():
     from datasheetindex.llm.client import VISION_MAX_TOKENS, _ManagedLlmClient
 
     chat = _FakeChat()
-    _ManagedLlmClient(
-        _FakeResponses(), object(), "gpt-4.1", chat_api=chat
-    ).describe_image("s", "QUJD")
+    _ManagedLlmClient(chat, object(), "gpt-4.1").describe_image("s", "QUJD")
 
     assert chat.captured["max_tokens"] == VISION_MAX_TOKENS
 
@@ -519,9 +609,7 @@ def test_describe_image_returns_empty_string_when_the_model_says_nothing():
     # a blank one as a failed call, which is the correct outcome here.
     from datasheetindex.llm.client import _ManagedLlmClient
 
-    client = _ManagedLlmClient(
-        _FakeResponses(), object(), "gpt-4.1", chat_api=_FakeChat(content=None)
-    )
+    client = _ManagedLlmClient(_FakeChat(content=None), object(), "gpt-4.1")
 
     assert client.describe_image("s", "QUJD") == ""
 
@@ -530,9 +618,9 @@ def test_describe_image_uses_the_vision_model_when_one_is_configured():
     from datasheetindex.llm.client import _ManagedLlmClient
 
     chat = _FakeChat()
-    _ManagedLlmClient(
-        _FakeResponses(), object(), "gpt-4.1", chat_api=chat, vision_model="qwen"
-    ).describe_image("s", "QUJD")
+    _ManagedLlmClient(chat, object(), "gpt-4.1", vision_model="qwen").describe_image(
+        "s", "QUJD"
+    )
 
     assert chat.captured["model"] == "qwen"
 
@@ -541,9 +629,7 @@ def test_describe_image_follows_the_text_model_without_a_vision_model():
     from datasheetindex.llm.client import _ManagedLlmClient
 
     chat = _FakeChat()
-    _ManagedLlmClient(
-        _FakeResponses(), object(), "gpt-4.1", chat_api=chat
-    ).describe_image("s", "QUJD")
+    _ManagedLlmClient(chat, object(), "gpt-4.1").describe_image("s", "QUJD")
 
     assert chat.captured["model"] == "gpt-4.1"
 
@@ -650,14 +736,13 @@ def test_create_llm_client_uses_the_text_model_env_when_no_model_is_named(monkey
     monkeypatch.setenv("LITELLM_MASTER_KEY", "secret")
     monkeypatch.setenv("DATASHEETINDEX_MODEL", "some-gateway-model")
     _install_fake_dotenv(monkeypatch)
-    seen_responses: dict[str, object] = {}
-    _patch_fake_clients(monkeypatch, {}, {}, seen_responses_kwargs=seen_responses)
+    chat = _patch_fake_clients(monkeypatch, {}, {})
 
     from datasheetindex.llm.client import create_llm_client
 
     create_llm_client()("system", "user")
 
-    assert seen_responses["model"] == "some-gateway-model"
+    assert chat.captured["model"] == "some-gateway-model"
 
 
 def test_an_explicit_model_wins_over_the_text_model_env(monkeypatch):
@@ -673,14 +758,13 @@ def test_an_explicit_model_wins_over_the_text_model_env(monkeypatch):
     monkeypatch.setenv("LITELLM_MASTER_KEY", "secret")
     monkeypatch.setenv("DATASHEETINDEX_MODEL", "deployment-default")
     _install_fake_dotenv(monkeypatch)
-    seen_responses: dict[str, object] = {}
-    _patch_fake_clients(monkeypatch, {}, {}, seen_responses_kwargs=seen_responses)
+    chat = _patch_fake_clients(monkeypatch, {}, {})
 
     from datasheetindex.llm.client import create_llm_client
 
     create_llm_client(model="gpt-5.2")("system", "user")
 
-    assert seen_responses["model"] == "gpt-5.2"
+    assert chat.captured["model"] == "gpt-5.2"
 
 
 def test_create_llm_client_falls_back_to_the_default_model(monkeypatch):
@@ -688,14 +772,13 @@ def test_create_llm_client_falls_back_to_the_default_model(monkeypatch):
     monkeypatch.setenv("LITELLM_MASTER_KEY", "secret")
     monkeypatch.delenv("DATASHEETINDEX_MODEL", raising=False)
     _install_fake_dotenv(monkeypatch)
-    seen_responses: dict[str, object] = {}
-    _patch_fake_clients(monkeypatch, {}, {}, seen_responses_kwargs=seen_responses)
+    chat = _patch_fake_clients(monkeypatch, {}, {})
 
     from datasheetindex.llm.client import DEFAULT_TEXT_MODEL, create_llm_client
 
     create_llm_client()("system", "user")
 
-    assert seen_responses["model"] == DEFAULT_TEXT_MODEL
+    assert chat.captured["model"] == DEFAULT_TEXT_MODEL
 
 
 def test_the_vision_knob_still_wins_over_the_text_model_env(monkeypatch):
@@ -710,10 +793,7 @@ def test_the_vision_knob_still_wins_over_the_text_model_env(monkeypatch):
     monkeypatch.setenv("DATASHEETINDEX_MODEL", "text-only-model")
     monkeypatch.setenv("DATASHEETINDEX_VISION_MODEL", "qwen3.6-27b")
     _install_fake_dotenv(monkeypatch)
-    seen_responses: dict[str, object] = {}
-    chat = _patch_fake_clients(
-        monkeypatch, {}, {}, seen_responses_kwargs=seen_responses
-    )
+    chat = _patch_fake_clients(monkeypatch, {}, {})
 
     from datasheetindex.llm.client import create_llm_client, get_vision_client
 
@@ -723,8 +803,11 @@ def test_the_vision_knob_still_wins_over_the_text_model_env(monkeypatch):
     assert vision is not None
     vision.describe_image("describe it", "QUJD")
 
-    assert seen_responses["model"] == "text-only-model"
-    assert chat.captured["model"] == "qwen3.6-27b"
+    # Read per request, not from the merged view: both calls now go out over
+    # the same chat transport, so the only thing separating them is order.
+    text_request, vision_request = chat.requests
+    assert text_request["model"] == "text-only-model"
+    assert vision_request["model"] == "qwen3.6-27b"
 
 
 def test_vision_follows_the_text_model_env_when_no_vision_model_is_set(monkeypatch):
@@ -792,10 +875,9 @@ def test_describe_image_logs_why_a_caption_came_back_empty(caplog):
     from datasheetindex.llm.client import _ManagedLlmClient
 
     client = _ManagedLlmClient(
-        _FakeResponses(),
+        _FakeChat(content=None, finish_reason="length"),
         object(),
         "gpt-4.1",
-        chat_api=_FakeChat(content=None, finish_reason="length"),
         vision_model="gpt-5-mini",
     )
 
@@ -815,9 +897,7 @@ def test_describe_image_returns_empty_when_the_gateway_sends_no_choices(caplog):
 
     from datasheetindex.llm.client import _ManagedLlmClient
 
-    client = _ManagedLlmClient(
-        _FakeResponses(), object(), "gpt-4.1", chat_api=_FakeChat(choices=0)
-    )
+    client = _ManagedLlmClient(_FakeChat(choices=0), object(), "gpt-4.1")
 
     with caplog.at_level(logging.WARNING, logger="datasheetindex.llm.client"):
         assert client.describe_image("s", "QUJD") == ""
