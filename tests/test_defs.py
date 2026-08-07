@@ -506,6 +506,29 @@ def _figure_pdf(path):
     doc.close()
 
 
+def test_manifest_carries_the_toc_source(tmp_path):
+    """The agent is handed the manifest and nothing else.
+
+    A reconstructed ToC has page numbers the model inferred from body text,
+    and one read from the PDF's own outline does not. The agent has to weigh
+    ``start_page`` differently in the two cases, and ``toc_quality`` cannot
+    tell them apart -- a reconstruction that scores well looks identical.
+    """
+    pdf = tmp_path / "figs.pdf"
+    _figure_pdf(pdf)
+    defs = _defs_by_name()
+
+    manifest = json.loads(
+        _run(defs["build_datasheet"].handler, {"pdf_source": str(pdf)})["content"][0][
+            "text"
+        ]
+    )
+
+    # This fixture has no bookmarks and no LLM client is configured under the
+    # hermetic env, so there is nothing to reconstruct from either.
+    assert manifest["toc_source"] == "none"
+
+
 def test_manifest_carries_the_figure_digest(tmp_path):
     """The agent is handed the manifest and nothing else.
 
@@ -825,9 +848,13 @@ def test_tool_descriptions_stay_within_a_budget():
     here rather than quietly taxing every turn. Raising one is allowed; doing
     it deliberately is the point. `build_datasheet` gets the largest budget
     because it is the only tool that has to explain the manifest it returns.
+
+    Raised from 1300 in 0.31.0 for the ``toc_source`` sentence: the manifest
+    gained a field, and a field the description does not explain is one the
+    agent has to guess at.
     """
     budgets = {
-        "build_datasheet": 1300,
+        "build_datasheet": 1500,
         "get_section_text": 800,
         "search_text": 700,
         "inspect_page": 400,

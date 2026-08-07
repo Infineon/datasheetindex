@@ -97,6 +97,21 @@ def test_text_file_page_alignment(tmp_path):
 
 
 @pytest.mark.real_pdf
+def test_toc_source_reports_the_pdf_outline(tmp_path):
+    """A document whose own bookmarks were used says so. The quality score
+    cannot answer this: a good score and a reconstructed tree look identical."""
+    if not TLE9350_PATH.exists():
+        pytest.skip("Test PDF not found")
+
+    idx = DatasheetIndex(str(TLE9350_PATH))
+    artifacts = idx.build(output_dir=str(tmp_path))
+    idx.close()
+
+    assert artifacts.json_data["toc_source"] == "pdf_outline"
+    assert artifacts.toc_source == "pdf_outline"
+
+
+@pytest.mark.real_pdf
 def test_toc_quality_populated(tmp_path):
     """Quality assessment should be populated."""
     if not TLE9350_PATH.exists():
@@ -331,6 +346,10 @@ def test_build_auto_llm_fallback_when_quality_low(monkeypatch, tmp_path):
     assert llm_models == [None]
     assert len(fallback_calls) == 1
     assert artifacts.json_data["toc"][0]["title"] == "Auto"
+    # The tree the caller receives was written by the model, not read from the
+    # PDF. Nothing else in the artifacts says so.
+    assert artifacts.json_data["toc_source"] == "llm_reconstructed"
+    assert artifacts.toc_source == "llm_reconstructed"
     assert fake_llm.closed is True
     # A stub that stops taking effect must fail here rather than pass quietly.
     assert artifacts.json_data["preamble"] == "pre"
@@ -464,6 +483,9 @@ def test_build_auto_llm_fallback_keeps_original_when_candidate_too_thin(
     assert llm_models == [None]
     assert len(fallback_calls) == 1
     assert artifacts.json_data["toc"][0]["title"] == "Original"
+    # A rejected candidate leaves the PDF's own outline in place, so that is
+    # what the field must report -- the fallback having run is not the question.
+    assert artifacts.json_data["toc_source"] == "pdf_outline"
     assert fake_llm.closed is True
 
 
@@ -591,6 +613,10 @@ def test_build_auto_llm_fallback_graceful_without_credentials(monkeypatch, tmp_p
     assert artifacts.toc_quality is not None
     assert artifacts.toc_quality.score == 0.0
     assert artifacts.json_data["toc"] == []
+    # No bookmarks and no reconstruction. "pdf_outline" over an empty tree
+    # would claim the document was read and found to have no sections.
+    assert artifacts.json_data["toc_source"] == "none"
+    assert artifacts.toc_source == "none"
 
 
 def test_build_llm_fallback_graceful_on_api_error(monkeypatch, tmp_path):

@@ -595,6 +595,10 @@ class DatasheetIndex:
         # 3. Extract ToC, build tree, enrich with table counts
         raw_toc = extract_toc(doc)
         nodes = build_tree(raw_toc, total_pages)
+        # Provenance, tracked from here because the fallback branch below is
+        # the only thing that can change the answer. Normalized once more just
+        # before serialization, where an empty tree settles it regardless.
+        toc_source = "pdf_outline" if nodes else "none"
         resolved_path = self._resolved_pdf_path
         enrich_with_table_counts(nodes, doc, pdf_path=resolved_path)
         t_tables = time.monotonic()
@@ -684,6 +688,7 @@ class DatasheetIndex:
                     if accept_candidate:
                         nodes = candidate_nodes
                         toc_quality = candidate_quality
+                        toc_source = "llm_reconstructed"
                         logger.info(
                             "LLM ToC fallback accepted in %.1fs (%s)",
                             time.monotonic() - t_llm,
@@ -730,6 +735,10 @@ class DatasheetIndex:
             logger.info("Total build time: %.1fs", time.monotonic() - t_start)
 
             # 7. Build JSON structure
+            # Neither source produced a tree. "pdf_outline" over an empty list
+            # would claim the outline was read and found to hold no sections.
+            if not nodes:
+                toc_source = "none"
             json_data = {
                 "source": self._source_file_name(),
                 "total_pages": total_pages,
@@ -742,6 +751,7 @@ class DatasheetIndex:
                     "page_coverage": toc_quality.page_coverage,
                     "recommend_summaries": toc_quality.recommend_summaries,
                 },
+                "toc_source": toc_source,
                 "toc": [node.to_dict() for node in nodes],
                 "figures": scan.figures,
                 "figures_excluded": {
@@ -779,6 +789,7 @@ class DatasheetIndex:
                 json_data=json_data,
                 text_content=text_content,
                 toc_quality=toc_quality,
+                toc_source=toc_source,
                 nodes=nodes,
                 llm_enrichment_incomplete=bool(enrichment_notes),
                 llm_enrichment_notes=tuple(enrichment_notes),

@@ -660,6 +660,12 @@ class DatasheetTools:
             json_data=json_data,
             text_content=text_content,
             toc_quality=toc_quality,
+            # From the deliverable, not the sidecar: the JSON is the one copy
+            # of this fact, and its hash was checked above. The default is
+            # unreachable in practice -- ``reuse_blocker`` rejects on
+            # ``version_changed`` before any artifact predating the field
+            # could be read -- and "none" is the honest answer if it ever is.
+            toc_source=str(json_data.get("toc_source", "none")),
             nodes=nodes,
             llm_enrichment_incomplete=record.llm_enrichment_incomplete,
             llm_enrichment_notes=record.llm_enrichment_notes,
@@ -761,6 +767,7 @@ class DatasheetTools:
                 str(artifacts.text_path) if artifacts.text_path is not None else None
             ),
             "toc_quality": artifacts.json_data.get("toc_quality"),
+            "toc_source": artifacts.toc_source,
             "toc": artifacts.json_data.get("toc"),
             "figures": _figure_digest(artifacts.json_data.get("figures")),
         }

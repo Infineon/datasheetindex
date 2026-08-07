@@ -126,6 +126,13 @@ class DatasheetArtifacts:
     json_data: dict = field(default_factory=dict)
     text_content: str = ""
     toc_quality: TocQuality | None = None
+    # Where ``nodes`` came from: ``"pdf_outline"`` (the document's own
+    # bookmarks), ``"llm_reconstructed"`` (the ToC fallback wrote it from body
+    # text, so every start_page was inferred rather than read), or ``"none"``
+    # (no tree at all). Distinct from ``toc_quality``, which scores the tree
+    # without saying who wrote it -- a good score cannot tell the two apart,
+    # and a consumer weighing whether to trust a page number needs to.
+    toc_source: str = "none"
     # The typed enriched ToC tree (same content as ``json_data["toc"]`` before
     # serialization). Retained so tools can resolve structure via TocNode
     # attributes instead of reaching into the serialized dict shape.

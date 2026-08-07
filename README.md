@@ -303,6 +303,7 @@ carries a `hint` field whenever the returned ToC is empty:
   "source": "current_sensor.pdf",
   "total_pages": 26,
   "toc_quality": { "score": 0.0, "entry_count": 0, ... },
+  "toc_source": "none",
   "toc": [],
   "figures": { "total": 0, "raster": 0, "captioned": 0, "pages_with_figures": 0, "pages": [], "truncated": false },
   "hint": "This PDF has no usable table of contents, so there is no section map to plan from. Orient by reading pages 1-2 with get_section_text, then locate content with search_text and read around each hit with get_section_text. inspect_page renders a page as an image when the extracted text is unclear."
@@ -310,6 +311,26 @@ carries a `hint` field whenever the returned ToC is empty:
 ```
 
 A document with a usable ToC has no `hint` key.
+
+### Knowing where the ToC came from
+
+`toc_source` sits beside `toc` in both the ToC JSON and the manifest, and is
+one of:
+
+| value | meaning |
+|---|---|
+| `pdf_outline` | The document's own PDF bookmarks. Page numbers are exact. |
+| `llm_reconstructed` | The bookmarks were missing or too weak, and the ToC was rewritten from the body text. Every `start_page` is the model's inference from a `--- PAGE N ---` marker, so confirm a section with `search_text` before reading a range from it. |
+| `none` | No ToC at all -- this is the case the `hint` above accompanies. |
+
+`toc_quality` deliberately does not answer this. It scores the tree that came
+out, not who wrote it, and a reconstruction that scores well is
+indistinguishable from a good outline by score alone. The two calls for
+different handling of the same `start_page`, so they are reported separately.
+
+A rejected fallback candidate leaves the PDF's own outline in place, and
+`toc_source` reports `pdf_outline` -- it names the tree you were given, not
+whether the fallback ran.
 
 ### Figure indexing and captions
 

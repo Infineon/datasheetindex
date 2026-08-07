@@ -740,6 +740,26 @@ def test_reuse_populates_every_field_the_tools_read(
     assert "datasheet" in section
 
 
+def test_reuse_preserves_the_toc_source(tmp_path, toc_pdf, not_editable, build_spy):
+    """Provenance is a property of the artifact, not of the run that served it.
+
+    A reuse that reported "none" would tell the agent the document has no
+    section map while handing it one.
+    """
+    out = tmp_path / "out"
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=str(out))
+        fresh = tools.get_artifact_manifest()["toc_source"]
+
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=str(out))
+        reused = tools.get_artifact_manifest()["toc_source"]
+
+    assert len(build_spy) == 1, "the second call rebuilt instead of reusing"
+    assert fresh == "pdf_outline"
+    assert reused == fresh
+
+
 @pytest.mark.parametrize(
     "mutate,token",
     [

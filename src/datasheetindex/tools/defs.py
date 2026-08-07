@@ -324,7 +324,12 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                 "the page text, and usually means a vector-drawn figure the "
                 "index cannot give coordinates for: still worth a full-page "
                 "inspect_page. The complete figures array, with regions for "
-                "inspect_page(region=...), is in the ToC JSON at json_path."
+                "inspect_page(region=...), is in the ToC JSON at json_path.\n\n"
+                "'toc_source' is where the ToC came from: 'pdf_outline' (the "
+                "PDF's own bookmarks -- pages exact), 'llm_reconstructed' "
+                "(rewritten from body text -- every start_page is inferred, "
+                "so confirm a section with search_text before reading its "
+                "range), or 'none'."
             ),
             input_schema={
                 "type": "object",
