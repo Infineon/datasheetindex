@@ -135,6 +135,10 @@ _BOILERPLATE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 
+# Despite the underscore, this has a second consumer outside the module:
+# `core/preamble.py` imports it to match features headings (see the comment
+# above its import for why). Changing what this strips changes that match too,
+# so a preamble test can fail from an edit made entirely inside this file.
 def _normalize_title(title: str) -> str:
     """Strip leading numbering/prefixes and trailing punctuation, lowercase."""
     s = title.strip()
