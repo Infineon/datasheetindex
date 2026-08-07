@@ -47,12 +47,17 @@ def _chat_reply(
     *,
     finish_reason: str | None = "stop",
     choices: int = 1,
+    refusal: str | None = None,
 ):
-    """One chat-completion-shaped response object."""
+    """One chat-completion-shaped response object.
+
+    ``refusal`` is a real field on the OpenAI message object and defaults to
+    ``None`` on every ordinary reply, which is what it does here.
+    """
     return types.SimpleNamespace(
         choices=[
             types.SimpleNamespace(
-                message=types.SimpleNamespace(content=content),
+                message=types.SimpleNamespace(content=content, refusal=refusal),
                 finish_reason=finish_reason,
             )
         ]
@@ -76,12 +81,14 @@ class _FakeChat:
         *,
         finish_reason: str | None = "stop",
         choices: int = 1,
+        refusal: str | None = None,
     ):
         self.requests: list[dict] = []
         self.captured: dict = {}
         self._content = content
         self._finish_reason = finish_reason
         self._choices = choices
+        self._refusal = refusal
 
     def create(self, **kwargs):
         self.requests.append(kwargs)
@@ -90,6 +97,7 @@ class _FakeChat:
             self._content,
             finish_reason=self._finish_reason,
             choices=self._choices,
+            refusal=self._refusal,
         )
 
 
@@ -534,6 +542,50 @@ def test_text_calls_log_when_the_reply_comes_back_empty(caplog):
 
     assert "some-gateway-model" in caplog.text
     assert "length" in caplog.text
+
+
+def test_a_refusal_is_logged_as_a_refusal_and_not_as_an_empty_reply(caplog):
+    # A refusal arrives as content=None with the reason in `refusal` and
+    # finish_reason="stop". Without checking it first, the blank-content branch
+    # logs "came back empty (finish_reason=stop)" -- which names the wrong cause
+    # in the one message whose whole job is to name the right one. OpenAI's
+    # guidance is to inspect `refusal` before parsing content, since a refusal
+    # deliberately does not follow the supplied schema.
+    import logging
+
+    from datasheetindex.llm.client import _ManagedLlmClient
+
+    chat = _FakeChat(content=None, refusal="I can't help with that.")
+    client = _ManagedLlmClient(chat, object(), "gpt-4.1")
+
+    with caplog.at_level(logging.WARNING, logger="datasheetindex.llm.client"):
+        assert client("s", "u") == ""
+
+    assert "refused" in caplog.text
+    assert "I can't help with that." in caplog.text
+    # The misleading message must not also fire.
+    assert "came back empty" not in caplog.text
+
+
+def test_a_backend_that_omits_refusal_still_works():
+    # `refusal` is OpenAI's field. An OpenAI-compatible backend such as vLLM
+    # need not send it, so reading it must not require it to exist.
+    from datasheetindex.llm.client import _ManagedLlmClient
+
+    class _NoRefusalField:
+        def create(self, **_kwargs):
+            return types.SimpleNamespace(
+                choices=[
+                    types.SimpleNamespace(
+                        message=types.SimpleNamespace(content="ok"),
+                        finish_reason="stop",
+                    )
+                ]
+            )
+
+    assert (
+        _ManagedLlmClient(_NoRefusalField(), object(), "vllm-model")("s", "u") == "ok"
+    )
 
 
 def test_structured_calls_report_truncation_as_an_incomplete_status():

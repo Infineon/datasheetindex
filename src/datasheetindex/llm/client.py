@@ -161,6 +161,22 @@ def _read_chat_reply(
     choice = response.choices[0]
     content = choice.message.content or ""
     finish_reason = getattr(choice, "finish_reason", None)
+
+    # Checked before the blank-content branch below, and that order is the whole
+    # point. A refusal arrives as ``content=None`` with the model's explanation
+    # in ``refusal`` and ``finish_reason="stop"`` -- so without this it logs
+    # "came back empty (finish_reason=stop)", which names the wrong cause in a
+    # message whose only job is to name the right one. OpenAI's structured-output
+    # guidance is to inspect ``refusal`` *before* parsing content, because a
+    # refusal deliberately does not follow the supplied schema.
+    #
+    # Read with getattr rather than declared on ``_ChatMessage``: the field is
+    # OpenAI's, and an OpenAI-compatible backend such as vLLM need not send it.
+    refusal = getattr(choice.message, "refusal", None)
+    if refusal:
+        logger.warning("%s was refused by model %s: %s", what, model, refusal)
+        return "", finish_reason
+
     if not content.strip():
         logger.warning(
             "%s came back empty from model %s (finish_reason=%s). A reasoning "
@@ -234,6 +250,16 @@ def _call_structured_with_retry(
     ``max_tokens``, not ``max_completion_tokens``, for the reason ``describe_image``
     records: both are accepted by the models this gateway serves, and ``max_tokens``
     is the one an OpenAI-compatible backend such as vLLM is certain to know.
+
+    Expect to want to change that, because OpenAI now documents ``max_tokens`` as
+    deprecated in favour of ``max_completion_tokens`` and "not compatible with
+    o-series models". Re-measured against exactly those: through this gateway
+    **both spellings answer on gpt-4.1, qwen3.6-27b, o4-mini, gpt-5-mini and
+    gpt-5.2**, all ``finish_reason="stop"``. LiteLLM translates, so the
+    deprecation does not reach us and the vLLM argument still decides. What would
+    change the answer is talking to an o-series model *directly* rather than
+    through a gateway -- so re-measure before switching, do not switch on the
+    strength of the deprecation notice alone.
     """
 
     last_exc: Exception | None = None
