@@ -19,7 +19,7 @@
 - **No f-strings without a variable.**
 - Ruff line-length 88. Pre-commit runs ruff check, ruff format, ty, and the unit tests. **Never use `--no-verify`.**
 - Commit messages must not mention Claude or include `Co-Authored-By`.
-- Work on branch `main` (content changes start on GitHub per CLAUDE.md).
+- **Work on the branch you are already on** (`feat/header-footer-detection`). Do not switch branches, and do not push or tag. Per CLAUDE.md content changes land on GitHub `main`, but that merge is a separate, explicitly-requested step after the whole plan is reviewed.
 
 ### Constants (exact values, from the spec)
 
