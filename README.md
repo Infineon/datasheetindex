@@ -11,7 +11,7 @@ Agent-first parameter extraction from technical datasheets.
 `datasheetindex` is meant to be handed to an external agent in two parts:
 
 1. **Enriched ToC JSON** - Hierarchical section tree with page ranges, table hints, pre-computed breadcrumbs, boilerplate flags (revision history, disclaimers, etc.), a page-marked preamble (pages 1-2 raw text, with per-page signals in `preamble_pages`) for agent orientation, and a `figures` array indexing every raster image placement and text-layer figure caption (see "Figure indexing and captions" below)
-2. **Page-matched text file** - Full document text with `--- PAGE N ---` markers aligned to the JSON, with column-aware reading order for two-column layouts
+2. **Page-matched text file** - Full document text with `--- PAGE N ---` markers aligned to the JSON, with column-aware reading order for two-column layouts (running headers and footers are omitted; set `DATASHEETINDEX_FURNITURE=0` to keep them)
 
 All page numbers are **1-indexed** across the JSON, the text file markers, and
 `inspect_page(page=...)`.
@@ -230,7 +230,8 @@ tools for the bound PDF source:
   and `inspect_page` (see "Figure indexing and captions")
 - `inspect_page` - render a page image when visual confirmation is needed
 - `extract_table_markdown` - re-extract a page as layout-aware Markdown tables
-  (the page's running header and footer are omitted; `get_section_text` keeps them)
+  (the page's running header and footer are omitted, same as `get_section_text`
+  and the page-matched text file)
 
 Build once, then use `get_section_text`, `search_text`, `inspect_page`, and
 `extract_table_markdown` together. `search_text` prefers exact matches, then

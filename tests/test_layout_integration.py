@@ -91,7 +91,7 @@ def _strip_markdown_emphasis(text: str) -> str:
 
     The generator emphasises the header, so on this fixture it comes back as
     ``**ACME AWC-3200 Motor Controller**``; on the real PSoC 6 datasheet the
-    same line arrives as ``**PSOC**<sup>**™**</sup> **62 MCU**``, split
+    same line arrives as ``**PSOC**<sup>**\u2122**</sup> **62 MCU**``, split
     mid-string. Either way a literal substring test for the header passes on
     the *unfixed* code and proves nothing -- that false pass is exactly what
     the first version of this test did. Collapsing whitespace closes the same

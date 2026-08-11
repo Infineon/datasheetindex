@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.33.0] - 2026-08-11
+
+### Changed
+- **The page-matched text file no longer carries running headers and footers.** Every page of a datasheet repeats a header naming the part and a footer with the document title, a revision string and a page number, and all of it reached `search_text`, `get_section_text` and the LLM ToC fallback. The cost was search precision rather than tokens: on the bundled PSoC 6, `search_text("PSOC")` returned 209 matches -- over the 200 cap an agent sees, so genuine hits were evicted -- of which 133 were the header, and `Datasheet` returned 138 of which 133 were furniture. Those now fall to 76 and 6. The text file shrinks 200,584 -> 193,020 characters (3.8%, ~1,891 tokens) across 265 dropped blocks. The header *block* is gone from all 133 pages that carry it, but the string is not extinct: `PSOC™ 62 MCU` still occurs twice, in genuine body prose, and `002-23185 Rev. *S` still occurs once, because page 1's footer merges a legal-pointer sentence into a unique 142-character block that cannot reach the recurrence threshold -- the design failing safe, not a miss.
+- **Detection is native PyMuPDF, on the default lane, with no new dependency.** A block is dropped when it lies wholly inside the top or bottom 20% of its page, is at most 200 characters, does not open with a caption keyword, and its whitespace-collapsed digit-masked text recurs on at least `max(3, ceil(0.5 * pages))` pages. This is a simplified Lin page-association (SPIE 2003) -- the standard method, not a new one.
+- **`Table N` captions are safe by construction.** An earlier line-level design would have deleted them: `Table #` recurs 89 times on the PSoC. Working at block granularity puts captions outside the band, and the caption-keyword rule is a second guard -- load-bearing, because `figures.caption_entries` reads the stripped text and `TocNode.continued_tables` is built from `Table N (continued)`.
+- **The preamble is unchanged, byte for byte.** `preamble.py` reads `_extract_page_text`, which stays unstripped; the stripping lives in `scan_pages`. The documented "raw text, zero heuristics" contract still holds, with no flag and no second code path.
+
+### Added
+- **`DATASHEETINDEX_FURNITURE=0`** disables stripping entirely (also `false`, `no`, `off`), matching `DATASHEETINDEX_PARALLEL`'s spellings and its reasoning: an escape hatch that ignores `=false` looks broken to whoever most needs it.
+- **`core/furniture.py`**, a pure module with no PyMuPDF, no environment and no I/O, so the decision logic is testable without a PDF.
+- **An ONNX-oracle precision test.** `pymupdf.layout` classifies `page-header`/`page-footer` directly but costs ~0.95s/page against an ~8s build and sits behind the optional `[layout]` extra, so it cannot serve the text path -- but it makes an independent cross-check. Blocks we drop are asserted to be furniture by the model at >= 0.95 precision. Recall is reported only: we knowingly detect less than it does.
+
+### Compatibility at a glance
+- **The text file changes** for any document with running furniture; that is the point. Page markers, page ranges and section boundaries are untouched, so `get_section_text` and page alignment are unaffected, and the figure index keeps its per-page ordering. `artifact_cache` fingerprints on the version, so stale text files invalidate automatically.
+- **Not detected, by design:** furniture whose *letters* vary per page, such as a per-chapter running title, and TI-style headers that alternate by odd/even page and so sit near a third of pages. Both fail safe by keeping text. Lowering the threshold to reach them was measured and is worse -- at 0.33 the PSoC starts losing `6 Electrical specifications`, a running section heading.
+- **A cover-page title can be caught in the same net as the header it resembles.** On page 1 of the bundled PSoC 6, the product-title block `PSOC™ 62 MCU` is dropped, because the same string also runs as a header on most other pages and block-level detection cannot distinguish "this page's title" from "every page's header" when the text matches. The string remains reachable through the preamble, which is deliberately unstripped, and through `search_text`.
+- **Considered and rejected:** an existing library (the only zero-dependency candidate, `refinedoc`, deletes `Table N (continued)` captions because it works on text lines with no coordinates) and LLM-driven detection (cheap, and higher recall, but on tcan1044a-q1 `qwen3.6-27b` flags 73 of 198 candidates including a table header row and several section headings -- and the text file must build without credentials). Both are recorded in the design spec.
+
 ## [0.32.0] - 2026-08-11
 
 ### Changed

@@ -1450,6 +1450,7 @@ Output: {"parameter": "Supply voltage VS relative", "symbol": "VVS_rel_max",
 - **`boilerplate_category`** — title-pattern flag for `legal` / `ordering` / `revision` / `contact` / `toc` / `glossary` sections, so agents can deprioritize disclaimers, revision histories, and similar admin content. Title-only regex matching (no LLM, no text scan); children of flagged parents inherit the category
 - **ToC quality assessment** — auto-detect whether summaries are worth generating
 - **Page-matched text file** — PyMuPDF `get_text("blocks")` with column-aware reordering and page markers
+- **Running header/footer stripping** — a block inside the top/bottom 20% band whose whitespace-collapsed, digit-masked text recurs on at least half the pages is dropped from the page-matched text file. A simplified Lin page-association; block granularity and a caption-keyword guard are what keep `Table N (continued)` captions intact. The preamble keeps raw text.
 - **Vision as primary escalation** — `inspect_page` for when text isn't sufficient
 - **`locate_text`** (Python API, not an agent tool) — text-to-coordinate source grounding (bounding boxes as
   percentages + PDF points), so an agent or review UI can turn a located string
@@ -1493,6 +1494,8 @@ datasheetindex/
 │   ├── textfile.py        # PDF → page-matched text file
 │   │                      #   Column-aware block extraction with page markers
 │   │                      #   Page alignment validation
+│   ├── furniture.py       # Running header/footer decision logic
+│   │                      #   normalized-key recurrence within a page-edge band
 │   ├── _textmatch.py      # Shared dash/token normalization + matcher
 │   ├── locate.py          # locate_text: text -> bounding-box coordinates
 │   ├── artifact_cache.py  # Build sidecar: fingerprint, validity, atomic writes
