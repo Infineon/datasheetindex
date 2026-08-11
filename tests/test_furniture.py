@@ -4,12 +4,34 @@ from __future__ import annotations
 
 from datasheetindex.core.furniture import (
     MAX_FURNITURE_CHARS,
+    PARITY_DOMINANCE,
     detect_furniture,
     furniture_threshold,
     has_lexical_evidence,
     is_candidate,
     normalize_key,
 )
+
+
+def _split_pages(total_pages, odd_count, even_count, key="ACME AWC-# Controller"):
+    """Page keys putting ``key`` on N odd-numbered and M even-numbered pages.
+
+    Index 0 is page 1, so the "odd" pages are the even indices. Every page
+    also carries a page-unique key, so no test can pass merely because the
+    document is empty.
+    """
+    pages = []
+    used = [0, 0]
+    wanted = (odd_count, even_count)
+    for index in range(total_pages):
+        keys = [f"body page {index}"]
+        parity = index % 2
+        if used[parity] < wanted[parity]:
+            used[parity] += 1
+            keys.append(key)
+        pages.append(keys)
+    assert used == [odd_count, even_count]
+    return pages
 
 
 def test_normalize_key_collapses_whitespace_and_masks_digits():
@@ -124,6 +146,101 @@ def test_detect_furniture_accepts_a_key_whose_letters_are_not_latin():
     key = "\u0421\u0442\u0440\u0430\u043d\u0438\u0446\u0430 #"
     page_keys = [[key] for _ in range(6)]
     assert detect_furniture(page_keys, total_pages=6) == frozenset({key})
+
+
+def test_detect_furniture_accepts_a_key_dominating_one_parity():
+    """The alternating odd/even header, which no overall count can reach.
+
+    Modelled on ``micro_atmega328.pdf``, where four genuine furniture keys sit
+    at exactly 146 of 294 pages -- one page under the overall threshold -- and
+    the document strips nothing without this route. The counts here are built
+    so the OVERALL route genuinely fails: 9 of 20 pages against a threshold of
+    10. Were that not so, the test would pass through the old route and prove
+    nothing about the new one.
+    """
+    key = "ACME AWC-# Controller"
+    page_keys = _split_pages(20, odd_count=9, even_count=0, key=key)
+    assert furniture_threshold(20) == 10  # and the key is on only 9 pages
+    assert detect_furniture(page_keys, total_pages=20) == frozenset({key})
+
+
+def test_detect_furniture_rejects_a_key_spread_across_both_parities():
+    """Dominance is the point: a bare parity threshold would admit this.
+
+    10 odd and 9 even of 40 pages is 19 -- under the overall threshold of 20 --
+    while 10 clears the parity bucket's own threshold of 10. Without the
+    dominance rule this key would qualify, and with it any key on roughly a
+    quarter of a document would, which is the unreviewed loosening the 0.5
+    fraction was measured to reject.
+    """
+    key = "Register description"
+    page_keys = _split_pages(40, odd_count=10, even_count=9, key=key)
+    assert furniture_threshold(40) == 20
+    assert furniture_threshold(20) == 10  # the per-bucket threshold it clears
+    assert detect_furniture(page_keys, total_pages=40) == frozenset()
+
+
+def test_detect_furniture_rejects_an_uneven_recurrence():
+    """The accepted price, pinned with the real numbers that pay it.
+
+    ``www.ti.com`` on ``ti_lm358.pdf`` is 22 pages of one parity and 8 of the
+    other, out of 68. It is genuine furniture, it clears the parity bucket's
+    threshold of 17, and dominance declines it anyway: 8 against 22 is an
+    uneven recurrence, not an alternating layout. Admitting it would mean
+    admitting every similarly uneven key.
+    """
+    key = "www.ti.com"
+    page_keys = _split_pages(68, odd_count=22, even_count=8, key=key)
+    assert furniture_threshold(68) == 34
+    assert furniture_threshold(34) == 17  # cleared, and dominance still rejects
+    assert detect_furniture(page_keys, total_pages=68) == frozenset()
+
+
+def test_detect_furniture_dominance_boundary_is_inclusive():
+    """``other <= PARITY_DOMINANCE * here``, not ``<``.
+
+    At exactly the ratio the key qualifies. Pinning the boundary keeps a later
+    refactor from silently tightening or loosening the rule by one page.
+    """
+    key = "ACME AWC-# Controller"
+    here, other = 10, int(PARITY_DOMINANCE * 10)
+    page_keys = _split_pages(40, odd_count=here, even_count=other, key=key)
+    assert detect_furniture(page_keys, total_pages=40) == frozenset({key})
+
+    over = _split_pages(40, odd_count=here, even_count=other + 1, key=key)
+    assert detect_furniture(over, total_pages=40) == frozenset()
+
+
+def test_detect_furniture_parity_route_still_requires_letters():
+    """The letter requirement applies to BOTH routes.
+
+    A bare page-number footer alternating by parity normalizes to ``#`` and
+    dominates its bucket perfectly. Admitting it via the new route would
+    reinstate exactly the content deletion ``has_lexical_evidence`` exists to
+    prevent. The lettered key on the same pages must still be found, or a
+    detector that returned nothing at all would also pass.
+    """
+    key = "ATmega#P [DATASHEET]"
+    page_keys = _split_pages(20, odd_count=9, even_count=0, key=key)
+    for index in range(0, 20, 2):
+        page_keys[index].append("#")
+    assert detect_furniture(page_keys, total_pages=20) == frozenset({key})
+
+
+def test_detect_furniture_parity_route_respects_the_min_pages_floor():
+    """A tiny document cannot produce furniture through the parity route.
+
+    On a 4-page document a parity bucket holds 2 pages, so a key on every page
+    of one parity still has only 2 pages of evidence against the floor of 3.
+    Without the floor applying per bucket, a 4-page document would strip on
+    two matching pages.
+    """
+    key = "ACME AWC-# Controller"
+    for pages in (2, 4):
+        page_keys = _split_pages(
+            pages, odd_count=(pages + 1) // 2, even_count=0, key=key
+        )
+        assert detect_furniture(page_keys, total_pages=pages) == frozenset(), pages
 
 
 def test_has_lexical_evidence_separates_masked_numbers_from_text():

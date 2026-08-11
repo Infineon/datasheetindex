@@ -40,6 +40,34 @@ PAGE_FRACTION = 0.5
 #: honest answer.
 MIN_PAGES = 3
 
+#: How much of a key's count may sit in the *other* page parity before its
+#: dominance of one parity stops being evidence of an alternating layout.
+#:
+#: Many datasheets alternate the header/footer between odd and even pages, so
+#: each variant lands on just under half the document and neither reaches
+#: ``PAGE_FRACTION``. Measured: ``micro_atmega328.pdf`` has four such keys at
+#: exactly 146 of 294 pages -- one page short of the threshold -- and strips
+#: nothing at all; ``ti_lm358.pdf`` likewise strips nothing.
+#:
+#: A *bare* per-parity threshold is the wrong fix. Since a parity bucket is
+#: half the document, it would admit any key recurring on roughly 25% of the
+#: pages -- a large, unreviewed loosening of a rule whose effect is to DELETE
+#: text, and precisely the loosening the 0.5 fraction was measured to reject
+#: (running section headings live in that range). Requiring near-absence from
+#: the other parity narrows the new route to the actual signature of an
+#: alternating header: present on one parity, missing from the other.
+#:
+#: What it costs, honestly. Every key the parity route recovers on the
+#: 17-document corpus is a clean split -- 146/0, 0/146, 14/0, 0/13 -- so
+#: dominance rejects none of them and 0.2 is not a tuned value. The one
+#: exception is ``www.ti.com`` on ``ti_lm358.pdf`` at 8 odd / 22 even. That is
+#: genuine furniture and dominance deliberately declines it: 8-versus-22 is an
+#: uneven recurrence, not an alternating layout, and any rule loose enough to
+#: admit it admits every similarly uneven key -- which is the unreviewed
+#: loosening above, reached by a different road. Missing it is the accepted
+#: price, and it fails in the design's stated safe direction: a miss.
+PARITY_DOMINANCE = 0.2
+
 _WHITESPACE_RE = re.compile(r"\s+")
 _DIGIT_RUN_RE = re.compile(r"\d+")
 
@@ -111,20 +139,51 @@ def detect_furniture(
 ) -> frozenset[str]:
     """Return the keys that recur on enough pages to be furniture.
 
-    ``page_keys`` is one iterable of normalized keys per page. Each key is
-    counted once per page whatever the caller passes, so a header repeated
-    twice on one page does not count double.
+    ``page_keys`` is one iterable of normalized keys per page, in page order.
+    Each key is counted once per page whatever the caller passes, so a header
+    repeated twice on one page does not count double.
 
-    A key with no letters is never returned, whatever its count -- see
-    ``has_lexical_evidence``.
+    A key qualifies by either of two routes:
+
+    - it recurs on ``furniture_threshold(total_pages)`` pages overall; or
+    - it *dominates one page parity* -- it clears the same fraction-and-floor
+      threshold within that parity's own bucket, and appears on at most
+      ``PARITY_DOMINANCE`` of that many pages in the other parity. This is the
+      alternating odd/even header, which no overall count can reach; see
+      ``PARITY_DOMINANCE`` for why dominance and not a bare parity threshold.
+
+    A key with no letters is never returned by *either* route, whatever its
+    count -- see ``has_lexical_evidence``.
     """
     counts: dict[str, int] = {}
-    for keys in page_keys:
+    # Index 0 is page 1, so bucket 0 is the odd pages and holds the extra page
+    # of a document with an odd length. Sized from ``total_pages`` rather than
+    # from ``len(page_keys)``, so a caller passing fewer key sets than pages
+    # cannot make the parity route looser than the overall one.
+    parity_counts: tuple[dict[str, int], dict[str, int]] = ({}, {})
+    for index, keys in enumerate(page_keys):
+        bucket = parity_counts[index % 2]
         for key in set(keys):
             counts[key] = counts.get(key, 0) + 1
+            bucket[key] = bucket.get(key, 0) + 1
+
     threshold = furniture_threshold(total_pages)
-    return frozenset(
-        key
-        for key, seen in counts.items()
-        if seen >= threshold and has_lexical_evidence(key)
+    parity_thresholds = (
+        furniture_threshold(math.ceil(total_pages / 2)),
+        furniture_threshold(total_pages // 2),
     )
+
+    detected: set[str] = set()
+    for key, seen in counts.items():
+        if not has_lexical_evidence(key):
+            continue
+        if seen >= threshold:
+            detected.add(key)
+            continue
+        for parity in (0, 1):
+            here = parity_counts[parity].get(key, 0)
+            other = parity_counts[1 - parity].get(key, 0)
+            if here >= parity_thresholds[parity] and other <= PARITY_DOMINANCE * here:
+                detected.add(key)
+                break
+    return frozenset(detected)

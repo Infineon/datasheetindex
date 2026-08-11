@@ -652,6 +652,64 @@ def test_scan_pages_keeps_a_recurring_table_caption(tmp_path):
         assert f"Table {p} Pin assignments" in text  # captions all stay
 
 
+def _alternating_header_pdf(path, pages):
+    """A document whose running header alternates by page parity.
+
+    The TI/Atmel layout: the part number heads odd pages and the document
+    title heads even ones, so each variant reaches only about half the
+    document and neither can clear the overall threshold. Pages 1 and 2 carry
+    no header, as a real cover and contents page do not -- which is also what
+    keeps each variant strictly *under* the overall threshold, so a detector
+    without the parity route finds nothing here.
+    """
+    import pymupdf
+
+    doc = pymupdf.open()
+    for p in range(pages):
+        page = doc.new_page()
+        height = page.rect.height
+        if p >= 2:
+            header = (
+                "ACME AWC-3200 Controller" if p % 2 == 0 else "3200 Series Data Sheet"
+            )
+            page.insert_text((50, height * 0.05), header, fontsize=9)
+        page.insert_text(
+            (50, height * 0.45), f"Body sentence unique to page {p + 1}.", fontsize=9
+        )
+    doc.save(str(path))
+    doc.close()
+
+
+def test_scan_pages_drops_a_header_that_alternates_by_page_parity(tmp_path):
+    """The parity route, end to end on a real PDF.
+
+    Each variant is on 9 of 20 pages, against an overall threshold of 10, so
+    before this route the document stripped nothing at all -- the state
+    ``micro_atmega328.pdf`` (four keys at 146 of 294) and ``ti_ina219.pdf``
+    were measured in. Both variants must go, and every page's body must stay.
+    """
+    import pymupdf
+
+    from datasheetindex.core.furniture import furniture_threshold
+    from datasheetindex.core.textfile import scan_pages
+
+    pdf = tmp_path / "alternating.pdf"
+    _alternating_header_pdf(pdf, pages=20)
+    doc = pymupdf.open(str(pdf))
+    try:
+        text = scan_pages(doc).text
+    finally:
+        doc.close()
+
+    # Neither variant could reach the overall threshold: 9 pages against 10.
+    assert furniture_threshold(20) == 10
+    assert "ACME AWC-3200 Controller" not in text
+    assert "3200 Series Data Sheet" not in text
+    for p in range(1, 21):
+        assert f"Body sentence unique to page {p}." in text
+        assert f"--- PAGE {p} ---" in text
+
+
 def _page_number_footer_pdf(path, pages):
     """A document whose footer is *only* a page number, with numeric tables.
 

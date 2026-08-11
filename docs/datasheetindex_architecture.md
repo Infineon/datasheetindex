@@ -685,7 +685,13 @@ geometry and the two-pass assembly in `scan_pages`. A block is dropped iff:
 - it is at most **200 characters** of raw text and does not open with a caption
   keyword (`figure`, `fig.`, `table`, `chart`);
 - its key -- whitespace collapsed, digit runs masked to `#` -- **contains at
-  least one letter** and recurs on at least `max(3, ceil(0.5 * pages))` pages.
+  least one letter**; and
+- that key clears **either** recurrence route:
+  - **overall**: it appears on at least `max(3, ceil(0.5 * pages))` pages; or
+  - **one page parity**: within the odd- or even-page bucket alone it clears
+    the same `max(3, ceil(0.5 * pages_in_bucket))` threshold, **and** appears on
+    at most `0.2 x that count` pages of the other parity. This is the
+    alternating odd/even header, which no overall count can reach.
 
 `DATASHEETINDEX_FURNITURE=0` (also `false`/`no`/`off`) disables it, and the
 setting participates in the artifact-reuse key, so flipping it rebuilds rather
@@ -729,6 +735,26 @@ constants above read as decisions rather than taste.
   *section headings* -- `6 Electrical specifications` on 47 of the PSoC's 134
   pages, `Register description` on 12 of 41 in another. 0.5 is the last value at
   which the corpus stays clean.
+- **Parity dominance, not a bare parity threshold.** Live testing across a
+  17-document, 8-vendor corpus found the odd/even case is not a corner: on
+  `micro_atmega328.pdf` (294 pages) four genuine furniture keys sit at **exactly
+  146 pages** each -- `ATmega328P [DATASHEET]` on 146 odd pages and zero even,
+  its twin `3 ATmega328P [DATASHEET]` the mirror -- one page under the 147-page
+  threshold, and the document stripped nothing at all. A *bare* per-parity
+  threshold is the wrong fix: a bucket is half the document, so it would admit
+  any key on roughly **25%** of the pages, which is the loosening the 0.5
+  fraction was measured to reject one paragraph above. Requiring near-absence
+  from the other parity (`PARITY_DOMINANCE = 0.2`) restricts the new route to
+  the actual signature of an alternating header. The constant is not tuned:
+  every key it recovers on this corpus is a clean split -- 146/0, 0/146, 14/0,
+  0/13 -- so dominance rejects none of them. It has exactly one measured cost:
+  `www.ti.com` on `ti_lm358.pdf` is 22 pages of one parity and 8 of the other,
+  genuine furniture that dominance deliberately declines, because 8-against-22
+  is an uneven recurrence rather than an alternating layout, and admitting it
+  means admitting every similarly uneven key. Recovery measured:
+  `micro_atmega328.pdf` 0 -> 1,460 blocks (13,034 chars), `ti_ina219.pdf`
+  110 -> 299, `tcan1044a-q1.pdf` 96 -> 294, and the other 14 documents --
+  including the bundled PSoC 6 -- byte-identical.
 - **No fuzzy matching.** A similarity threshold can delete a genuine one-off line
   resembling its neighbours. The accepted cost is that furniture whose *letters*
   vary per page is missed, which fails safe.
@@ -738,7 +764,8 @@ constants above read as decisions rather than taste.
 | Not detected | Why |
 |---|---|
 | Furniture whose letters vary per page (per-chapter running titles) | Exact-plus-digit-masked matching by design; fails safe by keeping text |
-| TI-style headers alternating by odd/even page | Each variant sits near a third of pages, under the 0.5 threshold. Lowering the threshold is worse (above). Revisit with page-parity buckets |
+| Furniture recurring **unevenly** across the two parities | Largely fixed: a header alternating cleanly by odd/even page is now caught by the parity route. What remains is furniture whose recurrence is uneven rather than alternating -- `www.ti.com` at 22-versus-8 on `ti_lm358.pdf` -- which the dominance rule declines on purpose (above), since the alternative admits any key on ~25% of a document |
+| Furniture confined to one **part** of a document | `ti_lm358.pdf` is a 32-page datasheet bound ahead of 36 pages of package-option and mechanical appendices with their own furniture. Each header variant covers 16 of its parity's 34 pages, so neither the overall nor the parity threshold is met, and the document still strips nothing. Not a parity problem; reaching it needs a lower fraction, which is worse (above) |
 | Page-number-only footers | A letterless key would delete numeric content (above) |
 | A repeated **table header row** on a table-heavy document | It is in-band, caption-free and recurrent. On the PSoC the repeated `Spec ID Parameter Description Min Typ Max Unit` row reaches 38/134 -- under threshold there, but not necessarily elsewhere. No cheap guard exists; `DATASHEETINDEX_FURNITURE=0` is the escape |
 | A product title on a cover page | Dropped when the same string also runs as a header on most other pages (observed on the PSoC). Still reachable via the unstripped preamble and `search_text` |
@@ -1551,7 +1578,7 @@ Output: {"parameter": "Supply voltage VS relative", "symbol": "VVS_rel_max",
 - **`boilerplate_category`** — title-pattern flag for `legal` / `ordering` / `revision` / `contact` / `toc` / `glossary` sections, so agents can deprioritize disclaimers, revision histories, and similar admin content. Title-only regex matching (no LLM, no text scan); children of flagged parents inherit the category
 - **ToC quality assessment** — auto-detect whether summaries are worth generating
 - **Page-matched text file** — PyMuPDF `get_text("blocks")` with column-aware reordering and page markers
-- **Running header/footer stripping** — a block inside the top/bottom 20% band whose whitespace-collapsed, digit-masked key contains at least one letter and recurs on at least half the pages is dropped from the page-matched text file. A simplified Lin page-association; block granularity is what keeps `Table N (continued)` captions intact. The preamble keeps raw text. See "Running header/footer stripping" under Deliverable 2 for the measurements behind each constant.
+- **Running header/footer stripping** — a block inside the top/bottom 20% band whose whitespace-collapsed, digit-masked key contains at least one letter and recurs on at least half the pages -- or dominates one page parity, the alternating odd/even header -- is dropped from the page-matched text file. A simplified Lin page-association; block granularity is what keeps `Table N (continued)` captions intact. The preamble keeps raw text. See "Running header/footer stripping" under Deliverable 2 for the measurements behind each constant.
 - **Vision as primary escalation** — `inspect_page` for when text isn't sufficient
 - **`locate_text`** (Python API, not an agent tool) — text-to-coordinate source grounding (bounding boxes as
   percentages + PDF points), so an agent or review UI can turn a located string
