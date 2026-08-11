@@ -11,18 +11,37 @@ a footer with the document title, a revision string and a page number. The
 page-matched text file reproduces all of it, once per page, and every consumer
 reads it.
 
-The cost is not primarily tokens. It is search precision. Measured on the
-bundled PSoC 6 datasheet (134 pages):
+The cost is not primarily tokens. It is search precision. Measured on the bundled
+PSoC 6 datasheet (134 pages), before and after the algorithm this spec specifies
+(counted with the result cap lifted, so the "before" figures are not truncated;
+an agent calling `search_text` sees the default cap of 200):
 
-| query | matches | of which running header |
+| query | before | after |
 |---|---|---|
-| `PSOC` | 200 (hits the result cap) | 133 |
-| `Datasheet` | 138 | 133 |
-| `Rev. *S` | 133 | 133 |
+| `PSOC` | 209 -- over the agent's 200 cap | 76 |
+| `Datasheet` | 138 | 6 |
+| `Rev. *S` | 133 | 1 |
+| `002-23185` | 133 | 1 |
 
 An agent searching for the part family gets a wall of identical hits and the cap
-evicts the real ones. Total furniture is 5.6% of the text file on the PSoC
-(11,044 characters, ~2,700 tokens) and 5.9% on the TI PCN.
+evicts the real ones.
+
+The text file itself goes from 200,584 to 193,020 characters -- 7,564 removed,
+**3.8%, ~1,891 tokens** -- across 265 dropped blocks.
+
+Every figure in this spec was produced by a standalone prototype of the
+algorithm, not by the integrated code. The block set and the decisions are the
+same, but the prototype orders blocks by a plain `(y, x)` sort rather than
+`_extract_page_text`'s column-aware order. That cannot change *which* blocks are
+dropped, so the counts hold; re-confirm them during implementation before pinning
+them in tests, and treat any disagreement as a finding rather than an excuse to
+adjust the assertion.
+
+An earlier draft of this spec claimed 5.6% / 11,044 characters. That number came
+from a *line-level* scan whose recurring set included `Table #` (89 occurrences)
+-- real captions this design deliberately keeps. The honest figure is 3.8%. The
+benefit was always search precision rather than token volume, and that survives:
+`Datasheet` falls 138 -> 6 and `PSOC` no longer reaches the cap.
 
 A second motivation is downstream. Running furniture is the dominant obstacle to
 a future non-LLM outline detector: on `motor_driver.pdf`, 91 of ~105
@@ -117,7 +136,7 @@ threshold note below. Revisit with odd/even page-parity buckets if it matters.
 |---|---|---|
 | Disposition | Drop furniture from the text file | Fixes `search_text`, `get_section_text` and the LLM ToC fallback at once, with no new format for consumers to learn |
 | Preamble | Keeps raw, unstripped text | The architecture doc advertises "zero heuristics"; page 1 is also where recurrence has least evidence and where real prose sits at the page foot |
-| Matching | Exact text plus digit masking | Catches all six shapes measured on the PSoC; deterministic and easy to reason about |
+| Matching | Exact text plus digit masking | Catches every furniture key measured across the corpus, including revision lines and page numbers that exact matching alone would miss; deterministic and easy to reason about |
 | Fuzzy matching | Excluded | A similarity threshold can delete a genuine one-off line resembling its neighbours. Fails safe by keeping text |
 | Traversal | Buffer blocks in the existing single pass | A second traversal costs +22% of the scan (0.33s of 1.50s) to save ~200KB we are not short of |
 | Existing library | None reusable | See "Prior art" -- the only zero-dependency candidate deletes `Table N (continued)` captions |
@@ -194,11 +213,14 @@ revision dates match across pages while the letters must still agree.
 **Threshold.** A key is furniture when it appears on at least
 `max(3, ceil(0.5 * total_pages))` distinct pages, counted once per page.
 
-The 0.5 is measured, not chosen by taste: real furniture landed at 52-100% of
-pages across three documents, with `www.ti.com` on tcan1044a-q1 the floor at
-22/42, and nothing non-furniture came within reach. The `max(3, ...)` floor means
-a 1- or 2-page document can never have furniture, which is the honest answer when
-there is no recurrence evidence to have.
+The 0.5 is measured, not chosen by taste: across the seven-document corpus real
+furniture landed at 52-100% of pages. The only keys below 92% are tcan1044a-q1's
+two -- `www.ti.com` at 22/42 (52%) and `Product Folder Links: TCAN#A-Q#` at 26/42
+(62%) -- and nothing non-furniture came within reach of the threshold. The margin
+above 0.5 is therefore thin on exactly one document, which is why lowering it was
+tested rather than assumed (below). The `max(3, ...)` floor means a 1- or 2-page
+document can never have furniture, which is the honest answer when there is no
+recurrence evidence to have.
 
 **Lowering it was tested and rejected.** At 0.33 the PSoC gains
 `6 Electrical specifications` (47/134) and at 0.25 the barometer gains
@@ -216,14 +238,23 @@ furniture produces a byte-identical text file.
 An earlier line-level scan found `Table #` recurring 89 times on the PSoC -- a
 genuine caption that digit-masked matching would have deleted. At block
 granularity `Table 43` is a body block and never enters the band, while the
-PSoC's three footer lines collapse into one block. Measured, with the band
-applied, across three documents:
+PSoC's four footer lines collapse into one block. Measured with the band and the
+adopted eligibility rule, across the seven-document survey corpus:
 
-| document | dropped | out-of-band recurrences above threshold |
-|---|---|---|
-| PSoC 6 (134pp) | `PSOC(tm) # MCU` x133, `Datasheet # #-# Rev. *S #-#-#` x132 | none |
-| motor_driver (20pp) | running title x20, `And Overcurrent Protection A#` x19, Allegro address x19 | none |
-| tcan1044a-q1 (42pp) | `Product Folder Links: TCAN#A-Q#` x26, `www.ti.com` x22 | none |
+| document | dropped |
+|---|---|
+| PSoC 6 (134pp) | `PSOC(tm) # MCU` x133, `Datasheet # #-# Rev. *S #-#-#` x132 |
+| motor_driver (20pp) | running title x20, `And Overcurrent Protection A#` x19, Allegro address x19 |
+| tcan1044a-q1 (42pp) | `Product Folder Links: TCAN#A-Q#` x26, `www.ti.com` x22 |
+| TI PCN (7pp) | `Texas Instruments Incorporated TI Information - Selective Disclosure ...` x7 |
+| current_sensor (26pp) | running title x25, Allegro address footer x25 |
+| barometer (41pp) | `DPS310 Digital XENSIV(tm) Barometric Pressure Sensor ...` x39, `# V#.# #-#-#` x39 |
+| TJA1051 (25pp) | `High-speed CAN transceiver` x25, `NXP Semiconductors TJA#` x24, legal footer x23, `Product data sheet Rev. # -- ...` x23 |
+
+Every key above was inspected and is genuine furniture. The out-of-band sanity
+check -- that no *non*-furniture block recurs above threshold outside the band --
+was run on the first three documents and found none; it is worth repeating over
+the whole corpus during implementation.
 
 ### Deliberately excluded
 
@@ -233,20 +264,29 @@ applied, across three documents:
 - **Cross-page geometric stability.** PageIndex requires a matched block to
   occupy nearly the same rectangle (sum of squared edge deltas < 100). The 20%
   band already constrains position and exact-key matching constrains content, and
-  it tested clean on three documents. This is the first thing to reach for if
+  it tested clean across the seven-document corpus. This is the first thing to reach for if
   false positives appear -- it is not built speculatively.
 
 ## Integration and data flow
 
 ```
 scan_pages(doc)
+  # pass 1 -- one traversal, buffering
   for each page:
-      blocks = _extract_page_blocks(page)        # column-ordered, banded flags
-      buffer blocks; keys[page] = [normalize_key(t) for banded+eligible blocks]
-  furniture = detect_furniture(keys, len(doc))
-  for each page:
-      text = "\n".join(text for (text, banded) in blocks if not dropped)
-      emit "--- PAGE N ---" then text
+      pages[i] = _extract_page_blocks(page)      # [(text, banded)], column-ordered
+      keys[i]  = { normalize_key(t)
+                   for (t, banded) in pages[i]
+                   if banded and is_candidate(t) }      # a set: dedupes within the page
+
+  furniture = detect_furniture(keys, total_pages=len(doc))
+
+  # pass 2 -- over the buffer, no PDF access
+  for each page i:
+      kept = [ t for (t, banded) in pages[i]
+               if not (banded and is_candidate(t)
+                       and normalize_key(t) in furniture) ]
+      emit "--- PAGE {i+1} ---"
+      emit "\n".join(kept)
 ```
 
 Page markers are unchanged and emitted for every page, including one left empty
@@ -281,9 +321,10 @@ the version bump invalidates stale text files automatically. No migration.
 ## Testing
 
 **Unit, default lane** (`tests/test_furniture.py`) -- `normalize_key` masking and
-whitespace collapse; `is_candidate` rejecting 3-line, over-long and
-caption-prefixed blocks; `detect_furniture` threshold arithmetic including the
-`max(3, ...)` floor and the per-page dedupe.
+whitespace collapse; `is_candidate` rejecting over-long and caption-prefixed
+blocks **and accepting a multi-line short block**, which pins the removed
+line-count rule so it cannot be reintroduced; `detect_furniture` threshold
+arithmetic including the `max(3, ...)` floor and the per-page dedupe.
 
 **Integration, default lane** (`tests/test_textfile.py`):
 
@@ -299,9 +340,16 @@ caption-prefixed blocks; `detect_furniture` threshold arithmetic including the
 5. Escape hatch: `DATASHEETINDEX_FURNITURE=0` restores 0.32.0 output exactly.
 
 **Real-document, `real_pdf` marker** -- on the bundled PSoC: the two known
-furniture shapes are absent; a known body string is still present; and
-`search_text("PSOC")` drops from the 200-result cap to under 20. That last
-assertion is the user-facing goal stated as a test.
+furniture shapes are absent; a known body string is still present; the **4-line
+footer block** is gone (the specific case the removed line-count rule would have
+kept); and search improves to the measured figures -- `Datasheet` 138 -> 6,
+`Rev. *S` 133 -> 1, and `PSOC` no longer reaching the default 200 result cap.
+
+Assert those measured numbers, not round targets. An earlier draft of this spec
+asserted `search_text("PSOC")` would fall "to under 20"; measured, it falls to
+**76**, because `PSOC` legitimately appears throughout the body of a PSoC
+datasheet. That assertion would have failed, and the temptation on a red test is
+to weaken the threshold rather than ask which number was wrong.
 
 **Oracle validation, `layout` marker** -- compare our decisions against
 `pymupdf.layout`'s `page-header` / `page-footer` labels on the bundled real PDFs.
