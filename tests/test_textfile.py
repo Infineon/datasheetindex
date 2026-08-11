@@ -741,6 +741,14 @@ def test_scan_pages_keeps_the_figure_index_interleaved_by_page(tmp_path):
     Figures are appended per page as rasters-then-captions. A naive two-pass
     split emits all rasters before all captions, which silently reorders the
     index that build_datasheet publishes.
+
+    Each page needs BOTH a raster (an inserted image above
+    DEFAULT_MIN_AREA_PCT) and a text caption for this to be a real test: a
+    text-only fixture makes every entry a caption, so `pages == sorted(pages)`
+    would hold under the naive "all rasters, then all captions" split too --
+    that gap is exactly what made the previous version of this test pass
+    without exercising the hazard it is named for. The exact-sequence
+    assertion below (page, kind pairs) is what a naive split actually fails.
     """
     import pymupdf
 
@@ -748,8 +756,13 @@ def test_scan_pages_keeps_the_figure_index_interleaved_by_page(tmp_path):
 
     pdf = tmp_path / "figs.pdf"
     doc = pymupdf.open()
-    for p in range(4):
-        page = doc.new_page()
+    # 200x200 on a 595x842 page is ~8% of the page area, comfortably above
+    # DEFAULT_MIN_AREA_PCT (1.0) so the raster is indexed, not excluded.
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 200, 200))
+    pix.set_rect(pix.irect, (200, 30, 30))
+    for p in range(2):
+        page = doc.new_page(width=595, height=842)
+        page.insert_image(pymupdf.Rect(50, 50, 250, 250), pixmap=pix)
         page.insert_text(
             (50, 300), f"Figure {p + 1}. Diagram for page {p + 1}", fontsize=9
         )
@@ -762,8 +775,13 @@ def test_scan_pages_keeps_the_figure_index_interleaved_by_page(tmp_path):
     finally:
         doc.close()
 
-    pages = [cast(int, f["page"]) for f in figures]
-    assert pages == sorted(pages), f"figure index is not page-ordered: {pages}"
+    sequence = [(cast(int, f["page"]), cast(str, f["kind"])) for f in figures]
+    assert sequence == [
+        (1, "raster"),
+        (1, "caption"),
+        (2, "raster"),
+        (2, "caption"),
+    ], f"figure index is not interleaved per page: {sequence}"
 
 
 def test_is_banded_requires_the_whole_block_inside_the_band(tmp_path):

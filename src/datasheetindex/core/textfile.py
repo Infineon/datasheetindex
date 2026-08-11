@@ -326,6 +326,8 @@ def scan_pages(
                 for text, banded in blocks
                 if banded and is_candidate(text)
             }
+            if stripping
+            else set()
         )
         rasters, page_excluded = raster_regions(page, min_area_pct=min_area_pct)
         page_rasters.append(rasters)

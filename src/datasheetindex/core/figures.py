@@ -107,10 +107,11 @@ def raster_regions(
 def caption_entries(page_number: int, page_text: str) -> list[dict[str, object]]:
     """Return caption entries found in one page's column-aware text.
 
-    ``page_text`` must come from ``_extract_page_text`` -- the same
-    column-aware extraction the text file carries. On ``page.get_text()`` a
-    two-column page can interleave a split-form number with an unrelated
-    title, silently producing a wrong caption.
+    ``page_text`` must come from the same column-aware extraction the text
+    file carries -- ``scan_pages``'s furniture-stripped assembly, built from
+    ``_extract_page_blocks``, not raw ``page.get_text()``. On
+    ``page.get_text()`` a two-column page can interleave a split-form number
+    with an unrelated title, silently producing a wrong caption.
 
     A ``Figure N`` mention matching neither accepted form emits nothing. An
     entry claiming page 12 merely *mentions* Figure 3 is noise the consumer
