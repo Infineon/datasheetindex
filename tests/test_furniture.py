@@ -5,11 +5,13 @@ from __future__ import annotations
 from datasheetindex.core.furniture import (
     MAX_FURNITURE_CHARS,
     PARITY_DOMINANCE,
+    PARITY_MIN_PAGES,
     detect_furniture,
     furniture_threshold,
     has_lexical_evidence,
     is_candidate,
     normalize_key,
+    parity_threshold,
 )
 
 
@@ -176,7 +178,7 @@ def test_detect_furniture_rejects_a_key_spread_across_both_parities():
     key = "Register description"
     page_keys = _split_pages(40, odd_count=10, even_count=9, key=key)
     assert furniture_threshold(40) == 20
-    assert furniture_threshold(20) == 10  # the per-bucket threshold it clears
+    assert parity_threshold(20) == 10  # the per-bucket threshold it clears
     assert detect_furniture(page_keys, total_pages=40) == frozenset()
 
 
@@ -192,7 +194,7 @@ def test_detect_furniture_rejects_an_uneven_recurrence():
     key = "www.ti.com"
     page_keys = _split_pages(68, odd_count=22, even_count=8, key=key)
     assert furniture_threshold(68) == 34
-    assert furniture_threshold(34) == 17  # cleared, and dominance still rejects
+    assert parity_threshold(34) == 17  # cleared, and dominance still rejects
     assert detect_furniture(page_keys, total_pages=68) == frozenset()
 
 
@@ -219,21 +221,45 @@ def test_detect_furniture_parity_route_still_requires_letters():
     reinstate exactly the content deletion ``has_lexical_evidence`` exists to
     prevent. The lettered key on the same pages must still be found, or a
     detector that returned nothing at all would also pass.
+
+    ``#`` is placed on **9** of the 20 pages, not 10: at 10 it would clear the
+    overall threshold as well, and the test would pass identically on a
+    detector with no parity route at all. The point is to isolate the new door.
     """
     key = "ATmega#P [DATASHEET]"
     page_keys = _split_pages(20, odd_count=9, even_count=0, key=key)
-    for index in range(0, 20, 2):
+    for index in range(0, 18, 2):
         page_keys[index].append("#")
+    assert furniture_threshold(20) == 10  # so 9 pages reaches only the new route
     assert detect_furniture(page_keys, total_pages=20) == frozenset({key})
 
 
-def test_detect_furniture_parity_route_respects_the_min_pages_floor():
+def test_detect_furniture_parity_route_needs_more_than_three_pages():
+    """``PARITY_MIN_PAGES``: the floor the parity route may not undercut.
+
+    ``MIN_PAGES`` does not scale, so sharing it let the parity route fire on a
+    10-page document from three pages of one parity -- 30% of the document,
+    where the overall route demands 50%. Dominance cannot cover for that:
+    ``PARITY_DOMINANCE * 3`` is 0.6, forcing the other parity to zero, which
+    any three-page odd-only run satisfies trivially.
+
+    The key is the reviewer's: ``Register description`` on pages 3, 5 and 7.
+    Odd-page section starts are a standard print convention, and this is the
+    exact string the architecture doc cites as what the 0.5 fraction protects.
+    """
+    key = "Register description"
+    page_keys = _split_pages(10, odd_count=3, even_count=0, key=key)
+    assert furniture_threshold(10) == 5  # the overall route is not reached
+    assert parity_threshold(5) == PARITY_MIN_PAGES  # nor is the parity floor
+    assert detect_furniture(page_keys, total_pages=10) == frozenset()
+
+
+def test_detect_furniture_parity_route_respects_the_floor_on_tiny_documents():
     """A tiny document cannot produce furniture through the parity route.
 
     On a 4-page document a parity bucket holds 2 pages, so a key on every page
-    of one parity still has only 2 pages of evidence against the floor of 3.
-    Without the floor applying per bucket, a 4-page document would strip on
-    two matching pages.
+    of one parity still has only 2 pages of evidence. Without a floor applying
+    per bucket, a 4-page document would strip on two matching pages.
     """
     key = "ACME AWC-# Controller"
     for pages in (2, 4):

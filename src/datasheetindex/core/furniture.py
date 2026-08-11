@@ -60,13 +60,38 @@ MIN_PAGES = 3
 #: What it costs, honestly. Every key the parity route recovers on the
 #: 17-document corpus is a clean split -- 146/0, 0/146, 14/0, 0/13 -- so
 #: dominance rejects none of them and 0.2 is not a tuned value. The one
-#: exception is ``www.ti.com`` on ``ti_lm358.pdf`` at 8 odd / 22 even. That is
+#: exception is ``www.ti.com`` on ``ti_lm358.pdf`` at 22 odd / 8 even. That is
 #: genuine furniture and dominance deliberately declines it: 8-versus-22 is an
 #: uneven recurrence, not an alternating layout, and any rule loose enough to
 #: admit it admits every similarly uneven key -- which is the unreviewed
 #: loosening above, reached by a different road. Missing it is the accepted
 #: price, and it fails in the design's stated safe direction: a miss.
 PARITY_DOMINANCE = 0.2
+
+#: Absolute floor on the *parity* route, in pages of the dominant parity.
+#: Double ``MIN_PAGES``, and the difference is not cosmetic.
+#:
+#: ``MIN_PAGES`` does not scale, so with the parity route sharing it the rule
+#: collapsed on mid-length documents to "3 pages of one parity, none of the
+#: other". Demonstrated on a 10-page document, where the overall route demands
+#: 5 pages: a key on pages 3, 5 and 7 only -- 30% of the document, on a third
+#: of one parity -- was returned as furniture. At 13 pages it fired at 23%.
+#:
+#: Dominance is *weakest* exactly there and cannot cover for the floor:
+#: ``PARITY_DOMINANCE * 3`` is 0.6, so the other-parity count is forced to
+#: zero, which any three-page odd-only run satisfies trivially. Odd-page
+#: section starts are a standard print convention, so the document that breaks
+#: it is ordinary -- and the string the reviewer's example deleted was
+#: ``Register description``, the very content the 0.5 fraction is documented as
+#: existing to protect. Deleting real content is the one outcome this feature
+#: may not have, so this is closed rather than documented.
+#:
+#: Doubling the floor is the cheap fix because it cannot bind where the route
+#: earns its keep: the keys it recovers clear their bucket thresholds by
+#: 146-against-74 (``micro_atmega328.pdf``) and 14-against-10
+#: (``ti_ina219.pdf``). Verified -- every recovered key and character count on
+#: the 17-document corpus is unchanged by this floor.
+PARITY_MIN_PAGES = 6
 
 _WHITESPACE_RE = re.compile(r"\s+")
 _DIGIT_RUN_RE = re.compile(r"\d+")
@@ -109,6 +134,16 @@ def furniture_threshold(total_pages: int) -> int:
     return max(MIN_PAGES, math.ceil(PAGE_FRACTION * total_pages))
 
 
+def parity_threshold(bucket_pages: int) -> int:
+    """Pages of ONE parity a key must hold before the parity route opens.
+
+    The same fraction as ``furniture_threshold`` over the bucket rather than
+    the document, on a higher floor -- see ``PARITY_MIN_PAGES`` for why the
+    floors differ.
+    """
+    return max(PARITY_MIN_PAGES, math.ceil(PAGE_FRACTION * bucket_pages))
+
+
 def has_lexical_evidence(key: str) -> bool:
     """Whether a normalized key carries any letters at all.
 
@@ -146,11 +181,12 @@ def detect_furniture(
     A key qualifies by either of two routes:
 
     - it recurs on ``furniture_threshold(total_pages)`` pages overall; or
-    - it *dominates one page parity* -- it clears the same fraction-and-floor
-      threshold within that parity's own bucket, and appears on at most
-      ``PARITY_DOMINANCE`` of that many pages in the other parity. This is the
-      alternating odd/even header, which no overall count can reach; see
-      ``PARITY_DOMINANCE`` for why dominance and not a bare parity threshold.
+    - it *dominates one page parity* -- it clears ``parity_threshold`` within
+      that parity's own bucket, and appears on at most ``PARITY_DOMINANCE`` of
+      that many pages in the other parity. This is the alternating odd/even
+      header, which no overall count can reach; see ``PARITY_DOMINANCE`` for
+      why dominance and not a bare parity threshold, and ``PARITY_MIN_PAGES``
+      for why this route floors higher than the overall one.
 
     A key with no letters is never returned by *either* route, whatever its
     count -- see ``has_lexical_evidence``.
@@ -169,8 +205,8 @@ def detect_furniture(
 
     threshold = furniture_threshold(total_pages)
     parity_thresholds = (
-        furniture_threshold(math.ceil(total_pages / 2)),
-        furniture_threshold(total_pages // 2),
+        parity_threshold(math.ceil(total_pages / 2)),
+        parity_threshold(total_pages // 2),
     )
 
     detected: set[str] = set()

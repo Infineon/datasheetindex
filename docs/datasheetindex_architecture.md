@@ -689,9 +689,10 @@ geometry and the two-pass assembly in `scan_pages`. A block is dropped iff:
 - that key clears **either** recurrence route:
   - **overall**: it appears on at least `max(3, ceil(0.5 * pages))` pages; or
   - **one page parity**: within the odd- or even-page bucket alone it clears
-    the same `max(3, ceil(0.5 * pages_in_bucket))` threshold, **and** appears on
-    at most `0.2 x that count` pages of the other parity. This is the
-    alternating odd/even header, which no overall count can reach.
+    `max(6, ceil(0.5 * pages_in_bucket))` -- a higher floor than the overall
+    route's, for the reason below -- **and** appears on at most `0.2 x that
+    count` pages of the other parity. This is the alternating odd/even header,
+    which no overall count can reach.
 
 `DATASHEETINDEX_FURNITURE=0` (also `false`/`no`/`off`) disables it, and the
 setting participates in the artifact-reuse key, so flipping it rebuilds rather
@@ -738,7 +739,7 @@ constants above read as decisions rather than taste.
 - **Parity dominance, not a bare parity threshold.** Live testing across a
   17-document, 8-vendor corpus found the odd/even case is not a corner: on
   `micro_atmega328.pdf` (294 pages) four genuine furniture keys sit at **exactly
-  146 pages** each -- `ATmega328P [DATASHEET]` on 146 odd pages and zero even,
+  146 pages** each -- `ATmega328P [DATASHEET]` on 146 even pages and zero odd,
   its twin `3 ATmega328P [DATASHEET]` the mirror -- one page under the 147-page
   threshold, and the document stripped nothing at all. A *bare* per-parity
   threshold is the wrong fix: a bucket is half the document, so it would admit
@@ -751,10 +752,23 @@ constants above read as decisions rather than taste.
   `www.ti.com` on `ti_lm358.pdf` is 22 pages of one parity and 8 of the other,
   genuine furniture that dominance deliberately declines, because 8-against-22
   is an uneven recurrence rather than an alternating layout, and admitting it
-  means admitting every similarly uneven key. Recovery measured:
-  `micro_atmega328.pdf` 0 -> 1,460 blocks (13,034 chars), `ti_ina219.pdf`
-  110 -> 299, `tcan1044a-q1.pdf` 96 -> 294, and the other 14 documents --
-  including the bundled PSoC 6 -- byte-identical.
+  means admitting every similarly uneven key. Recovery measured, in dropped
+  **blocks** (`_is_furniture_block`, the production predicate -- not lines; one
+  block is typically several, and the PSoC's 265 blocks are 926 lines):
+  `micro_atmega328.pdf` 0 -> 584 blocks (13,034 chars), `ti_ina219.pdf`
+  55 -> 109, `tcan1044a-q1.pdf` 48 -> 101, and the other 14 documents --
+  including the bundled PSoC 6 at its unchanged 265 -- byte-identical.
+- **The parity route floors at `PARITY_MIN_PAGES = 6`, double the overall
+  route's.** `MIN_PAGES` is absolute and does not scale, so sharing it let the
+  parity route fire on a 10-page document from three pages of one parity -- 30%
+  of the document, where the overall route demands 50%, and 23% at 13 pages.
+  Dominance is weakest exactly there and cannot compensate: `0.2 * 3` is 0.6, so
+  the other-parity count is forced to zero, which any three-page odd-only run
+  satisfies. Odd-page section starts are a standard print convention, and the
+  string that demonstrated it was `Register description` -- the content the 0.5
+  fraction exists to protect. Doubling the floor cannot bind where the route
+  earns its keep (146-against-74 and 14-against-10 bucket margins) and leaves
+  every measured recovery above unchanged.
 - **No fuzzy matching.** A similarity threshold can delete a genuine one-off line
   resembling its neighbours. The accepted cost is that furniture whose *letters*
   vary per page is missed, which fails safe.
