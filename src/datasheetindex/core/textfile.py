@@ -265,16 +265,39 @@ def _extract_page_blocks(page: pymupdf.Page) -> list[tuple[str, bool]]:
     return [(b[_BLOCK_TEXT], _is_banded(b, page_height)) for b in _ordered_blocks(page)]
 
 
-def _furniture_enabled_by_env() -> bool:
+def furniture_enabled_by_env() -> bool:
     """Whether DATASHEETINDEX_FURNITURE permits header/footer stripping.
 
     Accepts the spellings a user actually reaches for, for the reason
     ``structure._parallel_enabled_by_env`` records: matching only the literal
     "0" would silently ignore ``DATASHEETINDEX_FURNITURE=false``, leaving the
     escape hatch looking broken to the person who most needs it.
+
+    Public despite living beside private helpers, because it has a second
+    consumer outside this module: ``tools/bound.py`` puts its answer in
+    ``_BuildOptions``, so the setting participates in both artifact-reuse
+    keys. Without that, flipping the hatch served the previously built text
+    file from cache and the hatch looked inert.
     """
     value = os.environ.get("DATASHEETINDEX_FURNITURE", "1").strip().lower()
     return value not in {"0", "false", "no", "off"}
+
+
+def _is_furniture_block(text: str, banded: bool, furniture: frozenset[str]) -> bool:
+    """Whether one block is running furniture, and so dropped from the text.
+
+    The drop decision in **one** place. It was previously spelled out inline
+    in ``scan_pages`` and hand-copied into the ONNX oracle precision test,
+    which is this feature's principal safety evidence -- so a change to the
+    gate left the oracle measuring the old rule and staying green. The test
+    now calls this.
+
+    ``furniture`` empty means detection found nothing, or the escape hatch is
+    set; either way nothing is dropped.
+    """
+    if not furniture or not banded:
+        return False
+    return is_candidate(text) and normalize_key(text) in furniture
 
 
 @dataclass(frozen=True)
@@ -308,7 +331,7 @@ def scan_pages(
     datasheet.
     """
     total_pages = len(doc)
-    stripping = _furniture_enabled_by_env()
+    stripping = furniture_enabled_by_env()
 
     page_blocks: list[list[tuple[str, bool]]] = []
     page_keys: list[set[str]] = []
@@ -346,12 +369,7 @@ def scan_pages(
         page_num = page_idx + 1
         kept: list[str] = []
         for text, banded in blocks:
-            if (
-                furniture
-                and banded
-                and is_candidate(text)
-                and normalize_key(text) in furniture
-            ):
+            if _is_furniture_block(text, banded, furniture):
                 dropped += 1
                 continue
             kept.append(text)

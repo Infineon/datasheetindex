@@ -6,6 +6,7 @@ from datasheetindex.core.furniture import (
     MAX_FURNITURE_CHARS,
     detect_furniture,
     furniture_threshold,
+    has_lexical_evidence,
     is_candidate,
     normalize_key,
 )
@@ -95,3 +96,40 @@ def test_detect_furniture_on_a_two_page_document_finds_nothing():
 
 def test_detect_furniture_on_no_pages_is_empty():
     assert detect_furniture([], total_pages=0) == frozenset()
+
+
+def test_detect_furniture_ignores_keys_with_no_letters():
+    """A digit-masked key carrying no letters is content, not furniture.
+
+    A bare page-number footer normalizes to ``#`` on every page, which clears
+    the threshold trivially. Treating it as furniture then deletes every
+    bare-number block in either band -- genuine numeric table rows -- because
+    they normalize to the same key. The alphabetic key on the same input must
+    still be detected, or this test would also pass on a detector that found
+    nothing at all.
+    """
+    page_keys = [["#", "#.# #.#", "Datasheet # Rev. B"] for _ in range(8)]
+    assert detect_furniture(page_keys, total_pages=8) == frozenset(
+        {"Datasheet # Rev. B"}
+    )
+
+
+def test_detect_furniture_accepts_a_key_whose_letters_are_not_latin():
+    """``str.isalpha`` rather than ``[A-Za-z]``: any script is evidence.
+
+    Written as escapes to keep this file ASCII. The key is Cyrillic
+    "Stranitsa #" -- a page-number footer in a Russian-language document,
+    which an ``[A-Za-z]`` class would reject as evidence-free and delete.
+    """
+    key = "\u0421\u0442\u0440\u0430\u043d\u0438\u0446\u0430 #"
+    page_keys = [[key] for _ in range(6)]
+    assert detect_furniture(page_keys, total_pages=6) == frozenset({key})
+
+
+def test_has_lexical_evidence_separates_masked_numbers_from_text():
+    assert has_lexical_evidence("#") is False
+    assert has_lexical_evidence("#.# #.#") is False
+    assert has_lexical_evidence("- # -") is False
+    assert has_lexical_evidence("") is False
+    # A real survey key: every one of the 16 measured keys has letters.
+    assert has_lexical_evidence("# V#.# #-#-#") is True

@@ -528,7 +528,7 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                 "misaligned table and you want clean pipe-delimited rows. Costs "
                 "fewer tokens than inspect_page (text, not vision) but takes "
                 "about 3s per page. The page's running header and footer are "
-                "omitted; get_section_text still has them."
+                "omitted, as they are in get_section_text and search_text."
             ),
             input_schema={
                 "type": "object",

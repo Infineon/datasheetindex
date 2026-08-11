@@ -169,8 +169,17 @@ Two consequences follow from putting the strip in `scan_pages` rather than in
 - **`preamble.py` is unaffected without a flag or a second code path.** It calls
   `_extract_page_text` directly (`preamble.py:245`) and keeps today's behaviour.
 - **`figures.caption_entries` reads the stripped text.** That is why the caption
-  keyword exclusion below is load-bearing rather than defensive: without it a
-  figure caption near a page edge could disappear from the figure index.
+  keyword exclusion below is worth keeping: a caption that *did* fall inside a
+  band would disappear from the figure index, and `TocNode.continued_tables` is
+  built from `Table N (continued)`.
+
+  It is **insurance, not the active mechanism.** What actually protects captions
+  on a real document is block granularity: `Table 43` is a body block and never
+  enters the edge band, so the recurrence rule never sees it (see "Why block
+  granularity, not lines"; the `Table #` x89 figure quoted there is a *line*-level
+  count, from the design this one replaced). The keyword rule is cheap and the
+  cost of being wrong is high, so it stays -- but a reader should not conclude
+  that removing it would start deleting captions on the PSoC.
 
 ## Algorithm
 
@@ -210,6 +219,23 @@ Two consequences follow from putting the strip in `scan_pages` rather than in
 `002-23185 Rev. *S | 2025-11-06` becomes `#-# Rev. *S | #-#-#`. Page numbers and
 revision dates match across pages while the letters must still agree.
 
+**A key must contain at least one letter** (`has_lexical_evidence`, tested with
+`str.isalpha` so a non-Latin script counts). Masking is what makes this
+necessary: a key can end up with no lexical evidence at all -- `#`, or
+`#.# #.#` -- and then recurrence is the only thing said about it, while genuine
+numeric table content normalizes to exactly the same key. A bare page-number
+footer, a very common layout, makes `#` furniture; every bare-number block in
+either band is then deleted document-wide. Reproduced on a 10-page synthetic:
+`120`, `127` and `3.3 4.3` were removed from real table rows, and no other
+guard catches it -- such blocks are short, in-band and caption-free.
+
+The accepted cost is that a footer consisting *only* of a page number is not
+stripped. That is a miss rather than a deletion, the direction everything else
+here fails in. Measured cost to detection: **zero** keys on both bundled PDFs
+and on all 16 keys of the seven-document survey below, since a real footer
+carries a title, revision or URL beside its numbers -- the barometer's
+`# V#.# #-#-#` still qualifies.
+
 **Threshold.** A key is furniture when it appears on at least
 `max(3, ceil(0.5 * total_pages))` distinct pages, counted once per page.
 
@@ -232,6 +258,13 @@ deleting section titles. 0.5 is the last value at which the corpus is clean.
 **Emit.** A block is dropped iff banded AND eligible AND its key is furniture.
 Everything else is joined exactly as today, so a document with no running
 furniture produces a byte-identical text file.
+
+That decision lives in exactly one function, `textfile._is_furniture_block`,
+which `scan_pages` calls and the ONNX oracle test imports. It was previously
+written out inline in `scan_pages` and hand-copied into the oracle test -- so
+changing the gate left this feature's principal safety evidence measuring the
+old rule and staying green. Pass 1 keeps its own, deliberately partial
+`banded and is_candidate(t)`: it is collecting keys, not deciding.
 
 ### Why block granularity, not lines
 
@@ -308,6 +341,16 @@ aid, not a signal an agent acts on.
 **Artifact cache.** `artifact_cache` fingerprints on `datasheetindex_version`, so
 the version bump invalidates stale text files automatically. No migration.
 
+The hatch itself must also be part of the reuse key, and is: `_BuildOptions`
+carries `strip_furniture`, so it reaches both the in-memory comparison and the
+on-disk `reuse_blocker`. Without it, building once and rebuilding with the hatch
+flipped matched on version, source and options and served the stale artifact --
+and `text_sha256` agreed, because it hashes that same stale file. This is the
+third knob to need it, after `DATASHEETINDEX_VISION_MODEL` and
+`DATASHEETINDEX_MODEL`; the rule is that anything changing artifact *content*
+belongs in the key. The **resolved boolean** is recorded, not the env spelling,
+so `0` and `off` share one artifact.
+
 ## Failure modes
 
 | Failure | Behaviour | Rationale |
@@ -316,6 +359,8 @@ the version bump invalidates stale text files automatically. No migration.
 | Page with no text blocks | Unchanged from today (empty string) | Existing behaviour preserved |
 | Every block on a page is furniture | Page marker emitted, body empty | Page alignment must not shift |
 | Furniture varies in letters per page | Not detected, text kept | Fails safe by construction |
+| Footer is *only* a page number | Not detected, text kept | Its key has no letters, so it is indistinguishable from a numeric table row. Deliberate: see "A key must contain at least one letter". Costs zero keys on the survey corpus |
+| A table header row repeats on more than half the pages | **Deleted** -- the one wrong deletion the design admits | It is in-band, caption-free and recurrent, which is the entire rule; no cheap guard separates it from a running header. Measured on the PSoC, `Spec ID# Parameter Description Min Typ Max Unit Details/conditions` reaches 38/134 pages, under the 67-page threshold -- but that margin belongs to that document, not to the design. A table-heavy datasheet with one long table could cross it. `DATASHEETINDEX_FURNITURE=0` is the escape hatch; the cross-page geometric-stability check under "Deliberately excluded" is the first real fix to reach for |
 | Detection raises | Must not be possible: `furniture.py` is pure and total over its inputs. No try/except is added, so a genuine bug surfaces rather than silently disabling stripping | Matches the repo's preference for loud failure over silent degradation |
 
 ## Testing
@@ -324,7 +369,10 @@ the version bump invalidates stale text files automatically. No migration.
 whitespace collapse; `is_candidate` rejecting over-long and caption-prefixed
 blocks **and accepting a multi-line short block**, which pins the removed
 line-count rule so it cannot be reintroduced; `detect_furniture` threshold
-arithmetic including the `max(3, ...)` floor and the per-page dedupe.
+arithmetic including the `max(3, ...)` floor and the per-page dedupe; and
+`detect_furniture` refusing a letterless key while still returning an
+alphabetic one from the same input -- the second half matters, or the test
+would also pass on a detector that had stopped working.
 
 **Integration, default lane** (`tests/test_textfile.py`):
 
@@ -338,6 +386,13 @@ arithmetic including the `max(3, ...)` floor and the per-page dedupe.
 4. **No-furniture guard**: a document without running furniture produces
    byte-identical text to 0.32.0.
 5. Escape hatch: `DATASHEETINDEX_FURNITURE=0` restores 0.32.0 output exactly.
+6. **Numeric-content guard**: a document whose footer is only a page number,
+   with numeric table rows reaching into the bottom band. The numbers survive,
+   the alphabetic header on the same document is still stripped, and the
+   page-number footer is pinned as kept so the trade stays a decision.
+
+Plus, in `tests/test_reuse.py`, that flipping the hatch blocks artifact reuse in
+both directions while a different spelling of "off" does not.
 
 **Real-document, `real_pdf` marker** -- on the bundled PSoC: the two known
 furniture shapes are absent; a known body string is still present; the **4-line

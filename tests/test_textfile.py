@@ -559,23 +559,23 @@ def test_extract_page_blocks_preserves_reading_order(tmp_path):
         doc.close()
 
 
-def test_furniture_enabled_by_env_accepts_the_spellings_people_reach_for(
+def testfurniture_enabled_by_env_accepts_the_spellings_people_reach_for(
     monkeypatch,
 ):
     """Mirrors _parallel_enabled_by_env: matching only "0" would silently
     ignore =false and leave the escape hatch looking broken."""
-    from datasheetindex.core.textfile import _furniture_enabled_by_env
+    from datasheetindex.core.textfile import furniture_enabled_by_env
 
     monkeypatch.delenv("DATASHEETINDEX_FURNITURE", raising=False)
-    assert _furniture_enabled_by_env() is True
+    assert furniture_enabled_by_env() is True
 
     for off in ("0", "false", "FALSE", "no", "off", "  Off  "):
         monkeypatch.setenv("DATASHEETINDEX_FURNITURE", off)
-        assert _furniture_enabled_by_env() is False, off
+        assert furniture_enabled_by_env() is False, off
 
     for on in ("1", "true", "yes", "anything else"):
         monkeypatch.setenv("DATASHEETINDEX_FURNITURE", on)
-        assert _furniture_enabled_by_env() is True, on
+        assert furniture_enabled_by_env() is True, on
 
 
 def _furniture_pdf(path, pages, *, header=True, footer=True, caption=False):
@@ -650,6 +650,69 @@ def test_scan_pages_keeps_a_recurring_table_caption(tmp_path):
     assert "ACME AWC-3200 Controller" not in text  # furniture still goes
     for p in range(1, 9):
         assert f"Table {p} Pin assignments" in text  # captions all stay
+
+
+def _page_number_footer_pdf(path, pages):
+    """A document whose footer is *only* a page number, with numeric tables.
+
+    The table rows sit at 0.86h, inside the bottom band, and PyMuPDF merges
+    them into one block whose key is ``# # #.# #.#`` -- no letters at all,
+    exactly like the bare page number's ``#``.
+    """
+    import pymupdf
+
+    doc = pymupdf.open()
+    for p in range(pages):
+        page = doc.new_page()
+        height = page.rect.height
+        page.insert_text((50, height * 0.05), "ACME AWC-3200 Controller", fontsize=9)
+        page.insert_text(
+            (50, height * 0.45), f"Body sentence on page {p + 1}.", fontsize=9
+        )
+        for i, cell in enumerate(("120", "127", "3.3 4.3")):
+            page.insert_text((50 + i * 120, height * 0.86), cell, fontsize=9)
+        page.insert_text((300, height * 0.96), str(p + 1), fontsize=8)
+    doc.save(str(path))
+    doc.close()
+
+
+def test_scan_pages_keeps_numeric_content_under_a_page_number_footer(tmp_path):
+    """A key with no letters must never be furniture.
+
+    ``normalize_key`` masks digit runs, so a bare page-number footer -- an
+    extremely common datasheet layout -- normalizes to ``#`` on every page
+    and clears the threshold trivially. Acting on that deleted every
+    bare-number block in either band document-wide: reproduced on this
+    fixture, ``120``, ``127`` and ``3.3 4.3`` all vanished from genuine table
+    rows. None of the other guards helps -- such blocks are short, in-band
+    and carry no caption keyword.
+
+    The trade is recorded rather than hidden: the page-number-only footer is
+    now kept. That converts a content-deletion into a miss, which is the
+    direction this design fails in everywhere else. The header assertion
+    below keeps the test honest -- it would also pass on a detector that had
+    simply stopped working.
+    """
+    import pymupdf
+
+    from datasheetindex.core.textfile import extract_page_text, scan_pages
+
+    pdf = tmp_path / "page-numbers.pdf"
+    _page_number_footer_pdf(pdf, pages=10)
+    doc = pymupdf.open(str(pdf))
+    try:
+        text = scan_pages(doc).text
+    finally:
+        doc.close()
+
+    for cell in ("120", "127", "3.3 4.3"):
+        assert text.count(cell) == 10, cell
+    # Real furniture on the same document is still detected and dropped.
+    assert "ACME AWC-3200 Controller" not in text
+    # And the deliberate cost, pinned so it is a decision and not a surprise:
+    # the page-number-only footer is now kept.
+    page_seven = [line.strip() for line in extract_page_text(text, 7).splitlines()]
+    assert "7" in page_seven
 
 
 def test_scan_pages_strips_nothing_from_a_two_page_document(tmp_path):

@@ -78,6 +78,31 @@ def furniture_threshold(total_pages: int) -> int:
     return max(MIN_PAGES, math.ceil(PAGE_FRACTION * total_pages))
 
 
+def has_lexical_evidence(key: str) -> bool:
+    """Whether a normalized key carries any letters at all.
+
+    A key with no alphabetic character is pure punctuation and masked digits
+    -- ``#``, or ``#.# #.#`` -- so recurrence is the *only* thing said about
+    it, and numeric table content matches it exactly. A bare page-number
+    footer is an extremely common datasheet layout, and it makes ``#``
+    furniture; every bare-number block in either band is then deleted
+    document-wide. Reproduced on a 10-page synthetic: ``120``, ``127`` and
+    ``3.3 4.3`` were removed from real table rows. No other guard helps --
+    such blocks are short, in-band and carry no caption keyword.
+
+    The cost is that a footer consisting *only* of a page number is no longer
+    stripped, which is the design's stated safe direction: a miss, not a
+    deletion. It costs nothing measurable -- zero furniture keys on both
+    bundled PDFs and on all 16 keys of the seven-document survey, since a
+    real footer carries a document title, a revision or a URL alongside its
+    numbers (``# V#.# #-#-#`` still qualifies).
+
+    ``str.isalpha`` rather than an ``[A-Za-z]`` class so a non-Latin script
+    counts as evidence too.
+    """
+    return any(char.isalpha() for char in key)
+
+
 def detect_furniture(
     page_keys: Sequence[Iterable[str]], total_pages: int
 ) -> frozenset[str]:
@@ -86,10 +111,17 @@ def detect_furniture(
     ``page_keys`` is one iterable of normalized keys per page. Each key is
     counted once per page whatever the caller passes, so a header repeated
     twice on one page does not count double.
+
+    A key with no letters is never returned, whatever its count -- see
+    ``has_lexical_evidence``.
     """
     counts: dict[str, int] = {}
     for keys in page_keys:
         for key in set(keys):
             counts[key] = counts.get(key, 0) + 1
     threshold = furniture_threshold(total_pages)
-    return frozenset(key for key, seen in counts.items() if seen >= threshold)
+    return frozenset(
+        key
+        for key, seen in counts.items()
+        if seen >= threshold and has_lexical_evidence(key)
+    )

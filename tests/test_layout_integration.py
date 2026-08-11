@@ -307,6 +307,7 @@ def test_dropped_blocks_agree_with_the_layout_model():
     from datasheetindex.core.textfile import (
         _extract_page_blocks,
         _is_banded,
+        _is_furniture_block,
         _ordered_blocks,
     )
 
@@ -341,11 +342,11 @@ def test_dropped_blocks_agree_with_the_layout_model():
             regions = model.predict(page)
             for b in _ordered_blocks(page):
                 text = b[_BLOCK_TEXT_INDEX]
-                if not (
-                    _is_banded(b, height)
-                    and is_candidate(text)
-                    and normalize_key(text) in furniture
-                ):
+                # The production predicate, called -- never re-derived. A
+                # hand-copied duplicate kept this test measuring the old rule
+                # after the gate in scan_pages changed, so it stayed green on
+                # a detector it no longer described.
+                if not _is_furniture_block(text, _is_banded(b, height), furniture):
                     continue
                 total += 1
                 bbox = (b[0], b[1], b[2], b[3])

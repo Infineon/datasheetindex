@@ -40,7 +40,11 @@ from datasheetindex.core.structure import (
     continuation_at_boundary,
     find_breadcrumb_for_page,
 )
-from datasheetindex.core.textfile import TextSearchMatch, extract_section_text
+from datasheetindex.core.textfile import (
+    TextSearchMatch,
+    extract_section_text,
+    furniture_enabled_by_env,
+)
 from datasheetindex.core.textfile import search_text as search_text_content
 from datasheetindex.index import DatasheetIndex
 from datasheetindex.llm.client import (
@@ -106,6 +110,22 @@ class _BuildOptions:
     #: directions -- no two keys share an effective model, and no effective
     #: model spans two keys.
     text_model: str | None
+    #: Whether ``DATASHEETINDEX_FURNITURE`` permits header/footer stripping.
+    #:
+    #: Here for the third time for the same reason as the two model fields:
+    #: it changes the **content** of the published artifact -- the text file
+    #: keeps or drops every running header and footer -- so an artifact built
+    #: one way must not be served for a request that asked for the other.
+    #: Without it, building once with stripping on and rebuilding with
+    #: ``DATASHEETINDEX_FURNITURE=0`` matched on version, source and options
+    #: and served the stale stripped text file, with ``text_sha256`` agreeing
+    #: because it hashes that same stale file. The reverse is equally stale.
+    #:
+    #: The **resolved boolean**, not the raw env string, unlike the model
+    #: fields above: the hatch has no per-call argument that could outrank it,
+    #: and ``0``/``false``/``no``/``off`` all mean one thing, so recording the
+    #: spelling would split one artifact across four keys.
+    strip_furniture: bool
 
     def to_dict(self) -> dict[str, object]:
         """The cache key, as recorded in the sidecar.
@@ -470,6 +490,9 @@ class DatasheetTools:
             max_figure_captions=max_figure_captions,
             vision_model=vision_model_env(),
             text_model=None if named_model else text_model_env(),
+            # Read here, after ensure_dotenv_loaded above, so a ``.env`` that
+            # sets the hatch keys the same value ``scan_pages`` will act on.
+            strip_furniture=furniture_enabled_by_env(),
         )
         # One resolver for the whole call, closed however the call exits. Both
         # gates and the rebuild ask it, so a walk through all three opens one

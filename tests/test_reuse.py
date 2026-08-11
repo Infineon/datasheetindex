@@ -334,6 +334,7 @@ def test_build_options_to_dict_covers_every_dataclass_field():
         max_figure_captions=20,
         vision_model=None,
         text_model=None,
+        strip_furniture=True,
     )
 
     assert set(options.to_dict()) == {f.name for f in fields(_BuildOptions)}
@@ -531,6 +532,67 @@ def test_changing_the_text_model_blocks_reuse(
     with DatasheetTools(str(toc_pdf)) as tools:
         tools.build_datasheet(output_dir=out)
     assert len(build_spy) == 2, "a changed text model must rebuild"
+
+
+def test_flipping_the_furniture_hatch_blocks_reuse(
+    tmp_path, toc_pdf, not_editable, build_spy, monkeypatch
+):
+    """``DATASHEETINDEX_FURNITURE`` changes the text file, so it must key it.
+
+    Third instance of the class the two model knobs above already fixed, and
+    the most direct: this hatch decides whether the published text file keeps
+    or drops every running header and footer. Without it in the key, building
+    with stripping on and rebuilding with the hatch set matched on version,
+    source and options and served the stale stripped file -- and ``text_sha256``
+    agreed, because it hashes that same stale file. The reverse is equally
+    stale.
+
+    Both directions are exercised: someone reaching for the hatch is turning
+    it on, and someone else later turns it back off.
+
+    ``not_editable`` is required: on-disk reuse is off in an editable checkout,
+    so without it every call rebuilds and this passes for the wrong reason.
+    """
+    out = str(tmp_path / "out")
+    monkeypatch.delenv("DATASHEETINDEX_FURNITURE", raising=False)
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+    assert len(build_spy) == 1
+
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+    assert len(build_spy) == 1, "an unchanged environment must still reuse"
+
+    monkeypatch.setenv("DATASHEETINDEX_FURNITURE", "0")
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+    assert len(build_spy) == 2, "turning stripping off must rebuild"
+
+    monkeypatch.delenv("DATASHEETINDEX_FURNITURE")
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+    assert len(build_spy) == 3, "turning stripping back on must rebuild"
+
+
+def test_the_furniture_hatch_spelling_does_not_split_the_cache(
+    tmp_path, toc_pdf, not_editable, build_spy, monkeypatch
+):
+    """The key records the resolved boolean, not the spelling.
+
+    ``0``, ``false``, ``no`` and ``off`` all mean one thing, so recording the
+    raw string would spread one artifact across four keys and rebuild on a
+    change that cannot reach the output.
+    """
+    out = str(tmp_path / "out")
+    monkeypatch.setenv("DATASHEETINDEX_FURNITURE", "0")
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+    assert len(build_spy) == 1
+
+    monkeypatch.setenv("DATASHEETINDEX_FURNITURE", "off")
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+    assert len(build_spy) == 1, "a different spelling of off must still reuse"
 
 
 def test_a_dotenv_sourced_text_model_is_visible_to_the_cache_key(
