@@ -295,10 +295,18 @@ def test_single_column_page_unchanged():
 
 
 @pytest.mark.real_pdf
-def test_real_pdf_no_false_column_detection():
-    """Column detection should not trigger on single-column TLE9350 datasheet."""
+def test_real_pdf_no_false_column_detection(monkeypatch):
+    """Column detection should not trigger on single-column TLE9350 datasheet.
+
+    Furniture stripping is disabled here: this test's baseline is raw
+    ``get_text(sort=True)``, which includes running headers/footers, so
+    comparing it against furniture-stripped output would fail for a reason
+    unrelated to column detection -- the real TLE9350 datasheet does carry a
+    running header, and scan_pages now legitimately removes it.
+    """
     if not TLE9350_PATH.exists():
         pytest.skip("Test PDF not found")
+    monkeypatch.setenv("DATASHEETINDEX_FURNITURE", "0")
     doc = pymupdf.open(str(TLE9350_PATH))
     text_with_columns = generate_text(doc)
 
@@ -568,3 +576,267 @@ def test_furniture_enabled_by_env_accepts_the_spellings_people_reach_for(
     for on in ("1", "true", "yes", "anything else"):
         monkeypatch.setenv("DATASHEETINDEX_FURNITURE", on)
         assert _furniture_enabled_by_env() is True, on
+
+
+def _furniture_pdf(path, pages, *, header=True, footer=True, caption=False):
+    """A document with an optional running header, footer and top caption."""
+    import pymupdf
+
+    doc = pymupdf.open()
+    for p in range(pages):
+        page = doc.new_page()
+        height = page.rect.height
+        if header:
+            page.insert_text(
+                (50, height * 0.05), "ACME AWC-3200 Controller", fontsize=9
+            )
+        if caption:
+            # A caption high on the page: banded, recurring, must survive.
+            page.insert_text(
+                (50, height * 0.12), f"Table {p + 1} Pin assignments", fontsize=9
+            )
+        page.insert_text(
+            (50, height * 0.45), f"Body sentence unique to page {p + 1}.", fontsize=9
+        )
+        if footer:
+            page.insert_text((50, height * 0.94), "Datasheet", fontsize=8)
+            page.insert_text((50, height * 0.96), f"{p + 1}", fontsize=8)
+            page.insert_text((50, height * 0.98), "AWC-3200 Rev. B", fontsize=8)
+    doc.save(str(path))
+    doc.close()
+
+
+def test_scan_pages_drops_the_running_header_and_footer(tmp_path):
+    import pymupdf
+
+    from datasheetindex.core.textfile import scan_pages
+
+    pdf = tmp_path / "furniture.pdf"
+    _furniture_pdf(pdf, pages=8)
+    doc = pymupdf.open(str(pdf))
+    try:
+        text = scan_pages(doc).text
+    finally:
+        doc.close()
+
+    assert "ACME AWC-3200 Controller" not in text
+    assert "AWC-3200 Rev. B" not in text
+    # Body survives, and every page marker is still emitted.
+    assert "Body sentence unique to page 4." in text
+    for p in range(1, 9):
+        assert f"--- PAGE {p} ---" in text
+
+
+def test_scan_pages_keeps_a_recurring_table_caption(tmp_path):
+    """The caption guard.
+
+    A 'Table N' caption placed high on the page recurs on every page and
+    normalizes to the same key as its neighbours. It must survive: these are
+    the captions TocNode.continued_tables is built from, and the line-level
+    approach this design replaced would have deleted them.
+    """
+    import pymupdf
+
+    from datasheetindex.core.textfile import scan_pages
+
+    pdf = tmp_path / "captions.pdf"
+    _furniture_pdf(pdf, pages=8, caption=True)
+    doc = pymupdf.open(str(pdf))
+    try:
+        text = scan_pages(doc).text
+    finally:
+        doc.close()
+
+    assert "ACME AWC-3200 Controller" not in text  # furniture still goes
+    for p in range(1, 9):
+        assert f"Table {p} Pin assignments" in text  # captions all stay
+
+
+def test_scan_pages_strips_nothing_from_a_two_page_document(tmp_path):
+    """Below the MIN_PAGES floor there is no recurrence evidence."""
+    import pymupdf
+
+    from datasheetindex.core.textfile import scan_pages
+
+    pdf = tmp_path / "short.pdf"
+    _furniture_pdf(pdf, pages=2)
+    doc = pymupdf.open(str(pdf))
+    try:
+        text = scan_pages(doc).text
+    finally:
+        doc.close()
+
+    assert text.count("ACME AWC-3200 Controller") == 2
+
+
+def test_scan_pages_leaves_a_furniture_free_document_unchanged(tmp_path):
+    """No running furniture means byte-identical output."""
+    import pymupdf
+
+    from datasheetindex.core.textfile import _extract_page_text, scan_pages
+
+    pdf = tmp_path / "plain.pdf"
+    _furniture_pdf(pdf, pages=6, header=False, footer=False)
+    doc = pymupdf.open(str(pdf))
+    try:
+        expected = "\n".join(
+            part
+            for i in range(len(doc))
+            for part in (f"--- PAGE {i + 1} ---", _extract_page_text(doc[i]))
+        )
+        assert scan_pages(doc).text == expected
+    finally:
+        doc.close()
+
+
+def test_scan_pages_escape_hatch_restores_the_unstripped_text(tmp_path, monkeypatch):
+    import pymupdf
+
+    from datasheetindex.core.textfile import _extract_page_text, scan_pages
+
+    pdf = tmp_path / "hatch.pdf"
+    _furniture_pdf(pdf, pages=8)
+    monkeypatch.setenv("DATASHEETINDEX_FURNITURE", "0")
+    doc = pymupdf.open(str(pdf))
+    try:
+        expected = "\n".join(
+            part
+            for i in range(len(doc))
+            for part in (f"--- PAGE {i + 1} ---", _extract_page_text(doc[i]))
+        )
+        assert scan_pages(doc).text == expected
+    finally:
+        doc.close()
+
+
+def test_preamble_still_sees_the_running_furniture(tmp_path):
+    """The preamble's "raw text, zero heuristics" contract.
+
+    preamble.py reads _extract_page_text, not scan_pages, so stripping must
+    not reach it. This is the test that fails if someone "simplifies" the
+    design by moving the strip into _extract_page_text -- which would look
+    like a tidy-up and would silently break a documented guarantee.
+    """
+    import pymupdf
+
+    from datasheetindex.core.preamble import generate_preamble
+    from datasheetindex.core.textfile import scan_pages
+
+    pdf = tmp_path / "preamble.pdf"
+    _furniture_pdf(pdf, pages=8)
+    doc = pymupdf.open(str(pdf))
+    try:
+        preamble = generate_preamble(doc)
+        stripped = scan_pages(doc).text
+    finally:
+        doc.close()
+
+    assert "ACME AWC-3200 Controller" in preamble
+    assert "ACME AWC-3200 Controller" not in stripped
+
+
+def test_scan_pages_keeps_the_figure_index_interleaved_by_page(tmp_path):
+    """Splitting into two passes must not reorder the figure index.
+
+    Figures are appended per page as rasters-then-captions. A naive two-pass
+    split emits all rasters before all captions, which silently reorders the
+    index that build_datasheet publishes.
+    """
+    import pymupdf
+
+    from datasheetindex.core.textfile import scan_pages
+
+    pdf = tmp_path / "figs.pdf"
+    doc = pymupdf.open()
+    for p in range(4):
+        page = doc.new_page()
+        page.insert_text(
+            (50, 300), f"Figure {p + 1}. Diagram for page {p + 1}", fontsize=9
+        )
+    doc.save(str(pdf))
+    doc.close()
+
+    doc = pymupdf.open(str(pdf))
+    try:
+        figures = scan_pages(doc).figures
+    finally:
+        doc.close()
+
+    pages = [cast(int, f["page"]) for f in figures]
+    assert pages == sorted(pages), f"figure index is not page-ordered: {pages}"
+
+
+def test_is_banded_requires_the_whole_block_inside_the_band(tmp_path):
+    """A block straddling the band boundary is not banded, only a block that
+    lies wholly inside the top or bottom edge band is.
+
+    test_extract_page_blocks_tags_the_top_and_bottom_bands places its blocks
+    far from the 20%/80% boundaries, so it would still pass even if the two
+    comparisons in _is_banded were swapped (testing the wrong edge of each
+    block). That matters here because a too-permissive band makes furniture
+    detection delete real body text. This test builds blocks that actually
+    straddle each boundary and asserts on the real block geometry PyMuPDF
+    returns, rather than assuming exact coordinates.
+    """
+    import pymupdf
+
+    from datasheetindex.core.textfile import _is_banded, _ordered_blocks
+
+    pdf = tmp_path / "straddle.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page()  # default letter page: 792pt tall
+    height = page.rect.height
+    top_limit = height * 0.20
+    bottom_limit = height * 0.80
+
+    # Wholly inside the top band.
+    page.insert_text((50, height * 0.03), "top inside", fontsize=8)
+
+    # Straddles the top boundary: starts inside the top band, several lines
+    # push the block's bottom edge (y1) well past top_limit.
+    y = top_limit - 12
+    for i in range(6):
+        page.insert_text((300, y + i * 10), f"top straddle line {i}", fontsize=8)
+
+    # Straddles the bottom boundary: starts above bottom_limit, several lines
+    # push the block's bottom edge into the bottom band.
+    y = bottom_limit - 30
+    for i in range(6):
+        page.insert_text((300, y + i * 10), f"bottom straddle line {i}", fontsize=8)
+
+    # Wholly inside the bottom band.
+    page.insert_text((50, height * 0.97), "bottom inside", fontsize=8)
+
+    doc.save(str(pdf))
+    doc.close()
+
+    doc = pymupdf.open(str(pdf))
+    try:
+        page = doc[0]
+        blocks = {
+            b[textfile_module._BLOCK_TEXT].strip(): b for b in _ordered_blocks(page)
+        }
+        page_height = page.rect.height
+    finally:
+        doc.close()
+
+    top_inside = blocks["top inside"]
+    bottom_inside = blocks["bottom inside"]
+    top_straddle = next(
+        b for text, b in blocks.items() if text.startswith("top straddle")
+    )
+    bottom_straddle = next(
+        b for text, b in blocks.items() if text.startswith("bottom straddle")
+    )
+
+    # Sanity: confirm the straddling blocks really do straddle the boundary
+    # they are meant to test, rather than assuming exact PyMuPDF geometry.
+    assert top_straddle[textfile_module._BLOCK_Y0] < top_limit
+    assert top_straddle[textfile_module._BLOCK_Y1] > top_limit
+    assert bottom_straddle[textfile_module._BLOCK_Y0] < bottom_limit
+    assert bottom_straddle[textfile_module._BLOCK_Y1] > bottom_limit
+
+    assert _is_banded(top_inside, page_height) is True
+    assert _is_banded(bottom_inside, page_height) is True
+    assert _is_banded(top_straddle, page_height) is False
+    assert _is_banded(bottom_straddle, page_height) is False

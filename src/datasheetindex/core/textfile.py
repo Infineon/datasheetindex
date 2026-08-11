@@ -22,6 +22,11 @@ from datasheetindex.core.figures import (
     caption_entries,
     raster_regions,
 )
+from datasheetindex.core.furniture import (
+    detect_furniture,
+    is_candidate,
+    normalize_key,
+)
 
 if TYPE_CHECKING:
     import pymupdf
@@ -293,23 +298,77 @@ def scan_pages(
     Folded into the existing per-page pass rather than run as a second sweep:
     ``get_image_info()`` still costs what it costs, but reopening and
     re-loading every page object does not have to be paid twice.
+
+    Two passes over a buffer, not two passes over the PDF. Furniture
+    detection is a document-level decision -- a block is furniture because
+    the same text recurs on other pages -- so pass 1 reads every page once
+    and buffers its blocks, and pass 2 works from that buffer without
+    touching the document again. A second PDF traversal was measured at +22%
+    of this function's runtime, against ~200KB of buffer for a 134-page
+    datasheet.
     """
-    parts: list[str] = []
-    figures: list[dict[str, object]] = []
+    total_pages = len(doc)
+    stripping = _furniture_enabled_by_env()
+
+    page_blocks: list[list[tuple[str, bool]]] = []
+    page_keys: list[set[str]] = []
+    page_rasters: list[list[dict[str, object]]] = []
     excluded = 0
 
-    for page_idx in range(len(doc)):
-        page_num = page_idx + 1
+    # Pass 1: read each page once.
+    for page_idx in range(total_pages):
         page = doc[page_idx]
-        text = _extract_page_text(page)
+        blocks = _extract_page_blocks(page)
+        page_blocks.append(blocks)
+        page_keys.append(
+            {
+                normalize_key(text)
+                for text, banded in blocks
+                if banded and is_candidate(text)
+            }
+        )
+        rasters, page_excluded = raster_regions(page, min_area_pct=min_area_pct)
+        page_rasters.append(rasters)
+        excluded += page_excluded
+
+    furniture = detect_furniture(page_keys, total_pages) if stripping else frozenset()
+
+    # Pass 2: assemble from the buffer. Figures stay interleaved per page --
+    # rasters then captions -- because that is the order the figure index has
+    # always had, and build_datasheet publishes it.
+    parts: list[str] = []
+    figures: list[dict[str, object]] = []
+    dropped = 0
+
+    for page_idx, blocks in enumerate(page_blocks):
+        page_num = page_idx + 1
+        kept: list[str] = []
+        for text, banded in blocks:
+            if (
+                furniture
+                and banded
+                and is_candidate(text)
+                and normalize_key(text) in furniture
+            ):
+                dropped += 1
+                continue
+            kept.append(text)
+        text = "\n".join(kept)
+
         parts.append(f"--- PAGE {page_num} ---")
         parts.append(text)
 
-        page_figures, page_excluded = raster_regions(page, min_area_pct=min_area_pct)
-        figures.extend(page_figures)
-        excluded += page_excluded
+        figures.extend(page_rasters[page_idx])
         # Captions read the column-aware text, never page.get_text().
         figures.extend(caption_entries(page_num, text))
+
+    if furniture:
+        logger.info(
+            "Dropped %d running header/footer blocks across %d pages: %s",
+            dropped,
+            total_pages,
+            sorted(furniture),
+        )
 
     return PageScan(
         text="\n".join(parts),

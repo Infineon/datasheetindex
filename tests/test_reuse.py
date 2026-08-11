@@ -33,7 +33,10 @@ def toc_pdf(tmp_path):
     for _ in range(3):
         page = doc.new_page()
         writer = pymupdf.TextWriter(page.rect)
-        writer.append((72, 72), "Body text for this page of the datasheet")
+        # y=400 sits well outside the top/bottom furniture bands (20%/80% of
+        # an 842pt page): identical text on every page would otherwise be
+        # detected as a running header and stripped from scan_pages' output.
+        writer.append((72, 400), "Body text for this page of the datasheet")
         writer.write_text(page)
     doc.set_toc([[1, "Overview", 1], [1, "Electrical Characteristics", 2]])
     pdf_path = tmp_path / "ds.pdf"
@@ -67,7 +70,9 @@ def other_toc_pdf(tmp_path):
     for _ in range(5):
         page = doc.new_page()
         writer = pymupdf.TextWriter(page.rect)
-        writer.append((72, 72), "Unique marker Zephyr for the other datasheet")
+        # See toc_pdf above: keep body text out of the furniture bands so it
+        # is not detected as a running header and stripped.
+        writer.append((72, 400), "Unique marker Zephyr for the other datasheet")
         writer.write_text(page)
     doc.set_toc(
         [
@@ -1119,19 +1124,20 @@ def test_a_carriage_return_in_the_extracted_text_still_reuses(
     never returns a raw ``\\r`` no matter how it is inserted (``insert_text``,
     ``TextWriter``, ``insert_textbox``) -- so no fixture PDF reaches this bug
     through real extraction alone. The CR is injected one layer up, at
-    ``_extract_page_text``, the seam ``scan_pages`` composes into the text
-    artifact ``atomic_write_text`` puts on disk. Everything downstream of that
-    seam -- composing the artifact, writing it, recording its hash, and later
-    reading it back for the reuse check -- is the real production code path;
-    only the origin of the CR byte is synthetic.
+    ``_extract_page_blocks``, the seam ``scan_pages`` now composes into the
+    text artifact ``atomic_write_text`` puts on disk (it read
+    ``_extract_page_text`` before the two-pass furniture rewrite). Everything
+    downstream of that seam -- composing the artifact, writing it, recording
+    its hash, and later reading it back for the reuse check -- is the real
+    production code path; only the origin of the CR byte is synthetic.
     """
-    from datasheetindex.core.textfile import _extract_page_text as original_extract
+    from datasheetindex.core.textfile import _extract_page_blocks as original_extract
 
-    def extract_with_cr(page):
-        return original_extract(page) + "\rV\rCC = 3.3 V"
+    def extract_blocks_with_cr(page):
+        return [*original_extract(page), ("\rV\rCC = 3.3 V", False)]
 
     monkeypatch.setattr(
-        "datasheetindex.core.textfile._extract_page_text", extract_with_cr
+        "datasheetindex.core.textfile._extract_page_blocks", extract_blocks_with_cr
     )
 
     out = tmp_path / "out"
