@@ -498,3 +498,73 @@ def test_ordered_blocks_pins_column_partitioning_order():
         "R1 alpha bravo charlie\nR1 delta echo foxtrot\nR1 golf hotel india\n",
         "R2 alpha bravo charlie\nR2 delta echo foxtrot\nR2 golf hotel india\n",
     ]
+
+
+def test_extract_page_blocks_tags_the_top_and_bottom_bands(tmp_path):
+    """A block counts as banded only if it lies wholly inside an edge band."""
+    import pymupdf
+
+    from datasheetindex.core.textfile import _extract_page_blocks
+
+    pdf = tmp_path / "bands.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page()  # default letter page: 792pt tall
+    height = page.rect.height
+    page.insert_text((50, height * 0.05), "running header", fontsize=9)
+    page.insert_text((50, height * 0.50), "body text in the middle", fontsize=9)
+    page.insert_text((50, height * 0.96), "running footer", fontsize=9)
+    doc.save(str(pdf))
+    doc.close()
+
+    doc = pymupdf.open(str(pdf))
+    try:
+        blocks = _extract_page_blocks(doc[0])
+    finally:
+        doc.close()
+
+    banded = {text.strip(): flag for text, flag in blocks}
+    assert banded["running header"] is True
+    assert banded["running footer"] is True
+    assert banded["body text in the middle"] is False
+
+
+def test_extract_page_blocks_preserves_reading_order(tmp_path):
+    """The pairs must arrive in the same order _extract_page_text joins them."""
+    import pymupdf
+
+    from datasheetindex.core.textfile import _extract_page_blocks, _extract_page_text
+
+    pdf = tmp_path / "order.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page()
+    for row in range(5):
+        page.insert_text((50, 100 + row * 20), f"line {row}", fontsize=9)
+    doc.save(str(pdf))
+    doc.close()
+
+    doc = pymupdf.open(str(pdf))
+    try:
+        page = doc[0]
+        joined = "\n".join(text for text, _ in _extract_page_blocks(page))
+        assert joined == _extract_page_text(page)
+    finally:
+        doc.close()
+
+
+def test_furniture_enabled_by_env_accepts_the_spellings_people_reach_for(
+    monkeypatch,
+):
+    """Mirrors _parallel_enabled_by_env: matching only "0" would silently
+    ignore =false and leave the escape hatch looking broken."""
+    from datasheetindex.core.textfile import _furniture_enabled_by_env
+
+    monkeypatch.delenv("DATASHEETINDEX_FURNITURE", raising=False)
+    assert _furniture_enabled_by_env() is True
+
+    for off in ("0", "false", "FALSE", "no", "off", "  Off  "):
+        monkeypatch.setenv("DATASHEETINDEX_FURNITURE", off)
+        assert _furniture_enabled_by_env() is False, off
+
+    for on in ("1", "true", "yes", "anything else"):
+        monkeypatch.setenv("DATASHEETINDEX_FURNITURE", on)
+        assert _furniture_enabled_by_env() is True, on

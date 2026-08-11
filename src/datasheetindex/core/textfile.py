@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import os
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -23,6 +25,8 @@ from datasheetindex.core.figures import (
 
 if TYPE_CHECKING:
     import pymupdf
+
+logger = logging.getLogger(__name__)
 
 
 class TextSearchMatch(TypedDict):
@@ -78,6 +82,13 @@ _GUTTER_TOLERANCE_FRAC = 0.10  # gutter positions must agree within 10%
 
 # Minimum gap in points between two blocks to qualify as a gutter
 _MIN_GUTTER_PTS = 10
+
+# Fraction of a page's height, at each edge, within which a block may be
+# running furniture. Applied per page, so landscape and mixed-size pages need
+# no special case. This band is what separates a running header from a
+# "Table N" caption: measured on the PSoC, "Table #" recurs 89 times but never
+# inside the band.
+_FURNITURE_BAND_FRAC = 0.20
 
 # Height thresholds for confidence tiers (in points; 1 pt ~ 1/72 inch)
 _HIGH_CONFIDENCE_HEIGHT = 80  # ~7 lines at 11pt
@@ -228,6 +239,37 @@ def _extract_page_text(page: pymupdf.Page) -> str:
     Running-furniture stripping lives in ``scan_pages``, not here.
     """
     return "\n".join(b[_BLOCK_TEXT] for b in _ordered_blocks(page))
+
+
+def _is_banded(block: tuple[Any, ...], page_height: float) -> bool:
+    """Whether a block lies wholly inside the top or bottom edge band."""
+    if page_height <= 0:
+        return False
+    top_limit = page_height * _FURNITURE_BAND_FRAC
+    bottom_limit = page_height * (1.0 - _FURNITURE_BAND_FRAC)
+    return block[_BLOCK_Y1] <= top_limit or block[_BLOCK_Y0] >= bottom_limit
+
+
+def _extract_page_blocks(page: pymupdf.Page) -> list[tuple[str, bool]]:
+    """Reading-ordered ``(text, banded)`` pairs for one page.
+
+    Joining the texts reproduces ``_extract_page_text`` exactly; the flag is
+    the geometry ``scan_pages`` needs and a joined string cannot carry.
+    """
+    page_height = page.rect.height
+    return [(b[_BLOCK_TEXT], _is_banded(b, page_height)) for b in _ordered_blocks(page)]
+
+
+def _furniture_enabled_by_env() -> bool:
+    """Whether DATASHEETINDEX_FURNITURE permits header/footer stripping.
+
+    Accepts the spellings a user actually reaches for, for the reason
+    ``structure._parallel_enabled_by_env`` records: matching only the literal
+    "0" would silently ignore ``DATASHEETINDEX_FURNITURE=false``, leaving the
+    escape hatch looking broken to the person who most needs it.
+    """
+    value = os.environ.get("DATASHEETINDEX_FURNITURE", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
 
 
 @dataclass(frozen=True)
