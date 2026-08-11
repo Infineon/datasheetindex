@@ -9,8 +9,9 @@ furniture when the same normalized text recurs, in a page-edge band, on a
 large share of the document's pages. ``core/textfile.py`` owns the geometry
 half of that decision; this module owns the text and counting half.
 
-See ``docs/superpowers/specs/2026-08-11-header-footer-detection-design.md``
-for the measurements behind every constant here.
+See "Running header/footer stripping" under Deliverable 2 in
+``docs/datasheetindex_architecture.md`` for the measurements behind every
+constant here, the known limits, and the alternatives that were rejected.
 """
 
 from __future__ import annotations
@@ -43,10 +44,12 @@ _WHITESPACE_RE = re.compile(r"\s+")
 _DIGIT_RUN_RE = re.compile(r"\d+")
 
 #: A block opening with a caption keyword is content, even when it recurs.
-#: Load-bearing rather than defensive: ``figures.caption_entries`` reads the
-#: stripped text, so without this a caption near a page edge could vanish from
-#: the figure index, and ``Table N (continued)`` captions are what
-#: ``TocNode.continued_tables`` is built from.
+#: Insurance rather than the active mechanism: block granularity already keeps
+#: ``Table N (continued)`` captions out of the page-edge band, and ablating this
+#: rule changes nothing on either bundled PDF. It earns its place anyway because
+#: ``figures.caption_entries`` reads the stripped text, so a caption that did
+#: land in the band would vanish from the figure index, and those captions are
+#: what ``TocNode.continued_tables`` is built from.
 _CAPTION_PREFIX_RE = re.compile(r"(?i)^(figure\b|fig\.|table\b|chart\b)")
 
 

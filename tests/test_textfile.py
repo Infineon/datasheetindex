@@ -559,7 +559,7 @@ def test_extract_page_blocks_preserves_reading_order(tmp_path):
         doc.close()
 
 
-def testfurniture_enabled_by_env_accepts_the_spellings_people_reach_for(
+def test_furniture_enabled_by_env_accepts_the_spellings_people_reach_for(
     monkeypatch,
 ):
     """Mirrors _parallel_enabled_by_env: matching only "0" would silently
