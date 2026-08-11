@@ -406,9 +406,15 @@ def test_scan_pages_orders_figures_by_page():
 def test_ordered_blocks_joined_equals_extract_page_text(tmp_path):
     """_extract_page_text must stay a plain join over _ordered_blocks.
 
-    Characterization test for the Task 2 refactor: it pins the existing
-    output so the extraction of _ordered_blocks cannot alter reading order,
-    column handling, or the empty-page case.
+    Characterization test for the Task 2 refactor: it pins the join
+    equivalence and the empty-page path -- both sides call _ordered_blocks
+    and index the same field, so this holds for any list _ordered_blocks
+    returns and does not pin reading order or column partitioning by
+    itself. It still has real value: it fails if stripping or filtering
+    is later added to _extract_page_text, which core/preamble.py depends
+    on staying unstripped. See
+    test_ordered_blocks_pins_column_partitioning_order below for a test
+    that pins reading order with a concrete expected value.
     """
     import pymupdf
 
@@ -433,3 +439,62 @@ def test_ordered_blocks_joined_equals_extract_page_text(tmp_path):
             assert joined == _extract_page_text(page)
     finally:
         doc.close()
+
+
+def test_ordered_blocks_pins_column_partitioning_order():
+    """A concrete expected order that breaks if column partitioning changes.
+
+    Builds a two-column page with three stacked blocks per column. Each
+    right-column block starts 20pt higher on the page than its same-row
+    left-column counterpart, so a naive top-to-bottom sort across all six
+    blocks would interleave them (R0, L0, R1, L1, R2, L2). The correct
+    column-aware order groups the whole left column before the whole right
+    column. Unlike test_ordered_blocks_joined_equals_extract_page_text
+    above, this asserts a literal expected sequence, so it fails if the
+    above/left/right/below partitioning in _ordered_blocks is broken (for
+    example if left_col and right_col were swapped).
+    """
+    from datasheetindex.core.textfile import (
+        _BLOCK_TYPE,
+        _detect_columns,
+        _ordered_blocks,
+    )
+
+    doc = pymupdf.open()
+    page = doc.new_page(width=612, height=792)
+
+    def place(x, y_top, name):
+        page.insert_text((x, y_top + 24), name + " alpha bravo charlie", fontsize=20)
+        page.insert_text((x, y_top + 52), name + " delta echo foxtrot", fontsize=20)
+        page.insert_text((x, y_top + 80), name + " golf hotel india", fontsize=20)
+
+    left_x, right_x = 50, 320
+    left_tops = [100, 250, 400]
+    right_tops = [80, 230, 380]  # each 20pt higher than its left counterpart
+
+    for i, top in enumerate(left_tops):
+        place(left_x, top, f"L{i}")
+    for i, top in enumerate(right_tops):
+        place(right_x, top, f"R{i}")
+
+    # Column detection must actually fire here, or the rest of this test
+    # would degenerate into asserting plain top-to-bottom order and prove
+    # nothing about partitioning. Column widths (~197-200pt of a 612pt
+    # page), the ~73pt gutter, and the ~83.5pt block height are chosen to
+    # satisfy _detect_columns' width, gutter, and high-confidence height
+    # thresholds.
+    raw_blocks = page.get_text("blocks")
+    text_blocks = [b for b in raw_blocks if b[_BLOCK_TYPE] == 0]
+    assert _detect_columns(text_blocks, page.rect.width) is not None
+
+    ordered_texts = [b[4] for b in _ordered_blocks(page)]
+    doc.close()
+
+    assert ordered_texts == [
+        "L0 alpha bravo charlie\nL0 delta echo foxtrot\nL0 golf hotel india\n",
+        "L1 alpha bravo charlie\nL1 delta echo foxtrot\nL1 golf hotel india\n",
+        "L2 alpha bravo charlie\nL2 delta echo foxtrot\nL2 golf hotel india\n",
+        "R0 alpha bravo charlie\nR0 delta echo foxtrot\nR0 golf hotel india\n",
+        "R1 alpha bravo charlie\nR1 delta echo foxtrot\nR1 golf hotel india\n",
+        "R2 alpha bravo charlie\nR2 delta echo foxtrot\nR2 golf hotel india\n",
+    ]
