@@ -7,6 +7,7 @@ page.layout_information.
 """
 
 import asyncio
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -25,12 +26,72 @@ pytestmark = pytest.mark.layout
 HELPER = Path(__file__).parent / "_fresh_layout_process.py"
 PAGES = 6
 
+# Running header/footer strings for _write_running_header_pdf. Kept distinct
+# from every body string so a match in the extracted markdown is unambiguous.
+RUNNING_HEADER = "ACME AWC-3200 Motor Controller"
+RUNNING_FOOTER = "Datasheet | www.example.invalid"
+RUNNING_REVISION = "AWC-3200 Rev. B | 2026-01-15"
+BODY_SENTENCE = "The device operates over the full industrial temperature range."
+
 
 @pytest.fixture
 def mixed_pdf(tmp_path: Path) -> Path:
     pdf = tmp_path / "mixed.pdf"
     _write_mixed_table_pdf(pdf, pages=PAGES)
     return pdf
+
+
+def _write_running_header_pdf(path: Path, pages: int) -> None:
+    """A document whose every page carries a running header and footer.
+
+    `_write_mixed_table_pdf` has neither, so it cannot show whether the
+    layout engine's page-header/page-footer classes are being honoured.
+    Verified against the real ONNX model before this test was written: it
+    labels the header and both footer lines on every page of this fixture,
+    so the assertions below rest on a measured behaviour rather than an
+    assumption about how the model generalizes to synthetic input.
+    """
+    doc = pymupdf.open()
+    for p in range(pages):
+        page = doc.new_page()
+        page.insert_text((50, 40), RUNNING_HEADER, fontsize=9)
+        for row in range(5):
+            for col in range(3):
+                rect = pymupdf.Rect(
+                    50 + col * 90,
+                    120 + row * 25,
+                    50 + (col + 1) * 90,
+                    120 + (row + 1) * 25,
+                )
+                page.draw_rect(rect, color=(0, 0, 0), width=0.7)
+                page.insert_text(
+                    (rect.x0 + 3, rect.y0 + 15), f"c{p}{row}{col}", fontsize=7
+                )
+        page.insert_text((50, 300), BODY_SENTENCE, fontsize=9)
+        page.insert_text((50, 760), RUNNING_FOOTER, fontsize=8)
+        page.insert_text((500, 760), str(p + 1), fontsize=8)
+        page.insert_text((50, 772), RUNNING_REVISION, fontsize=8)
+    doc.set_toc([[1, f"Section {i + 1}", i + 1] for i in range(pages)])
+    doc.save(str(path))
+    doc.close()
+
+
+@pytest.fixture
+def running_header_pdf(tmp_path: Path) -> Path:
+    pdf = tmp_path / "running-header.pdf"
+    _write_running_header_pdf(pdf, pages=PAGES)
+    return pdf
+
+
+def _strip_markdown_emphasis(text: str) -> str:
+    """Drop the formatting the markdown generator injects mid-word.
+
+    The header renders as ``**ACME**<sup>...</sup> **AWC-3200**``, so a
+    literal substring test for the header string passes on the unfixed code
+    and proves nothing. Measured: that false pass is exactly what a first
+    pass at this test did.
+    """
+    return re.sub(r"[*_`]|<[^>]+>", "", text)
 
 
 def _classic_counts(pdf: Path) -> dict[int, int]:
@@ -109,3 +170,45 @@ def test_fresh_process_build_then_extract_table_markdown(mixed_pdf, tmp_path):
     )
     assert proc.returncode == 0, f"stdout={proc.stdout}\nstderr={proc.stderr}"
     assert "OK" in proc.stdout
+
+
+def test_extract_table_markdown_drops_the_running_header_and_footer(
+    running_header_pdf, tmp_path
+):
+    """The page furniture must not reach the agent.
+
+    `extract_table_markdown` already pays for a full layout pass, and that
+    pass classifies page-header/page-footer blocks. Passing the two flags
+    spends nothing extra and keeps the running header, the footer and the
+    page number out of every extracted table. Measured on the PSoC 6
+    datasheet: ~86 characters of pure furniture per page.
+
+    The body assertions are what stop the fix from being "return less".
+    """
+    session = create_datasheet_tool_session()
+    defs = {d.name: d for d in session.defs}
+    try:
+        build = asyncio.run(
+            defs["build_datasheet"].handler(
+                {
+                    "pdf_source": str(running_header_pdf),
+                    "output_dir": str(tmp_path / "out"),
+                }
+            )
+        )
+        assert build["is_error"] is False, build
+        result = asyncio.run(defs["extract_table_markdown"].handler({"page": 2}))
+    finally:
+        session.close()
+
+    assert result["is_error"] is False, result
+    flat = _strip_markdown_emphasis(result["content"][0]["text"])
+
+    assert RUNNING_HEADER not in flat, f"running header survived:\n{flat}"
+    assert RUNNING_FOOTER not in flat, f"running footer survived:\n{flat}"
+    assert RUNNING_REVISION not in flat, f"revision footer survived:\n{flat}"
+
+    # The table and the body text must still be there.
+    assert "|" in flat, f"table markup lost:\n{flat}"
+    assert "c110" in flat, f"table cell text lost:\n{flat}"
+    assert BODY_SENTENCE in flat, f"body sentence lost:\n{flat}"

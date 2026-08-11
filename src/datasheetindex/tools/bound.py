@@ -386,13 +386,26 @@ class DatasheetTools:
         the import outside it would let a concurrent ``classic_tables()``
         restore a stale ``None`` over the freshly installed hook, after which
         every call here raises ``TypeError``.
+
+        ``header=False, footer=False`` drop the running page furniture. The
+        layout pass classifies ``page-header`` / ``page-footer`` blocks and we
+        are already paying for it, so suppressing them costs nothing and keeps
+        the running header, the footer and the bare page number out of every
+        extracted table -- roughly 86 characters per page on the PSoC 6
+        datasheet, and noise the agent would otherwise have to read past. Both
+        flags reach ``pymupdf4llm._layout_to_markdown``, which exists only on
+        the layout path; that is the only path this method takes.
         """
         total = len(self.doc)
         if page < 1 or page > total:
             raise ValueError(f"page must be between 1 and {total}")
         with layout_engine() as pymupdf4llm:
             return pymupdf4llm.to_markdown(
-                self.doc, pages=[page - 1], show_progress=False
+                self.doc,
+                pages=[page - 1],
+                show_progress=False,
+                header=False,
+                footer=False,
             )
 
     def build_datasheet(
