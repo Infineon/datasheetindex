@@ -26,6 +26,7 @@ pytestmark = pytest.mark.layout
 
 HELPER = Path(__file__).parent / "_fresh_layout_process.py"
 PAGES = 6
+_BLOCK_TEXT_INDEX = 4
 
 # Running header/footer strings for _write_running_header_pdf. Kept distinct
 # from every body string so a match in the extracted markdown is unambiguous.
@@ -241,3 +242,139 @@ def test_extract_table_markdown_drops_the_running_header_and_footer(
     assert "|" in flat, f"table markup lost:\n{flat}"
     assert "c110" in flat, f"table cell text lost:\n{flat}"
     assert BODY_SENTENCE in flat, f"body sentence lost:\n{flat}"
+
+
+# Labels the model is confirmed to emit for real content, as opposed to
+# page-header/page-footer. Any label NOT in _HEADER_FOOTER_LABELS is treated
+# as content for the overlap check below -- including one that shows up here
+# for the first time -- so an unrecognised label fails safe (it blocks
+# agreement) rather than silently counting as a match.
+_HEADER_FOOTER_LABELS = frozenset({"page-header", "page-footer"})
+_KNOWN_CONTENT_LABELS = frozenset(
+    {"text", "table", "caption", "section-header", "title", "list-item", "picture"}
+)
+
+# Page 1 (index 0), the cover-page product title. Its bbox has zero overlap
+# with any header/footer region because on that page it functions as the
+# title, not a repeating page header -- yet it is correctly dropped because
+# the identical string runs as the header on the other 133 pages. It stays
+# reachable via the unstripped preamble and via search_text. Named here so
+# it counts as agreement only through this specific, explained exception --
+# any OTHER kind of disagreement still fails the test.
+_COVER_PAGE_TITLE_TEXT = "PSOC" + "\u2122" + " 62 MCU"
+
+
+def _bbox_overlaps(a: tuple[float, float, float, float], b: tuple[float, ...]) -> bool:
+    """Whether two (x0, y0, x1, y1) boxes share any positive-area overlap."""
+    ix0 = max(a[0], b[0])
+    iy0 = max(a[1], b[1])
+    ix1 = min(a[2], b[2])
+    iy1 = min(a[3], b[3])
+    return ix1 > ix0 and iy1 > iy0
+
+
+def test_dropped_blocks_agree_with_the_layout_model():
+    """Precision against an independent oracle.
+
+    The ML layout model classifies page-header/page-footer directly. It is
+    too slow and too optional to ship in the text path (~0.95s/page against
+    an ~8s build, behind a 49MB extra), but it is an excellent cross-check:
+    a block we delete should be one the model also calls furniture.
+
+    Matching is by bbox overlap, not centroid-in-a-single-region: PyMuPDF
+    merges a page's footer (left "Datasheet" / center page number / right
+    revision-and-date) into one wide block, while the model emits three or
+    four small footer boxes side by side. The merged block's centroid lands
+    in the gap between those boxes even though all of them agree the area is
+    footer, so a centroid test (and a naive area-overlap-fraction test --
+    those small boxes cover only ~13% of the merged block's area) both
+    misclassify every footer as a disagreement. A dropped block agrees when
+    it overlaps at least one header/footer region and no content region,
+    which is the question this test actually exists to answer: did we
+    delete only furniture.
+
+    Precision is asserted; recall is only reported. We knowingly detect less
+    than the model does -- we skip fuzzy matching and it does not -- so a
+    recall assertion would fail for a designed reason.
+    """
+    import pymupdf
+
+    from datasheetindex.core.furniture import (
+        detect_furniture,
+        is_candidate,
+        normalize_key,
+    )
+    from datasheetindex.core.textfile import (
+        _extract_page_blocks,
+        _is_banded,
+        _ordered_blocks,
+    )
+
+    pdf = Path(__file__).resolve().parent.parent / (
+        "infineon-psoc-6-mcu-cy8c62x8-cy8c62xa-datasheet-datasheet-en.pdf"
+    )
+    if not pdf.exists():
+        pytest.skip("bundled PSoC datasheet not present")
+
+    from pymupdf.layout.DocumentLayoutAnalyzer import get_model  # ty: ignore
+
+    model = get_model()
+    doc = pymupdf.open(str(pdf))
+    try:
+        # Sample every 6th page: the ONNX pass costs ~0.95s/page.
+        sampled = list(range(0, len(doc), 6))
+        page_keys = []
+        for i in range(len(doc)):
+            blocks = _extract_page_blocks(doc[i])
+            page_keys.append(
+                {normalize_key(t) for t, banded in blocks if banded and is_candidate(t)}
+            )
+        furniture = detect_furniture(page_keys, len(doc))
+        assert furniture, "no furniture detected on a document that has it"
+
+        agreed = 0
+        total = 0
+        disagreements = []
+        for pno in sampled:
+            page = doc[pno]
+            height = page.rect.height
+            regions = model.predict(page)
+            for b in _ordered_blocks(page):
+                text = b[_BLOCK_TEXT_INDEX]
+                if not (
+                    _is_banded(b, height)
+                    and is_candidate(text)
+                    and normalize_key(text) in furniture
+                ):
+                    continue
+                total += 1
+                bbox = (b[0], b[1], b[2], b[3])
+                overlaps_header_footer = any(
+                    _bbox_overlaps(bbox, r[:4])
+                    for r in regions
+                    if r[4] in _HEADER_FOOTER_LABELS
+                )
+                overlaps_content = any(
+                    _bbox_overlaps(bbox, r[:4])
+                    for r in regions
+                    if r[4] not in _HEADER_FOOTER_LABELS
+                )
+                agree = overlaps_header_footer and not overlaps_content
+                if not agree and pno == 0 and text.strip() == _COVER_PAGE_TITLE_TEXT:
+                    agree = True
+                if agree:
+                    agreed += 1
+                else:
+                    disagreements.append((pno + 1, text.strip(), bbox))
+    finally:
+        doc.close()
+
+    assert total > 0, "sampled no dropped blocks; the sample is not exercising it"
+    precision = agreed / total
+    print(f"oracle precision: {agreed}/{total} = {precision:.3f}")
+    assert precision >= 0.95, (
+        f"only {agreed}/{total} dropped blocks agree with the layout model "
+        f"(overlap a page-header/page-footer region and no content region). "
+        f"Below 0.95 this is a detector defect -- fix the detector rather "
+        f"than lowering the bar. Disagreements: {disagreements}"
+    )

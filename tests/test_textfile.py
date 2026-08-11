@@ -858,3 +858,58 @@ def test_is_banded_requires_the_whole_block_inside_the_band(tmp_path):
     assert _is_banded(bottom_inside, page_height) is True
     assert _is_banded(top_straddle, page_height) is False
     assert _is_banded(bottom_straddle, page_height) is False
+
+
+@pytest.mark.real_pdf
+def test_psoc_furniture_is_gone_and_search_is_cleaner():
+    """The user-facing goal, on the bundled 134-page datasheet.
+
+    The numbers are measured, not round targets. An earlier draft of the
+    spec asserted search_text("PSOC") would fall "to under 20"; it falls to
+    76, because PSOC legitimately appears throughout the body of a PSoC
+    datasheet. If one of these disagrees, find out which number is wrong
+    before weakening the assertion.
+    """
+    import pymupdf
+
+    from datasheetindex.core.textfile import scan_pages, search_text
+
+    pdf = Path(__file__).resolve().parent.parent / (
+        "infineon-psoc-6-mcu-cy8c62x8-cy8c62xa-datasheet-datasheet-en.pdf"
+    )
+    if not pdf.exists():
+        pytest.skip("bundled PSoC datasheet not present")
+
+    doc = pymupdf.open(str(pdf))
+    try:
+        text = scan_pages(doc).text
+    finally:
+        doc.close()
+
+    # The running header, and the 4-line footer block a line-count rule
+    # would have kept. The header carries a trademark sign; it is spelled
+    # with an escape so this file stays ASCII, per the repo's style rule.
+    #
+    # These are bounded counts, not "not in text": the raw document has the
+    # header on 133+ pages and the footer key on 132 pages, but a handful of
+    # occurrences survive stripping for legitimate reasons unrelated to the
+    # recurring furniture, so a blanket absence check is the wrong shape.
+    running_header = "PSOC" + "\u2122" + " 62 MCU"
+    # Measured: exactly 2 survivors, both genuine body prose -- "...design
+    # and debug of the PSOC(tm) 62 MCU and the Murata 1LV Module..." and a
+    # page-10 section-context line -- down from 133+ before stripping.
+    assert text.count(running_header) <= 5
+    # Measured: exactly 1 survivor, on page 1, whose footer block merges the
+    # disclaimer sentence ("Please read the sections...") into a unique
+    # 142-char block that can never reach the recurrence threshold. That is
+    # the design failing safe, not a miss.
+    assert text.count("002-23185 Rev. *S") <= 2
+
+    # Body content survives.
+    assert "Electrical specifications" in text
+
+    # Search precision: the measured improvement.
+    assert len(search_text(text, "Datasheet", max_results=500)) <= 10
+    assert len(search_text(text, "002-23185", max_results=500)) <= 3
+    # No longer saturates the agent-visible default cap of 200.
+    assert len(search_text(text, "PSOC", max_results=200)) < 200
