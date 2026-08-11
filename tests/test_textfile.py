@@ -401,3 +401,35 @@ def test_scan_pages_orders_figures_by_page():
     doc.close()
 
     assert pages == sorted(pages)
+
+
+def test_ordered_blocks_joined_equals_extract_page_text(tmp_path):
+    """_extract_page_text must stay a plain join over _ordered_blocks.
+
+    Characterization test for the Task 2 refactor: it pins the existing
+    output so the extraction of _ordered_blocks cannot alter reading order,
+    column handling, or the empty-page case.
+    """
+    import pymupdf
+
+    from datasheetindex.core.textfile import _extract_page_text, _ordered_blocks
+
+    pdf = tmp_path / "two-column.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page()
+    # Two columns plus a full-width heading above them.
+    page.insert_text((50, 60), "Wide heading across the page", fontsize=11)
+    for row in range(6):
+        page.insert_text((50, 120 + row * 14), f"left line {row}", fontsize=9)
+        page.insert_text((320, 120 + row * 14), f"right line {row}", fontsize=9)
+    doc.new_page()  # deliberately empty: the no-blocks path
+    doc.save(str(pdf))
+    doc.close()
+
+    doc = pymupdf.open(str(pdf))
+    try:
+        for page in doc:
+            joined = "\n".join(b[4] for b in _ordered_blocks(page))
+            assert joined == _extract_page_text(page)
+    finally:
+        doc.close()

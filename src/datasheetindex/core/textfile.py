@@ -159,19 +159,24 @@ def _detect_columns(
     return (avg_gutter, col_top, col_bottom)
 
 
-def _extract_page_text(page: pymupdf.Page) -> str:
-    """Extract text from a page with column-aware reading order.
+def _ordered_blocks(page: pymupdf.Page) -> list[tuple[Any, ...]]:
+    """Page text blocks in reading order.
 
     Uses ``page.get_text("blocks")`` to detect two-column layouts and
     reorder blocks so the left column is read before the right column.
     Falls back to standard top-to-bottom, left-to-right ordering when
     no column structure is detected.
+
+    Split out of ``_extract_page_text`` so ``scan_pages`` can reach the
+    block geometry -- specifically each block's vertical position -- which a
+    joined string has already discarded. Reading order is decided here and
+    nowhere else.
     """
     raw_blocks = page.get_text("blocks")
     text_blocks = [b for b in raw_blocks if b[_BLOCK_TYPE] == 0]
 
     if not text_blocks:
-        return ""
+        return []
 
     page_width = page.rect.width
     result = _detect_columns(text_blocks, page_width)
@@ -179,7 +184,7 @@ def _extract_page_text(page: pymupdf.Page) -> str:
     if result is None:
         # No columns detected -- standard reading order
         text_blocks.sort(key=lambda b: (b[_BLOCK_Y0], b[_BLOCK_X0]))
-        return "\n".join(b[_BLOCK_TEXT] for b in text_blocks)
+        return text_blocks
 
     gutter_x, col_top, col_bottom = result
     wide_threshold = page_width * _WIDE_BLOCK_FRAC
@@ -207,13 +212,22 @@ def _extract_page_text(page: pymupdf.Page) -> str:
         else:
             right_col.append(b)
 
-    ordered = (
+    return (
         sorted(above, key=lambda b: (b[_BLOCK_Y0], b[_BLOCK_X0]))
         + sorted(left_col, key=lambda b: b[_BLOCK_Y0])
         + sorted(right_col, key=lambda b: b[_BLOCK_Y0])
         + sorted(below, key=lambda b: (b[_BLOCK_Y0], b[_BLOCK_X0]))
     )
-    return "\n".join(b[_BLOCK_TEXT] for b in ordered)
+
+
+def _extract_page_text(page: pymupdf.Page) -> str:
+    """Extract text from a page with column-aware reading order.
+
+    Unstripped: this is what ``core/preamble.py`` reads for the page-marked
+    front matter, whose documented contract is raw text with zero heuristics.
+    Running-furniture stripping lives in ``scan_pages``, not here.
+    """
+    return "\n".join(b[_BLOCK_TEXT] for b in _ordered_blocks(page))
 
 
 @dataclass(frozen=True)
