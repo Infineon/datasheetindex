@@ -93,3 +93,24 @@ def layout_engine() -> Iterator[Any]:
         ):
             module.use_layout(True)
         yield module
+
+
+def layout_active(module: Any) -> bool:
+    """Whether ``module.to_markdown`` will take pymupdf4llm's layout branch.
+
+    ``layout_engine()`` yielding successfully does **not** imply the layout
+    path. ``to_markdown`` dispatches on the module global ``_use_layout`` at
+    *call* time, and that global is ``False`` whenever pymupdf4llm's own
+    ``import pymupdf.layout`` failed -- a broken or unimportable
+    ``onnxruntime`` is enough, and the package still imports fine. In that
+    state ``to_markdown`` silently routes to the classic renderer in
+    ``helpers/pymupdf_rag.py``, which accepts ``**kwargs`` and ``print()``s
+    "Warning - arguments ignored in legacy mode: ..." to **stdout** for any it
+    does not know -- the channel the MCP stdio transport carries JSON-RPC on.
+    So callers must ask before passing a layout-only keyword.
+
+    Upstream draws the same line: ``to_markdown``'s ``table_output="html"``
+    branch pops ``header`` and ``footer`` out of the kwargs before it calls
+    the classic function.
+    """
+    return bool(getattr(module, "_use_layout", False))

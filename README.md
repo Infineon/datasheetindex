@@ -230,6 +230,7 @@ tools for the bound PDF source:
   and `inspect_page` (see "Figure indexing and captions")
 - `inspect_page` - render a page image when visual confirmation is needed
 - `extract_table_markdown` - re-extract a page as layout-aware Markdown tables
+  (the page's running header and footer are omitted; `get_section_text` keeps them)
 
 Build once, then use `get_section_text`, `search_text`, `inspect_page`, and
 `extract_table_markdown` together. `search_text` prefers exact matches, then

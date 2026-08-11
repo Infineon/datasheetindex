@@ -7,6 +7,7 @@ page.layout_information.
 """
 
 import asyncio
+import inspect
 import re
 import subprocess
 import sys
@@ -84,14 +85,22 @@ def running_header_pdf(tmp_path: Path) -> Path:
 
 
 def _strip_markdown_emphasis(text: str) -> str:
-    """Drop the formatting the markdown generator injects mid-word.
+    """Drop the formatting the markdown generator injects mid-word, and
+    collapse whitespace.
 
-    The header renders as ``**ACME**<sup>...</sup> **AWC-3200**``, so a
-    literal substring test for the header string passes on the unfixed code
-    and proves nothing. Measured: that false pass is exactly what a first
-    pass at this test did.
+    The generator emphasises the header, so on this fixture it comes back as
+    ``**ACME AWC-3200 Motor Controller**``; on the real PSoC 6 datasheet the
+    same line arrives as ``**PSOC**<sup>**™**</sup> **62 MCU**``, split
+    mid-string. Either way a literal substring test for the header passes on
+    the *unfixed* code and proves nothing -- that false pass is exactly what
+    the first version of this test did. Collapsing whitespace closes the same
+    hole for a header the generator happens to wrap.
+
+    Only the negative assertions gain sensitivity from this: none of the
+    positive targets contain ``*``, ``_``, a backtick or angle brackets, so
+    stripping cannot mask a genuine content loss.
     """
-    return re.sub(r"[*_`]|<[^>]+>", "", text)
+    return re.sub(r"\s+", " ", re.sub(r"[*_`]|<[^>]+>", "", text))
 
 
 def _classic_counts(pdf: Path) -> dict[int, int]:
@@ -184,7 +193,27 @@ def test_extract_table_markdown_drops_the_running_header_and_footer(
     datasheet: ~86 characters of pure furniture per page.
 
     The body assertions are what stop the fix from being "return less".
+    Captions are not asserted here because they are safe by construction
+    rather than by luck: `caption` is its own layout class, and
+    `pymupdf4llm.helpers.document_layout` skips exactly the `page-header`
+    and `page-footer` classes. A `Table N (continued)` caption -- which
+    `TocNode.continued_tables` depends on -- is therefore never a candidate.
+    Confirmed live on PSoC page 101, where `Table 43 (continued)` survives.
+
+    The signature assertion is the tripwire: both `_layout_to_markdown` and
+    the classic renderer swallow unknown keywords into `**kwargs`, so an
+    upstream rename would silently restore the furniture. Asserting the
+    parameters exist names that cause instead of leaving a maintainer to
+    debug headers that came back.
     """
+    import pymupdf4llm  # ty: ignore[unresolved-import]
+
+    params = inspect.signature(pymupdf4llm._layout_to_markdown).parameters
+    assert {"header", "footer"} <= set(params), (
+        "pymupdf4llm._layout_to_markdown no longer takes header=/footer=; "
+        f"the furniture suppression is silently inert. Parameters: {sorted(params)}"
+    )
+
     session = create_datasheet_tool_session()
     defs = {d.name: d for d in session.defs}
     try:

@@ -3,10 +3,12 @@
 import sys
 import types
 from pathlib import Path
+from typing import Any
 
 import pymupdf
 import pytest
 
+from datasheetindex.core import engine
 from datasheetindex.tools.registry import (
     DatasheetTools,
     create_datasheet_tools_server,
@@ -808,3 +810,71 @@ def test_sdk_content_conversion_survives_every_tool(monkeypatch, tmp_path):
         envelope, content = call(name, args)
         assert isinstance(envelope["is_error"], bool)
         assert content and content[0]["type"] == "text"
+
+
+def _tools_on_a_one_page_pdf(tmp_path: Path) -> "DatasheetTools":
+    pdf_path = tmp_path / "kwargs.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page()
+    writer = pymupdf.TextWriter(page.rect)
+    writer.append((72, 72), "Layout kwarg gating")
+    writer.write_text(page)
+    doc.save(str(pdf_path))
+    doc.close()
+    return DatasheetTools(str(pdf_path))
+
+
+def _fake_pymupdf4llm(*, use_layout: bool, seen: dict) -> Any:
+    """A stand-in whose to_markdown records the keywords it was handed."""
+    module: Any = types.ModuleType("pymupdf4llm")
+    module._use_layout = use_layout
+    module.use_layout = lambda yes: None
+
+    def to_markdown(_doc, **kwargs):
+        seen.update(kwargs)
+        return "md"
+
+    module.to_markdown = to_markdown
+    return module
+
+
+@pytest.mark.parametrize(
+    ("use_layout", "expect_furniture"),
+    [(True, True), (False, False)],
+)
+def test_extract_table_markdown_passes_layout_kwargs_only_on_the_layout_branch(
+    tmp_path, monkeypatch, use_layout, expect_furniture
+):
+    """`header=`/`footer=` must not reach the classic renderer.
+
+    `pymupdf4llm.to_markdown` dispatches on the module global `_use_layout` at
+    call time, so importing the package successfully does not mean the layout
+    branch is taken: a pymupdf4llm whose own `import pymupdf.layout` failed
+    (an unimportable onnxruntime is enough) routes to
+    `helpers/pymupdf_rag.py`, which swallows unknown keywords into `**kwargs`
+    and `print()`s a notice naming them to *stdout* -- the channel the MCP
+    stdio transport carries JSON-RPC on. `mcp_server`'s existing
+    `_silence_pymupdf_stdout_notice` does not cover it; it silences PyMuPDF's
+    own advertisement, a different print in a different package.
+
+    Runs on the default lane, which is the point: tests/test_layout_integration.py
+    skips without the [layout] extra, i.e. in exactly the environment where the
+    classic branch is taken.
+    """
+    seen: dict = {}
+    module = _fake_pymupdf4llm(use_layout=use_layout, seen=seen)
+    monkeypatch.setattr(
+        engine, "importlib", types.SimpleNamespace(import_module=lambda name: module)
+    )
+    tools = _tools_on_a_one_page_pdf(tmp_path)
+    try:
+        assert tools.extract_table_markdown(1) == "md"
+    finally:
+        tools.close()
+
+    assert ("header" in seen) is expect_furniture, seen
+    assert ("footer" in seen) is expect_furniture, seen
+    if expect_furniture:
+        assert seen["header"] is False and seen["footer"] is False, seen
+    # The keywords the classic renderer does accept are passed either way.
+    assert seen["pages"] == [0] and seen["show_progress"] is False, seen

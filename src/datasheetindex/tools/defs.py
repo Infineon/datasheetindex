@@ -527,7 +527,8 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                 "formatting. Use when get_section_text shows a garbled or "
                 "misaligned table and you want clean pipe-delimited rows. Costs "
                 "fewer tokens than inspect_page (text, not vision) but takes "
-                "about 3s per page."
+                "about 3s per page. The page's running header and footer are "
+                "omitted; get_section_text still has them."
             ),
             input_schema={
                 "type": "object",

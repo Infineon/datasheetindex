@@ -33,7 +33,7 @@ from datasheetindex.core.artifact_cache import (
     sidecar_path,
     write_sidecar,
 )
-from datasheetindex.core.engine import layout_engine
+from datasheetindex.core.engine import layout_active, layout_engine
 from datasheetindex.core.locate import TextLocation
 from datasheetindex.core.locate import locate_text as locate_text_core
 from datasheetindex.core.structure import (
@@ -392,20 +392,28 @@ class DatasheetTools:
         are already paying for it, so suppressing them costs nothing and keeps
         the running header, the footer and the bare page number out of every
         extracted table -- roughly 86 characters per page on the PSoC 6
-        datasheet, and noise the agent would otherwise have to read past. Both
-        flags reach ``pymupdf4llm._layout_to_markdown``, which exists only on
-        the layout path; that is the only path this method takes.
+        datasheet, and noise the agent would otherwise have to read past.
+
+        The two flags are **layout-only**, and they are passed only when
+        ``layout_active()`` says the layout branch will actually be taken. An
+        importable pymupdf4llm whose own ``import pymupdf.layout`` failed
+        serves the classic renderer instead, which swallows unknown keywords
+        into ``**kwargs`` and ``print()``s a notice about them to stdout --
+        the MCP stdio transport's JSON-RPC channel. See ``layout_active``.
         """
         total = len(self.doc)
         if page < 1 or page > total:
             raise ValueError(f"page must be between 1 and {total}")
         with layout_engine() as pymupdf4llm:
+            # Empty on the classic branch: see the docstring.
+            furniture = (
+                {"header": False, "footer": False} if layout_active(pymupdf4llm) else {}
+            )
             return pymupdf4llm.to_markdown(
                 self.doc,
                 pages=[page - 1],
                 show_progress=False,
-                header=False,
-                footer=False,
+                **furniture,
             )
 
     def build_datasheet(
