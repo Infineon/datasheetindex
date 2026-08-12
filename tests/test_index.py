@@ -543,6 +543,63 @@ def test_accept_llm_toc_candidate_rejects_coverage_regression():
     assert "page coverage" in reason
 
 
+def test_explicit_request_accepts_a_candidate_that_does_not_beat_the_baseline():
+    """An enumerated outline scores well, so the score comparison would refuse
+    the very replacement escalation exists to obtain."""
+    ok, reason = _accept_llm_toc_candidate(
+        _quality(score=0.68, entry_count=10, page_coverage=1.0),
+        _quality(score=0.50, entry_count=10, page_coverage=1.0),
+        total_pages=20,
+        explicit_request=True,
+    )
+    assert ok is True, reason
+
+
+def test_without_an_explicit_request_the_score_comparison_still_applies():
+    ok, reason = _accept_llm_toc_candidate(
+        _quality(score=0.68, entry_count=10, page_coverage=1.0),
+        _quality(score=0.50, entry_count=10, page_coverage=1.0),
+        total_pages=20,
+    )
+    assert ok is False
+    assert "did not improve" in reason
+
+
+def test_explicit_request_still_rejects_an_empty_candidate():
+    ok, reason = _accept_llm_toc_candidate(
+        _quality(score=0.68, entry_count=10, page_coverage=1.0),
+        _quality(score=0.90, entry_count=0, page_coverage=1.0),
+        total_pages=20,
+        explicit_request=True,
+    )
+    assert ok is False
+    assert "no entries" in reason
+
+
+def test_explicit_request_still_rejects_a_coverage_regression():
+    ok, reason = _accept_llm_toc_candidate(
+        _quality(score=0.68, entry_count=10, page_coverage=0.9),
+        _quality(score=0.90, entry_count=10, page_coverage=0.5),
+        total_pages=20,
+        explicit_request=True,
+    )
+    assert ok is False
+    assert "coverage" in reason
+
+
+@pytest.mark.real_pdf
+def test_regenerate_toc_without_a_client_raises(
+    tmp_path, pdf_tle9350_path, monkeypatch
+):
+    """An explicit request that cannot be honoured must not look like success."""
+    monkeypatch.setattr(
+        DatasheetIndex, "_try_create_default_llm_client", lambda self: None
+    )
+    with DatasheetIndex(str(pdf_tle9350_path)) as index:
+        with pytest.raises(RuntimeError, match="regenerate_toc"):
+            index.build(output_dir=str(tmp_path), regenerate_toc=True)
+
+
 def test_build_auto_llm_fallback_graceful_without_credentials(monkeypatch, tmp_path):
     def fake_open(_path: str):
         return _FakeBuildDoc()
@@ -1441,7 +1498,10 @@ def test_a_rejected_fallback_candidate_is_complete(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "datasheetindex.index._accept_llm_toc_candidate",
-        lambda _baseline, _candidate, *, total_pages: (False, "declined for this test"),
+        lambda _baseline, _candidate, *, total_pages, explicit_request=False: (
+            False,
+            "declined for this test",
+        ),
     )
 
     idx = DatasheetIndex(str(pdf_path))

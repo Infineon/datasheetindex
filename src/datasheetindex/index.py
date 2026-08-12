@@ -92,13 +92,19 @@ def _accept_llm_toc_candidate(
     candidate: TocQuality,
     *,
     total_pages: int,
+    explicit_request: bool = False,
 ) -> tuple[bool, str]:
     """Decide whether an LLM-generated ToC is safe to replace the baseline."""
 
     if candidate.entry_count == 0:
         return False, "candidate has no entries"
 
-    if candidate.score <= baseline.score:
+    # An explicit caller request replaces the score comparison, and only that
+    # one. The score is exactly what escalation routes around: an enumerated
+    # outline scores 0.68, so requiring the candidate to beat it would let the
+    # broken number veto its own repair. The remaining guards protect against a
+    # degenerate *candidate*, which an explicit request says nothing about.
+    if not explicit_request and candidate.score <= baseline.score:
         return (
             False,
             "candidate score did not improve "
@@ -545,12 +551,21 @@ class DatasheetIndex:
         output_stem: str | None = None,
         caption_figures: bool = True,
         max_figure_captions: int = DEFAULT_MAX_FIGURE_CAPTIONS,
+        regenerate_toc: bool = False,
     ) -> DatasheetArtifacts:
         """Build the two deliverables: enriched ToC JSON and page-matched text.
 
         When ``llm_callable`` is provided, low-quality ToCs are regenerated
         via LLM and optional section summaries can be added. ``output_stem``
         optionally overrides the default stem derived from the source filename.
+
+        ``regenerate_toc`` (default ``False``) forces the LLM ToC fallback
+        regardless of the baseline's quality score, for a caller (or agent)
+        that has looked at the ToC and judged it unusable even though it
+        scored well. It requires an LLM client: one supplied via
+        ``llm_callable``, or one this method can construct for itself: if
+        neither is available, ``build`` raises ``RuntimeError`` rather than
+        silently returning the un-regenerated ToC.
 
         ``include_summaries`` needs a client whose provenance sanctions it (see
         ``_SUMMARY_CLIENT_ORIGINS``): one the caller supplied, or the one the
@@ -633,7 +648,9 @@ class DatasheetIndex:
         # hands in, which it owns and closes itself.
         effective_cap = max_figure_captions if caption_figures else 0
         has_caption_candidates = eligible_caption_count(scan.figures, effective_cap) > 0
-        needs_toc_fallback = toc_quality.score < TOC_FALLBACK_THRESHOLD
+        needs_toc_fallback = (
+            regenerate_toc or toc_quality.score < TOC_FALLBACK_THRESHOLD
+        )
         active_llm_callable = llm_callable
         owns_llm_callable = False
         # Where the client came from, which is a different question from
@@ -655,6 +672,13 @@ class DatasheetIndex:
                     "these artifacts will not be cached for reuse"
                 )
                 enrichment_notes.append("toc_fallback_no_client")
+
+            if active_llm_callable is None and regenerate_toc:
+                raise RuntimeError(
+                    "regenerate_toc=True requires an LLM client, but none could "
+                    "be created. Install the [llm] extra and configure "
+                    "LITELLM_BASE_URL and LITELLM_MASTER_KEY."
+                )
 
         try:
             # 5. LLM fallback: regenerate ToC if quality is poor
@@ -684,6 +708,7 @@ class DatasheetIndex:
                         toc_quality,
                         candidate_quality,
                         total_pages=total_pages,
+                        explicit_request=regenerate_toc,
                     )
                     if accept_candidate:
                         nodes = candidate_nodes
