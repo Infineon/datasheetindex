@@ -34,6 +34,11 @@ def assess_toc_quality(nodes: list[TocNode], total_pages: int) -> TocQuality:
     - Page coverage (30%): how much of the document is covered
     - Hierarchy depth (20%): multi-level structure is better
     - Title quality (20%): meaningful titles vs numeric/short ones
+
+    The weighted total is then multiplied by ``_informativeness`` -- the
+    fraction of entries distinguishable from one another -- which gates the
+    score rather than joining it as a fifth weighted factor. See the comment
+    above the multiplication for why.
     """
     if not nodes or total_pages == 0:
         return TocQuality(
@@ -96,9 +101,10 @@ def assess_toc_quality(nodes: list[TocNode], total_pages: int) -> TocQuality:
     # 'Page 1..20' scores 0.860 against a real 89-entry outline's 0.820. An
     # outline whose entries cannot be told apart cannot route a reader
     # anywhere, however completely it covers the pages, so this multiplies.
+    informativeness = _informativeness(flat)
     score = (
         0.3 * entry_score + 0.3 * coverage_score + 0.2 * depth_score + 0.2 * title_score
-    ) * _informativeness(flat)
+    ) * informativeness
     score = round(score, 3)
 
     recommend_summaries = score < 0.5 or entry_count > 40
@@ -108,6 +114,7 @@ def assess_toc_quality(nodes: list[TocNode], total_pages: int) -> TocQuality:
         f"coverage_score={coverage_score:.2f}",
         f"depth_score={depth_score:.2f}",
         f"title_score={title_score:.2f}",
+        f"informativeness={informativeness:.2f}",
     ]
 
     return TocQuality(

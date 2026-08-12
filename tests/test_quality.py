@@ -222,20 +222,25 @@ def test_same_named_subsections_under_different_parents_are_not_penalised():
         ),
     ]
     quality = assess_toc_quality(nodes, total_pages=10)
-    assert quality.score > 0.5
+    assert quality.score == 0.82
 
 
 def test_numbered_siblings_survive():
     """Digit masking collapses Port P1..P8, which are genuinely distinct
-    sections -- the ti_msp430f5529 shape. A minority of collisions must not
-    condemn a real outline.
+    sections -- the ti_msp430f5529 shape. Even a toy outline where this
+    collision is a *majority* must not be condemned.
 
-    The Ports subtree alone is 8 of its own 9 entries colliding -- a
-    majority, not the minority the docstring on ``_informativeness``
-    describes -- so it is embedded in a handful of other chapters here,
-    the way it sits inside a much larger real ToC. That dilution is what
-    the "minority" claim is actually about; the corpus check confirms it
-    (ti_msp430f5529 0.741 -> 0.670, nowhere near the 0.3 fallback line).
+    The Ports subtree alone is 8 of its own 9 entries colliding. Adding
+    three more chapters here does not dilute that into a minority -- it is
+    still 7 of 12 entries colliding (0.417 informativeness, score 0.392) --
+    so this only shows that a majority-collision outline can still clear
+    the 0.3 line, not that it is diluted away. The minority claim itself is
+    a real-document fact, not something this fixture demonstrates: on
+    ti_msp430f5529, measured directly, the score goes 0.820 -> 0.741,
+    nowhere near the 0.3 fallback line, because in the real document the
+    Ports subtree sits among far more distinguishable entries (worst
+    measured collision fraction across the corpus is 21%, not this
+    fixture's 58%).
     """
     other_chapters = [
         TocNode(title=title, level=1, start_page=p, end_page=p)
@@ -277,6 +282,7 @@ def test_nodes_without_a_breadcrumb_fall_back_to_the_title():
     assert quality.score > 0.5
 
 
+@pytest.mark.real_pdf
 def test_the_bundled_datasheet_is_unaffected():
     """The only assertion tying this heuristic to a real document. A change to
     normalize_key that reintroduces collisions must fail loudly here.
