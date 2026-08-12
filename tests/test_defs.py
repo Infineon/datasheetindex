@@ -852,9 +852,13 @@ def test_tool_descriptions_stay_within_a_budget():
     Raised from 1300 in 0.31.0 for the ``toc_source`` sentence: the manifest
     gained a field, and a field the description does not explain is one the
     agent has to guess at.
+
+    Raised from 1500 for the ``regenerate_toc`` nudge: the tool gained a
+    parameter that only helps if the description tells the agent when to
+    reach for it.
     """
     budgets = {
-        "build_datasheet": 1500,
+        "build_datasheet": 1800,
         "get_section_text": 800,
         "search_text": 700,
         "inspect_page": 400,

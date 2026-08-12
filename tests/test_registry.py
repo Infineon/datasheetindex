@@ -478,6 +478,24 @@ def test_datasheet_tools_locate_text_without_build(tmp_path):
     assert results[0]["match_method"] == "search_for"
 
 
+def test_build_datasheet_exposes_regenerate_toc():
+    """A parameter absent from input_schema is unreachable by an MCP agent, no
+    matter what the Python signature accepts."""
+    from datasheetindex.tools.defs import create_datasheet_tool_defs
+
+    spec = next(t for t in create_datasheet_tool_defs() if t.name == "build_datasheet")
+    props = spec.input_schema["properties"]
+    assert "regenerate_toc" in props
+    assert props["regenerate_toc"]["type"] == "boolean"
+
+
+def test_build_datasheet_description_tells_the_agent_when_to_regenerate():
+    from datasheetindex.tools.defs import create_datasheet_tool_defs
+
+    spec = next(t for t in create_datasheet_tool_defs() if t.name == "build_datasheet")
+    assert "regenerate_toc" in spec.description
+
+
 def test_datasheet_tools_reexported_for_backward_compat():
     """DatasheetTools now lives in tools.bound but must stay importable everywhere."""
     from datasheetindex import DatasheetTools as top_level

@@ -193,6 +193,7 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                     include_summaries=args.get("include_summaries", False),
                     model=args.get("model"),
                     force_rebuild=args.get("force_rebuild", False),
+                    regenerate_toc=args.get("regenerate_toc", False),
                     caption_figures=args.get("caption_figures", True),
                     max_figure_captions=args.get(
                         "max_figure_captions", DEFAULT_MAX_FIGURE_CAPTIONS
@@ -329,7 +330,12 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                 "PDF's own bookmarks -- pages exact), 'llm_reconstructed' "
                 "(rewritten from body text -- every start_page is inferred, "
                 "so confirm a section with search_text before reading its "
-                "range), or 'none'."
+                "range), or 'none'.\n\n"
+                "The returned 'toc' is the outline the PDF itself carries, and "
+                "it is occasionally useless -- entries like 'Page 1', 'Page 2' "
+                "that name no section. Read it before planning: if the entries "
+                "do not identify sections, call build_datasheet again with "
+                "regenerate_toc=true to rebuild the outline from the body text. "
             ),
             input_schema={
                 "type": "object",
@@ -375,6 +381,16 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                         "description": (
                             "Rebuild even when artifacts on disk already match "
                             "this source."
+                        ),
+                    },
+                    "regenerate_toc": {
+                        "type": "boolean",
+                        "description": (
+                            "Rewrite the table of contents from the body text "
+                            "with an LLM, even when the PDF's own outline "
+                            "scored well enough to be kept. Requires "
+                            "credentials; the call fails if none are "
+                            "configured."
                         ),
                     },
                     "caption_figures": {
