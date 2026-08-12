@@ -389,10 +389,16 @@ stay transient -- those are genuine failures worth retrying.
 
 #### Decisions already settled by measurement
 
-Every number here comes from one **26-document, 7-vendor corpus** (TI, Espressif,
-Bosch, Microchip, Raspberry Pi, Infineon, Vishay), 5 to 784 pages. **24 have a
-ToC and are scored**; 2 have none, already score 0.00 and already fall back. ST,
-NXP and Analog Devices blocked scripted download and are absent.
+Every number here comes from one **7-vendor corpus** (TI, Espressif, Bosch,
+Microchip, Raspberry Pi, Infineon, Vishay), 5 to 784 pages. **24 documents have a
+ToC and are scored**, and every scored figure below comes from those 24. ST, NXP
+and Analog Devices blocked scripted download and are absent.
+
+The unscored tail is smaller than first recorded. The original run reported 26
+documents of which 2 had no ToC; re-measured later, the corpus on disk holds 25
+of which **1** has none (`vishay_1n4001`). The scored set of 24 is identical
+either way, so every score below stands; only the count of bookmark-less
+documents changed, and it moved *down*.
 
 - **Repairing `title_score` is insufficient, and was measured before being
   rejected.** Its check rejects only *purely* numeric titles, so `"Page 1"` scores
@@ -434,8 +440,8 @@ NXP and Analog Devices blocked scripted download and are absent.
   is the whole mechanism. The corpus bounds the damage: on real documents
   collisions are always a *minority* (worst measured **21%**, on `raspi_pico`),
   whereas a degenerate outline collapses essentially every entry.
-- **Frequency, stated plainly: no degenerate outline appeared in any of the 26
-  documents.** The shape was observed on a real document earlier in development,
+- **Frequency, stated plainly: no degenerate outline appeared anywhere in the
+  corpus.** The shape was observed on a real document earlier in development,
   but among mainstream vendor datasheets it is rare. This is cheap insurance
   against a demonstrably wrong gate, not a fix for a common case, and it should
   not be described as one.
@@ -449,6 +455,63 @@ NXP and Analog Devices blocked scripted download and are absent.
   `score < 0.5 or entry_count > 40`, so every newly low-scoring document now
   recommends summaries too. Defensible -- a useless ToC is where summaries help --
   but it is an LLM cost that follows automatically from the score change.
+
+#### Why there is no non-LLM ToC fallback
+
+A deterministic fallback -- reconstructing an outline from the body text with no
+LLM call, for the credential-free default install -- was designed and rejected
+on measurement over the same corpus. The trigger population is empty in a way
+that no amount of implementation quality can fix.
+
+- **"Weak ToC" is not a real category; "no bookmarks at all" is.** Documents with
+  an outline scoring below the 0.3 threshold: **0 of 25**. Documents with no
+  native outline: **1 of 25**. The fallback has exactly one trigger and, in this
+  corpus, exactly one document.
+- **That document does not want a ToC.** `vishay_1n4001` is 5 pages and 9,757
+  characters, of which the automatic preamble already covers pages 1-2. Its whole
+  text file is roughly 2,500 tokens -- cheaper to read end to end than any outline
+  is to consult. A ToC is a routing device, and routing earns nothing when the
+  destination is five pages away.
+- **The most reliable technique can only fire where it is not needed.** Parsing
+  the document's own *printed* ToC (dot-leader rows) is the sturdiest non-LLM
+  route available. Measured: **19 of 25 documents carry printed-ToC rows, and all
+  19 already have bookmarks**; the one document without bookmarks has zero. That
+  is not luck -- bookmarks and the printed ToC are emitted by the same publishing
+  pipeline (Word, FrameMaker, LaTeX), so their presence is correlated by
+  construction. The leader-row detector is a lower bound and may have missed
+  ToCs in unusual layouts, which only strengthens the correlation; the
+  bookmark-less document's zero was confirmed by reading all five of its pages,
+  not inferred from the regex.
+- **Heading clustering by font size aims at the same 5-page datasheet.** At best
+  it recovers `FEATURES / MECHANICAL DATA / MAXIMUM RATINGS / ELECTRICAL
+  CHARACTERISTICS / ORDERING INFORMATION` -- five headings the agent already sees
+  in the preamble it gets for free.
+- **The cost argument that would have justified it does not fire either.** The
+  LLM fallback genuinely scales badly: 15,000-character chunks with a 1s
+  inter-chunk delay put `raspi_rp2040` (642p) at ~88 sequential calls and
+  `esp32_trm` (784p) at ~85. A deterministic path would be free and instant --
+  but only on a *large bookmark-less* document, and there is none: every document
+  over 30 pages in the corpus has bookmarks. On the one document that does
+  trigger, the LLM fallback is a single call.
+- **The gap it was meant to fill is already closed.** `_NO_TOC_HINT`
+  (`tools/bound.py`) fires whenever the returned ToC is empty and tells the agent
+  how to navigate without a section map, and `toc_fallback_pending` (above) stops
+  the credential-free build from rebuilding forever. What remained was a third
+  structural source (`toc_source: "heuristic"`), its own accept/reject gate
+  against the existing outline, and its own failure modes, for a population of
+  one.
+
+**What would reopen this, stated so it is falsifiable.** The corpus is public,
+mainstream vendors; the deployment is internal documents -- internal specs,
+application notes, customer documents and scanned legacy parts. If a meaningful
+share of those are long *and* bookmark-less, the arithmetic changes. That is
+cheap to find out: `extract_toc()` plus a page count over a directory of internal
+PDFs, no build required. Until that number exists, the fallback is speculation.
+
+One caveat if scanned documents turn out to be that population: a scan has no
+text layer, so **neither** fallback works -- the LLM one reads body text too. The
+answer there is OCR or an explicit no-text-layer signal in the manifest, which is
+a different gap from this one and is not currently emitted.
 
 ### Figure indexing
 
