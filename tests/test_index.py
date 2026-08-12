@@ -1419,8 +1419,14 @@ def test_a_failed_text_write_leaves_the_previous_generation_readable(
     assert not any(p.name.endswith(".tmp") for p in out.iterdir())
 
 
-def test_no_obtainable_client_marks_enrichment_incomplete(tmp_path, monkeypatch):
-    """An eligible fallback that never ran must not be cached as if complete."""
+def test_no_obtainable_client_marks_toc_fallback_pending(tmp_path, monkeypatch):
+    """No credentials is an environment fact, not a failed build.
+
+    A build eligible for the ToC fallback that finds no LLM client must not be
+    cached as incomplete -- rebuilding cannot create credentials, so that would
+    cost a full rebuild on every request forever. It is recorded separately as
+    ``toc_fallback_pending`` instead, mirroring ``figure_captions_pending``.
+    """
     pdf_path = _simple_pdf(tmp_path, name="weak.pdf", pages=3, with_toc=False)
     monkeypatch.setattr(
         DatasheetIndex, "_try_create_default_llm_client", lambda _self: None
@@ -1434,8 +1440,8 @@ def test_no_obtainable_client_marks_enrichment_incomplete(tmp_path, monkeypatch)
 
     assert artifacts.toc_quality is not None
     assert artifacts.toc_quality.score < TOC_FALLBACK_THRESHOLD
-    assert artifacts.llm_enrichment_incomplete is True
-    assert "toc_fallback_no_client" in artifacts.llm_enrichment_notes
+    assert artifacts.toc_fallback_pending is True
+    assert artifacts.llm_enrichment_incomplete is False
 
 
 def test_a_raising_fallback_marks_enrichment_incomplete(tmp_path, monkeypatch):

@@ -1620,3 +1620,90 @@ def test_the_probe_does_not_upgrade_an_empty_model_to_the_default(monkeypatch):
 
     assert _VisionResolver("").get() is None
     assert seen == [{"model": ""}]
+
+
+def test_a_missing_llm_client_no_longer_blocks_reuse():
+    """No credentials is a fact about the environment, not a failed build.
+    Rebuilding cannot create credentials, so refusing reuse costs a full
+    rebuild on every request and buys nothing."""
+    from importlib.metadata import version
+    from pathlib import Path
+
+    from datasheetindex.core.artifact_cache import (
+        ArtifactRecord,
+        reuse_blocker,
+        sha256_file,
+    )
+
+    src = Path("infineon-psoc-6-mcu-cy8c62x8-cy8c62xa-datasheet-datasheet-en.pdf")
+    v = version("datasheetindex")
+    record = ArtifactRecord(
+        source_sha256=sha256_file(src),
+        source_size=src.stat().st_size,
+        build_options={},
+        datasheetindex_version=v,
+        json_name="a.json",
+        json_sha256="x",
+        text_name="a.txt",
+        text_sha256="y",
+        toc_quality={},
+        toc_fallback_pending=True,
+    )
+    assert (
+        reuse_blocker(record, source_path=src, build_options={}, running_version=v)
+        is None
+    )
+
+
+def test_a_transient_llm_failure_still_blocks_reuse():
+    """toc_fallback_raised and figure_caption_failed are real failures worth
+    retrying; only the no-client case is a stable environment fact."""
+    from importlib.metadata import version
+    from pathlib import Path
+
+    from datasheetindex.core.artifact_cache import (
+        ArtifactRecord,
+        reuse_blocker,
+        sha256_file,
+    )
+
+    src = Path("infineon-psoc-6-mcu-cy8c62x8-cy8c62xa-datasheet-datasheet-en.pdf")
+    v = version("datasheetindex")
+    record = ArtifactRecord(
+        source_sha256=sha256_file(src),
+        source_size=src.stat().st_size,
+        build_options={},
+        datasheetindex_version=v,
+        json_name="a.json",
+        json_sha256="x",
+        text_name="a.txt",
+        text_sha256="y",
+        toc_quality={},
+        llm_enrichment_incomplete=True,
+        llm_enrichment_notes=("toc_fallback_raised",),
+    )
+    assert (
+        reuse_blocker(record, source_path=src, build_options={}, running_version=v)
+        == "llm_enrichment_incomplete"
+    )
+
+
+def test_a_sidecar_written_before_the_field_existed_still_loads():
+    """from_dict must default this like figure_captions_pending: it is not a
+    fingerprint, and requiring it would warn on every pre-existing sidecar."""
+    from datasheetindex.core.artifact_cache import ArtifactRecord
+
+    payload = {
+        "source_sha256": "a",
+        "source_size": 1,
+        "build_options": {},
+        "datasheetindex_version": "0.0.0",
+        "artifacts": {
+            "json": {"name": "a.json", "sha256": "x"},
+            "text": {"name": "a.txt", "sha256": "y"},
+        },
+        "toc_quality": {},
+        "llm_enrichment_incomplete": False,
+        "llm_enrichment_notes": [],
+    }
+    assert ArtifactRecord.from_dict(payload).toc_fallback_pending is False

@@ -636,6 +636,11 @@ class DatasheetIndex:
         # single transient gateway error would cost this document its ToC for
         # the life of the output directory.
         enrichment_notes: list[str] = []
+        # True when this build wanted the ToC fallback and no LLM client could
+        # be obtained. Kept separate from enrichment_notes: it is an
+        # environment fact, not a failure worth retrying, so it deliberately
+        # does not feed llm_enrichment_incomplete.
+        toc_fallback_pending = False
 
         # Two branches can need a client, and they share one. Captioning is the
         # second: without it here, a caller with credentials configured but no
@@ -666,12 +671,13 @@ class DatasheetIndex:
                 llm_client_origin = (
                     "toc_fallback" if needs_toc_fallback else "figure_captions"
                 )
-            if active_llm_callable is None and needs_toc_fallback:
+            toc_fallback_pending = active_llm_callable is None and needs_toc_fallback
+            if toc_fallback_pending:
                 logger.info(
                     "ToC quality below threshold but no LLM client is available; "
-                    "these artifacts will not be cached for reuse"
+                    "the ToC is left as-is and these artifacts stay reusable "
+                    "until a client appears"
                 )
-                enrichment_notes.append("toc_fallback_no_client")
 
             if active_llm_callable is None and regenerate_toc:
                 raise RuntimeError(
@@ -819,6 +825,7 @@ class DatasheetIndex:
                 llm_enrichment_incomplete=bool(enrichment_notes),
                 llm_enrichment_notes=tuple(enrichment_notes),
                 figure_captions_pending=caption_outcome.pending,
+                toc_fallback_pending=toc_fallback_pending,
             )
         finally:
             if owns_llm_callable:

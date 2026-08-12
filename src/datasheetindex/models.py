@@ -153,6 +153,13 @@ class DatasheetArtifacts:
     # is not a defect, so both caches reuse this artifact until vision
     # capability actually appears. Both caches consult it.
     figure_captions_pending: int = 0
+    # True when this build wanted the ToC fallback and no LLM client could be
+    # obtained. A fact about the environment, not a failed build: rebuilding
+    # cannot create credentials, so this deliberately does NOT set
+    # llm_enrichment_incomplete, which means a transient failure worth
+    # retrying. Both caches reuse this artifact until a client actually
+    # becomes available, exactly as figure_captions_pending does above.
+    toc_fallback_pending: bool = False
 
 
 def flatten_nodes(nodes: list[TocNode]) -> list[TocNode]:

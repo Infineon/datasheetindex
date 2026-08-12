@@ -213,6 +213,16 @@ class _VisionResolver:
             close_llm_client(self._owned)
             self._owned = None
 
+    def has_client(self) -> bool:
+        """Whether any LLM client could be constructed, vision-capable or not.
+
+        The ToC fallback needs a text client, not a vision one -- see ``take``.
+        Forces construction through ``get`` so the answer is real, then reports
+        on the owned client rather than the vision-filtered result.
+        """
+        self.get()
+        return self._owned is not None
+
 
 _NO_TOC_HINT = (
     "This PDF has no usable table of contents, so there is no section map to "
@@ -545,6 +555,7 @@ class DatasheetTools:
                 self._artifacts.figure_captions_pending > 0
                 and resolver.get() is not None
             )
+            and not (self._artifacts.toc_fallback_pending and resolver.has_client())
         ):
             return self._artifacts
 
@@ -710,6 +721,12 @@ class DatasheetTools:
             logger.debug("Not reusing on-disk artifacts: %s", "figure_captions_pending")
             return None
 
+        # Same reasoning as above, for the ToC fallback's own no-client fact:
+        # reused as-is while no client exists, invalidated once one does.
+        if record.toc_fallback_pending and resolver.has_client():
+            logger.debug("Not reusing on-disk artifacts: %s", "toc_fallback_pending")
+            return None
+
         logger.info("Reusing valid on-disk artifacts from %s", json_path)
         return DatasheetArtifacts(
             json_path=json_path,
@@ -727,6 +744,7 @@ class DatasheetTools:
             llm_enrichment_incomplete=record.llm_enrichment_incomplete,
             llm_enrichment_notes=record.llm_enrichment_notes,
             figure_captions_pending=record.figure_captions_pending,
+            toc_fallback_pending=record.toc_fallback_pending,
         )
 
     def _write_build_sidecar(
@@ -789,6 +807,7 @@ class DatasheetTools:
                 llm_enrichment_incomplete=artifacts.llm_enrichment_incomplete,
                 llm_enrichment_notes=artifacts.llm_enrichment_notes,
                 figure_captions_pending=artifacts.figure_captions_pending,
+                toc_fallback_pending=artifacts.toc_fallback_pending,
             )
             write_sidecar(sidecar, record)
         except Exception:
