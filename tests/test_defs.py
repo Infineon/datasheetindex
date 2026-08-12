@@ -904,3 +904,53 @@ def test_tool_descriptions_do_not_shout():
         if marker in d.description
     }
     assert found == set()
+
+
+def test_build_datasheet_handler_forwards_regenerate_toc(
+    tmp_path, toc_pdf, monkeypatch
+):
+    """The MCP argument must reach ``DatasheetTools.build_datasheet``.
+
+    A schema key and a Python parameter are two ends of a wire, and nothing in
+    the structural tests looks at the wire itself: deleting the ``args.get``
+    line from this handler left the parameter documented, accepted, validated
+    -- and inert. ``toc_pdf`` is above the quality threshold and carries no
+    figures, so the error the ``True`` case produces can only come from the
+    request having arrived.
+    """
+    import datasheetindex.tools.defs as defs_mod
+
+    seen: list[dict] = []
+    real_tools = defs_mod.DatasheetTools
+
+    class RecordingTools(real_tools):
+        def build_datasheet(self, *args, **kwargs):
+            seen.append(kwargs)
+            return super().build_datasheet(*args, **kwargs)
+
+    monkeypatch.setattr(defs_mod, "DatasheetTools", RecordingTools)
+    defs = _defs_by_name()
+
+    ok = _run(
+        defs["build_datasheet"].handler,
+        {"pdf_source": str(toc_pdf), "output_dir": str(tmp_path / "off")},
+    )
+    assert ok.get("is_error") is not True
+    assert seen[-1].get("regenerate_toc") is False, (
+        "omitting the argument must forward the documented default"
+    )
+
+    escalated = _run(
+        defs["build_datasheet"].handler,
+        {
+            "pdf_source": str(toc_pdf),
+            "output_dir": str(tmp_path / "on"),
+            "regenerate_toc": True,
+        },
+    )
+    assert seen[-1].get("regenerate_toc") is True
+    # And it was acted on: credential-free, the only honest answer is a failure
+    # naming the parameter. A handler that dropped the argument would build
+    # happily and return a manifest here.
+    assert escalated["is_error"] is True
+    assert "regenerate_toc" in escalated["content"][0]["text"]

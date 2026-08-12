@@ -1,6 +1,7 @@
 """Tests for the main DatasheetIndex orchestrator."""
 
 import json
+import logging
 import re
 import subprocess
 import urllib.error
@@ -19,6 +20,7 @@ from datasheetindex.index import (
     _accept_llm_toc_candidate,
 )
 from datasheetindex.models import TocNode, TocQuality
+from tests.conftest import spy_on_toc_fallback
 
 DATA2PAGE_DIR = Path(__file__).resolve().parent.parent.parent / "data2page"
 TLE9350_PATH = DATA2PAGE_DIR / "Infineon-TLE9350BSJ-DataSheet-v01_00-EN.pdf"
@@ -591,13 +593,118 @@ def test_explicit_request_still_rejects_a_coverage_regression():
 def test_regenerate_toc_without_a_client_raises(
     tmp_path, pdf_tle9350_path, monkeypatch
 ):
-    """An explicit request that cannot be honoured must not look like success."""
+    """An explicit request that cannot be honoured must not look like success.
+
+    **Skipped on a clean clone.** The TLE9350 PDF is gitignored and absent from
+    the CI checkout that gates releases, so the protection this describes does
+    not exist there -- ``pdf_tle9350_path`` skips. The hermetic test below is
+    the one that actually runs in CI; this one only adds a real document.
+    """
     monkeypatch.setattr(
         DatasheetIndex, "_try_create_default_llm_client", lambda self: None
     )
     with DatasheetIndex(str(pdf_tle9350_path)) as index:
         with pytest.raises(RuntimeError, match="regenerate_toc"):
             index.build(output_dir=str(tmp_path), regenerate_toc=True)
+
+
+def test_regenerate_toc_without_a_client_raises_on_a_good_toc(tmp_path, toc_pdf):
+    """The hermetic half, and the one that isolates the guard.
+
+    ``toc_pdf`` scores above the threshold and carries no raster figure, so
+    nothing else in ``build`` wants an LLM client: the raise can only come from
+    the explicit request. The real-PDF test above reaches the same guard, but
+    that document has caption candidates, so it would pass even if the request
+    itself were ignored -- and it skips in CI besides.
+    """
+    with DatasheetIndex(str(toc_pdf)) as index:
+        with pytest.raises(RuntimeError, match="regenerate_toc"):
+            index.build(output_dir=str(tmp_path), regenerate_toc=True)
+
+
+def _stub_llm_callable():
+    """A client-shaped object that is never actually called.
+
+    The ToC fallback is stubbed out in the tests below, so this only has to be
+    non-``None``: what is under test is whether ``build`` decides to run the
+    fallback, not what a model would answer.
+    """
+
+    def call(system: str, user: str) -> str:  # pragma: no cover - never invoked
+        raise AssertionError("the stubbed fallback should have intercepted this")
+
+    return call
+
+
+def test_regenerate_toc_runs_the_fallback_on_an_above_threshold_toc(
+    tmp_path, toc_pdf, monkeypatch
+):
+    """The behavioural pin: an explicit request must actually reach the fallback.
+
+    ``toc_pdf`` scores 0.62 against a 0.3 threshold and has no figures, so the
+    LLM fallback is ineligible on every other route. If ``regenerate_toc`` stops
+    feeding ``needs_toc_fallback``, the spy is never called and the ToC stays
+    the PDF's own -- which is what the whole feature is supposed to prevent, and
+    what no structural test could see.
+    """
+    candidate = [
+        TocNode(title="Introduction", level=1, start_page=1, end_page=2),
+        TocNode(title="Absolute Maximum Ratings", level=1, start_page=3, end_page=3),
+    ]
+    calls = spy_on_toc_fallback(monkeypatch, candidate)
+
+    with DatasheetIndex(str(toc_pdf)) as index:
+        artifacts = index.build(
+            output_dir=str(tmp_path),
+            llm_callable=_stub_llm_callable(),
+            regenerate_toc=True,
+        )
+
+    assert calls == [3], "the LLM ToC fallback was never run"
+    # Observed twice over, so a spy that fires without the result being used
+    # cannot pass this: the regenerated tree is what the build published.
+    assert artifacts.toc_source == "llm_reconstructed"
+    assert [node.title for node in artifacts.nodes] == [
+        "Introduction",
+        "Absolute Maximum Ratings",
+    ]
+
+
+def test_a_good_toc_alone_does_not_run_the_fallback(tmp_path, toc_pdf, monkeypatch):
+    """The control for the test above: without the request, nothing escalates.
+
+    Same document, same available client, ``regenerate_toc=False``. This is what
+    makes the assertion above about the parameter rather than about the client.
+    """
+    calls = spy_on_toc_fallback(monkeypatch, [])
+
+    with DatasheetIndex(str(toc_pdf)) as index:
+        artifacts = index.build(
+            output_dir=str(tmp_path),
+            llm_callable=_stub_llm_callable(),
+            regenerate_toc=False,
+        )
+
+    assert calls == []
+    assert artifacts.toc_source == "pdf_outline"
+
+
+def test_an_explicit_request_does_not_log_the_threshold_sentence(
+    tmp_path, toc_pdf, monkeypatch, caplog
+):
+    """The operator-facing log must not claim a good score was below threshold."""
+    spy_on_toc_fallback(monkeypatch, [])
+
+    with caplog.at_level(logging.INFO, logger="datasheetindex.index"):
+        with DatasheetIndex(str(toc_pdf)) as index:
+            index.build(
+                output_dir=str(tmp_path),
+                llm_callable=_stub_llm_callable(),
+                regenerate_toc=True,
+            )
+
+    assert "below threshold (0.62 < 0.30)" not in caplog.text
+    assert "requested explicitly" in caplog.text
 
 
 def test_build_auto_llm_fallback_graceful_without_credentials(monkeypatch, tmp_path):

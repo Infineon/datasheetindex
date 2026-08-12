@@ -172,6 +172,79 @@ def _has_env():
         pytest.skip("LiteLLM env vars not set")
 
 
+def spy_on_toc_fallback(monkeypatch, nodes):
+    """Replace ``generate_toc_from_text`` with a spy returning ``nodes``.
+
+    Returns the list of ``total_pages`` values it was called with, so an empty
+    list means the LLM ToC fallback never ran. ``index.build`` imports the
+    function inside the branch that uses it, so patching the module attribute
+    is what a call there resolves to.
+
+    Shared because the ``regenerate_toc`` escalation is tested at two levels --
+    ``DatasheetIndex.build`` and ``DatasheetTools.build_datasheet`` -- and the
+    two must be spying on the same thing for the pair to mean anything.
+    """
+    import datasheetindex.llm.toc_fallback as fallback_module
+
+    calls: list[int] = []
+
+    def spy(_text, total_pages, _client):
+        calls.append(total_pages)
+        return list(nodes)
+
+    monkeypatch.setattr(fallback_module, "generate_toc_from_text", spy)
+    return calls
+
+
+@pytest.fixture
+def toc_pdf(tmp_path):
+    """A synthetic PDF whose ToC quality clears TOC_FALLBACK_THRESHOLD.
+
+    A PDF with no bookmarks scores 0.00 against a threshold of 0.3, so the
+    fallback is eligible, CI has no credentials, no client can be created, and
+    the build is marked ``toc_fallback_pending`` -- which makes every reuse-hit
+    test unpassable. Two ``set_toc`` entries on three pages score 0.62.
+
+    Shared here rather than owned by one module because two very different
+    suites need the same shape. The reuse tests need an artifact that is
+    cacheable at all. The ``regenerate_toc`` escalation tests need a document
+    where the escalation is the *only* thing that can make the LLM fallback
+    eligible: this one is above the threshold and carries no raster figure, so
+    ``needs_toc_fallback`` and ``has_caption_candidates`` are both False and
+    every LLM branch is unreachable without an explicit request.
+
+    Hermetic by construction -- built with pymupdf into ``tmp_path``, with no
+    dependence on a bundled PDF. Those are gitignored, so a test resting on one
+    silently skips in the CI clone that gates releases.
+    """
+    from datasheetindex.core.quality import assess_toc_quality
+    from datasheetindex.core.structure import build_tree, extract_toc
+    from datasheetindex.index import TOC_FALLBACK_THRESHOLD
+
+    doc = pymupdf.open()
+    for _ in range(3):
+        page = doc.new_page()
+        writer = pymupdf.TextWriter(page.rect)
+        # y=400 sits well outside the top/bottom furniture bands (20%/80% of
+        # an 842pt page): identical text on every page would otherwise be
+        # detected as a running header and stripped from scan_pages' output.
+        writer.append((72, 400), "Body text for this page of the datasheet")
+        writer.write_text(page)
+    doc.set_toc([[1, "Overview", 1], [1, "Electrical Characteristics", 2]])
+    pdf_path = tmp_path / "ds.pdf"
+    doc.save(str(pdf_path))
+
+    nodes = build_tree(extract_toc(doc), len(doc))
+    score = assess_toc_quality(nodes, len(doc)).score
+    doc.close()
+    assert score >= TOC_FALLBACK_THRESHOLD, (
+        f"fixture ToC scores {score}, below the {TOC_FALLBACK_THRESHOLD} "
+        "threshold; the LLM fallback would be eligible without an explicit "
+        "request, and the escalation tests would pass for the wrong reason"
+    )
+    return pdf_path
+
+
 @pytest.fixture(scope="session")
 def pdf_tle9350_path() -> Path:
     """Return the path to the TLE9350BSJ PDF, skipping if not found."""

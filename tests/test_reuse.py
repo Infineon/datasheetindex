@@ -14,42 +14,11 @@ from datasheetindex.index import TOC_FALLBACK_THRESHOLD, DatasheetIndex
 from datasheetindex.models import TocNode, TocQuality
 from datasheetindex.tools.bound import DatasheetTools, _BuildOptions
 from datasheetindex.tools.defs import create_datasheet_tool_defs
+from tests.conftest import spy_on_toc_fallback
 
-
-@pytest.fixture
-def toc_pdf(tmp_path):
-    """A PDF whose ToC quality clears TOC_FALLBACK_THRESHOLD.
-
-    A synthetic PDF with no bookmarks scores 0.00 against a threshold of 0.3,
-    so the fallback is eligible, CI has no credentials, no client can be
-    created, and the build is marked llm_enrichment_incomplete -- which makes
-    the document permanently uncacheable and every reuse-hit test unpassable.
-    Two set_toc entries on three pages score 0.62.
-    """
-    from datasheetindex.core.quality import assess_toc_quality
-    from datasheetindex.core.structure import build_tree, extract_toc
-
-    doc = pymupdf.open()
-    for _ in range(3):
-        page = doc.new_page()
-        writer = pymupdf.TextWriter(page.rect)
-        # y=400 sits well outside the top/bottom furniture bands (20%/80% of
-        # an 842pt page): identical text on every page would otherwise be
-        # detected as a running header and stripped from scan_pages' output.
-        writer.append((72, 400), "Body text for this page of the datasheet")
-        writer.write_text(page)
-    doc.set_toc([[1, "Overview", 1], [1, "Electrical Characteristics", 2]])
-    pdf_path = tmp_path / "ds.pdf"
-    doc.save(str(pdf_path))
-
-    nodes = build_tree(extract_toc(doc), len(doc))
-    score = assess_toc_quality(nodes, len(doc)).score
-    doc.close()
-    assert score >= TOC_FALLBACK_THRESHOLD, (
-        f"fixture ToC scores {score}, below the {TOC_FALLBACK_THRESHOLD} "
-        "threshold; it would be marked enrichment-incomplete and never reused"
-    )
-    return pdf_path
+# ``toc_pdf`` lives in conftest.py: the regenerate_toc escalation tests need a
+# document of exactly this shape (above threshold, no raster figures) and
+# maintaining two copies of a fixture whose score is load-bearing invites drift.
 
 
 @pytest.fixture
@@ -1830,3 +1799,123 @@ def test_toc_fallback_pending_is_false_with_a_caller_supplied_client(
         idx.close()
 
     assert artifacts.toc_fallback_pending is False
+
+
+def _stub_client_factory(monkeypatch):
+    """Make ``_VisionResolver`` find a client without touching a gateway.
+
+    ``create_llm_client`` is imported inside ``_VisionResolver.get``, so the
+    module attribute is what a call there resolves to. The object returned is
+    not vision-capable, which is deliberate: ``get_vision_client`` filters it
+    out of the caption path while ``take()`` still hands it to ``build``, and
+    that asymmetry is the whole reason ``has_client()`` exists.
+    """
+
+    def call(system, user):  # pragma: no cover - the fallback below intercepts
+        raise AssertionError("the stubbed ToC fallback should have intercepted")
+
+    monkeypatch.setattr(
+        "datasheetindex.llm.client.create_llm_client",
+        lambda model=None: call,
+    )
+    return call
+
+
+def test_regenerate_toc_reaches_the_fallback_through_the_tools_layer(
+    tmp_path, toc_pdf, monkeypatch
+):
+    """The chain end to end: build_datasheet -> _BuildOptions -> index.build.
+
+    ``toc_pdf`` is above the quality threshold and has no figures, so the LLM
+    fallback is ineligible by every other route -- the request is the only
+    thing that can run it. Severing any link in the chain (dropping the
+    argument from the ``index.build`` call, or dropping ``regenerate_toc`` from
+    ``needs_toc_fallback``) leaves the spy uncalled and the PDF's own outline
+    published, which is exactly the silent no-op the parameter exists to avoid.
+    """
+    _stub_client_factory(monkeypatch)
+    candidate = [
+        TocNode(title="Introduction", level=1, start_page=1, end_page=2),
+        TocNode(title="Absolute Maximum Ratings", level=1, start_page=3, end_page=3),
+    ]
+    calls = spy_on_toc_fallback(monkeypatch, candidate)
+
+    with DatasheetTools(str(toc_pdf)) as tools:
+        artifacts = tools.build_datasheet(
+            output_dir=str(tmp_path / "out"), regenerate_toc=True
+        )
+
+    assert calls == [3], "the request never reached the LLM ToC fallback"
+    assert artifacts.toc_source == "llm_reconstructed"
+
+
+def test_without_the_request_the_tools_layer_does_not_escalate(
+    tmp_path, toc_pdf, monkeypatch
+):
+    """The control: same document, same available client, no request."""
+    _stub_client_factory(monkeypatch)
+    calls = spy_on_toc_fallback(monkeypatch, [])
+
+    with DatasheetTools(str(toc_pdf)) as tools:
+        artifacts = tools.build_datasheet(
+            output_dir=str(tmp_path / "out"), regenerate_toc=False
+        )
+
+    assert calls == []
+    assert artifacts.toc_source == "pdf_outline"
+
+
+def test_regenerate_toc_without_a_client_raises_from_the_tools_layer(tmp_path, toc_pdf):
+    """A keyless install must refuse the request rather than quietly ignore it.
+
+    No client can be constructed here -- the suite runs credential-free by
+    fixture -- and ``toc_pdf`` needs one for no other reason, so this isolates
+    the explicit request.
+    """
+    with DatasheetTools(str(toc_pdf)) as tools:
+        with pytest.raises(RuntimeError, match="regenerate_toc"):
+            tools.build_datasheet(output_dir=str(tmp_path / "out"), regenerate_toc=True)
+
+
+def test_a_failed_regenerate_toc_leaves_the_cached_sidecar_intact(tmp_path, toc_pdf):
+    """Refusing a request must not cost the cache that was already valid.
+
+    ``_build_or_reuse`` removes the sidecar before it builds, so a raise from
+    inside ``index.build`` came too late: the artifact on disk survived with no
+    sidecar to validate it, and the next process rebuilt the document from
+    scratch. The requirement is now resolved in ``build_datasheet``, before any
+    invalidation.
+    """
+    out = tmp_path / "out"
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=str(out))
+    before = sorted(p.name for p in out.iterdir())
+    assert any(name.endswith(".build.json") for name in before), before
+
+    with DatasheetTools(str(toc_pdf)) as tools:
+        with pytest.raises(RuntimeError, match="regenerate_toc"):
+            tools.build_datasheet(output_dir=str(out), regenerate_toc=True)
+
+    assert sorted(p.name for p in out.iterdir()) == before
+
+
+def test_regenerate_toc_is_the_last_positional_parameter(tmp_path):
+    """Both public entry points must order their tails identically.
+
+    ``regenerate_toc`` was first added between ``force_rebuild`` and
+    ``caption_figures`` here while ``DatasheetIndex.build`` appended it, so a
+    positional call that predated the release bound its ``caption_figures``
+    argument to ``regenerate_toc`` -- silently enabling LLM regeneration -- and
+    its caption cap to ``caption_figures``. Pinned by name and by position so a
+    future parameter is appended rather than inserted.
+    """
+    import inspect
+
+    tools_params = list(inspect.signature(DatasheetTools.build_datasheet).parameters)
+    build_params = list(inspect.signature(DatasheetIndex.build).parameters)
+
+    assert tools_params[-1] == "regenerate_toc"
+    assert build_params[-1] == "regenerate_toc"
+    # The shared tail, in the same order in both, is what a positional caller
+    # of either depends on.
+    assert tools_params[-3:] == build_params[-3:]

@@ -80,7 +80,12 @@ def test_numeric_titles_penalized():
 
 
 def test_large_toc_recommends_summaries():
-    """A ToC with many entries should recommend summaries."""
+    """A ToC with many entries should recommend summaries.
+
+    These titles are enumerated, so informativeness collapses them to one key
+    and the score falls to 0.016 -- which satisfies ``score < 0.5`` as well.
+    The test below is the one that isolates the entry-count rule.
+    """
     nodes = [
         TocNode(title=f"Section {i}", level=1, start_page=i, end_page=i)
         for i in range(1, 50)
@@ -88,6 +93,42 @@ def test_large_toc_recommends_summaries():
     quality = assess_toc_quality(nodes, total_pages=50)
     assert quality.recommend_summaries is True
     assert quality.entry_count == 49
+
+
+def _distinct_titles(count):
+    """``count`` titles that survive ``normalize_key``'s digit masking.
+
+    Enumerated titles collapse to a single key, which is exactly what the
+    informativeness factor is for -- so a test about the *entry count* must not
+    use them, or it measures informativeness instead.
+    """
+    from string import ascii_uppercase as letters
+
+    return [
+        f"Register {letters[i // len(letters)]}{letters[i % len(letters)]} control"
+        for i in range(count)
+    ]
+
+
+def test_a_high_scoring_toc_still_recommends_summaries_past_the_entry_cap():
+    """Isolates ``entry_count > 40`` from the ``score < 0.5`` clause beside it.
+
+    ``test_large_toc_recommends_summaries`` above satisfies both clauses since
+    informativeness landed, so deleting ``or entry_count > 40`` left it green.
+    These 45 titles are all distinct, so the score clears 0.5 and the entry cap
+    is the only rule that can still recommend summaries.
+    """
+    nodes = [
+        TocNode(title=title, level=1, start_page=i + 1, end_page=i + 1)
+        for i, title in enumerate(_distinct_titles(45))
+    ]
+    quality = assess_toc_quality(nodes, total_pages=45)
+
+    assert quality.entry_count == 45
+    assert quality.score >= 0.5, (
+        "the score clause must not be able to satisfy this test on its own"
+    )
+    assert quality.recommend_summaries is True
 
 
 def test_single_entry_low_score():
@@ -290,6 +331,10 @@ def test_the_bundled_datasheet_is_unaffected():
     0.82 is measured, not a round target: the outline's 89 entries produce 89
     distinct breadcrumb keys, so informativeness is exactly 1.000 and the
     score is unchanged by this factor.
+
+    **Skipped on a clean clone.** The bundled PSoC datasheet is gitignored and
+    absent from the CI checkout that gates releases, so this protection does
+    not exist there. The synthetic cases above are what actually run in CI.
     """
     from pathlib import Path
 
