@@ -126,6 +126,16 @@ class _BuildOptions:
     #: and ``0``/``false``/``no``/``off`` all mean one thing, so recording the
     #: spelling would split one artifact across four keys.
     strip_furniture: bool
+    #: Whether this build was explicitly asked to rewrite the ToC with an LLM.
+    #:
+    #: In the key for the same reason as ``strip_furniture``: it changes the
+    #: **content** of the published artifact -- the ToC is reconstructed from
+    #: body text rather than read from the bookmarks -- so an artifact built one
+    #: way must not be served for a request that asked for the other. Without
+    #: it, asking for regeneration after a normal build matched on version,
+    #: source and options and served the stale ToC, with ``json_sha256``
+    #: agreeing because it hashes that same stale file.
+    regenerate_toc: bool
 
     def to_dict(self) -> dict[str, object]:
         """The cache key, as recorded in the sidecar.
@@ -443,6 +453,7 @@ class DatasheetTools:
         include_summaries: bool = False,
         model: str | None = None,
         force_rebuild: bool = False,
+        regenerate_toc: bool = False,
         caption_figures: bool = True,
         max_figure_captions: int = DEFAULT_MAX_FIGURE_CAPTIONS,
     ) -> DatasheetArtifacts:
@@ -493,6 +504,7 @@ class DatasheetTools:
             # Read here, after ensure_dotenv_loaded above, so a ``.env`` that
             # sets the hatch keys the same value ``scan_pages`` will act on.
             strip_furniture=furniture_enabled_by_env(),
+            regenerate_toc=regenerate_toc,
         )
         # One resolver for the whole call, closed however the call exits. Both
         # gates and the rebuild ask it, so a walk through all three opens one
@@ -590,6 +602,7 @@ class DatasheetTools:
                 llm_callable=llm_callable,
                 caption_figures=options.caption_figures,
                 max_figure_captions=options.max_figure_captions,
+                regenerate_toc=options.regenerate_toc,
             )
         finally:
             close_llm_client(owned_here)

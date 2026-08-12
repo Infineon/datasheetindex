@@ -335,9 +335,42 @@ def test_build_options_to_dict_covers_every_dataclass_field():
         vision_model=None,
         text_model=None,
         strip_furniture=True,
+        regenerate_toc=False,
     )
 
     assert set(options.to_dict()) == {f.name for f in fields(_BuildOptions)}
+
+
+def test_regenerate_toc_is_part_of_the_cache_key():
+    """It changes the artifact's CONTENT -- the ToC is rewritten -- so an
+    artifact built one way must not be served for a request that asked for the
+    other. Same reasoning as strip_furniture in 0.33.0."""
+    from dataclasses import fields
+
+    from datasheetindex.tools.bound import _BuildOptions
+
+    assert "regenerate_toc" in {f.name for f in fields(_BuildOptions)}
+
+
+def test_flipping_regenerate_toc_changes_the_recorded_key():
+    from typing import Any
+
+    from datasheetindex.tools.bound import _BuildOptions
+
+    common: dict[str, Any] = dict(
+        output_dir="out",
+        output_stem=None,
+        include_summaries=False,
+        model=None,
+        caption_figures=True,
+        max_figure_captions=20,
+        vision_model=None,
+        text_model=None,
+        strip_furniture=True,
+    )
+    off = _BuildOptions(regenerate_toc=False, **common)
+    on = _BuildOptions(regenerate_toc=True, **common)
+    assert off.to_dict() != on.to_dict()
 
 
 def test_a_failing_sidecar_write_does_not_fail_the_build(
