@@ -334,6 +334,22 @@ A rejected fallback candidate leaves the PDF's own outline in place, and
 `toc_source` reports `pdf_outline` -- it names the tree you were given, not
 whether the fallback ran.
 
+### Asking for a better ToC
+
+The quality score decides one thing only: whether to spend an LLM call
+rebuilding the ToC. It is deterministic and cheap, so it can be wrong -- an
+outline of `Page 1`, `Page 2`, ... covers the document perfectly while naming no
+section at all. Since the manifest hands you the whole `toc`, you can see that
+for yourself, and `build_datasheet(regenerate_toc=true)` acts on it: the ToC is
+rewritten from the body text regardless of the score. `force_rebuild` is not the
+same lever -- it re-runs the same deterministic scoring and reaches the same
+decision.
+
+It needs the `[llm]` extra and gateway credentials, and raises if neither is
+available rather than quietly returning the ToC you asked to replace. It is part
+of the artifact-reuse key, so a regenerated build and a normal one are separate
+artifacts rather than one overwriting the other.
+
 ### Figure indexing and captions
 
 Alongside `toc`, the ToC JSON carries `figures` -- a page-then-position list

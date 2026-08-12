@@ -316,6 +316,133 @@ We benchmarked table detection across three libraries (PyMuPDF, pdfplumber, pymu
 
 **The decision on summaries:** If the ToC is high quality (descriptive titles, proper hierarchy, correct page numbers), summaries add cost without much value. If the ToC is sparse or uses cryptic section numbers, summaries become essential. The library should score ToC quality and recommend whether summaries are worth generating.
 
+### ToC quality: what the score decides, and how a caller overrules it
+
+`assess_toc_quality` produces one number with exactly one consumer:
+
+```python
+needs_toc_fallback = regenerate_toc or toc_quality.score < TOC_FALLBACK_THRESHOLD  # 0.3
+```
+
+It decides whether to spend an LLM call rebuilding the table of contents.
+Everywhere else the score appears -- on `DatasheetArtifacts`, in the ToC JSON,
+in `get_artifact_manifest` -- it is information rather than control.
+
+Four weighted factors, gated by a fifth that multiplies:
+
+```
+score = (0.3*entry + 0.3*coverage + 0.2*depth + 0.2*title) * informativeness
+informativeness = distinct(normalize_key(breadcrumb or title)) / entry_count
+```
+
+`normalize_key` is `core/furniture.py`'s -- whitespace collapsed, digit runs
+masked to `#` -- so `Page 1` and `Page 2` share one key. Both `furniture.py` and
+`quality.py` are pure (no PyMuPDF, no environment, no I/O), so the reuse adds no
+coupling; a comment above `normalize_key` names this second consumer, because a
+change to the masking rules moves ToC quality scores as well as furniture
+detection.
+
+**The gate is appealable.** `build_datasheet(regenerate_toc=true)`, and
+`DatasheetIndex.build(regenerate_toc=True)` beneath it, forces the fallback
+whatever the score says. It exists because the manifest already hands the agent
+both `toc_quality` and the full `toc` tree -- so the agent can see an outline is
+useless while the library insists it is fine -- and `force_rebuild` is not the
+lever: it busts the cache and then re-runs the same deterministic scoring to the
+same conclusion. Four details carry the weight:
+
+- **It is in the artifact-reuse key** (`_BuildOptions`), because it changes
+  artifact *content*. Same lesson as `DATASHEETINDEX_FURNITURE` in 0.33.0: an
+  option absent from the key means the rebuild serves the stale artifact, and
+  `json_sha256` still agrees because it hashes that same stale file.
+- **It overrides the score comparison in `_accept_llm_toc_candidate`, and only
+  that one.** An enumerated outline scores 0.680, so requiring the replacement to
+  beat the baseline would let the broken number veto its own repair. The
+  non-empty, entry-floor and coverage-regression guards still apply: they protect
+  against a degenerate *candidate*, which an explicit request says nothing about.
+- **Without a client it raises**, before any artifacts are produced, rather than
+  returning the un-regenerated ToC. A tool that appears to ignore the parameter
+  invites the agent to retry forever.
+- **The description names the next action** and the parameter is in the tool's
+  `input_schema`, not only in the Python signature -- an MCP host validates
+  against the schema, so a Python-only parameter is unreachable.
+
+**Transient versus stable, in the artifact cache.** A build that wanted the
+fallback and found no LLM client records `toc_fallback_pending` on the artifact
+and the sidecar. It deliberately does **not** feed `llm_enrichment_incomplete`,
+which `reuse_blocker` treats as a reason to refuse the artifact: rebuilding
+cannot create credentials, so that made a bookmark-less PDF on a credential-free
+install -- the default install, since `[llm]` is an extra -- rebuild on every
+request forever. `toc_fallback_pending` follows `figure_captions_pending`
+instead: `reuse_blocker` stays pure and ignores it, and the *caller* resolves it
+with a real capability probe, reusing while no client exists and invalidating the
+moment one appears. The probe is `_VisionResolver.has_client()` rather than
+`get()`, because `get()` returns the vision-filtered client while the ToC
+fallback needs any text client. `toc_fallback_raised` and `figure_caption_failed`
+stay transient -- those are genuine failures worth retrying.
+
+#### Decisions already settled by measurement
+
+Every number here comes from one **26-document, 7-vendor corpus** (TI, Espressif,
+Bosch, Microchip, Raspberry Pi, Infineon, Vishay), 5 to 784 pages. **24 have a
+ToC and are scored**; 2 have none, already score 0.00 and already fall back. ST,
+NXP and Analog Devices blocked scripted download and are absent.
+
+- **Repairing `title_score` is insufficient, and was measured before being
+  rejected.** Its check rejects only *purely* numeric titles, so `"Page 1"` scores
+  perfectly -- but forcing the entire factor to zero still leaves the enumerated
+  outline at **0.48** (134 pages) to **0.66** (20 pages). Three of the four
+  factors, 80% of the weight, measure whether the outline *spans* the document,
+  and enumeration maximises all three by construction: one entry per page is a
+  plausible entry count and perfect page coverage, and only depth suffers. A 20%
+  component cannot pull a score across 0.3 -- which is why informativeness
+  multiplies rather than joining as a fifth weighted factor. It is a
+  precondition, not a contribution.
+- **Raising the threshold cannot work, because the ordering was inverted.**
+  `Page 1..20` scored **0.860**, above the bundled PSoC 6's real 89-entry outline
+  at **0.820**; `Page 1..134` scored 0.680 and a single real section 0.620. No
+  cutoff separates two populations when the bad one ranks above the good one.
+- **Keyed on the breadcrumb, not the bare title.** Two chapters legitimately share
+  a subsection name and the ancestry path separates them: bare title against
+  breadcrumb, `esp32_trm` (784p) **0.727 / 0.995**, `raspi_rp2040` (642p)
+  0.744 / 0.943, `micro_atmega328` (294p) 0.794 / 0.955. Up to 27 points on the
+  large reference manuals, which are the repetition stress case. A flat
+  `Page 1..N` outline has `breadcrumb == title`, so it still collapses to one key
+  and is still caught, and `TocNode.breadcrumb` defaults to `""` on a directly
+  constructed node, so the title stays the fallback. `assign_breadcrumbs` runs
+  inside `build_tree`, through which the LLM candidate also returns, so baseline
+  and candidate are normalised identically.
+- **Fallback decisions that flip: 0.** The worst real document, `raspi_pico`,
+  scores **0.697** against the 0.300 threshold -- 2.3x headroom -- while the best
+  degenerate outline manages 0.043, a **16x** gap. That separation is what makes
+  the rule safe, not the precision of the normaliser. The bundled PSoC 6 is
+  unchanged at **0.820** with informativeness exactly **1.000**, pinned by a test
+  so a future change to `normalize_key` that reintroduces collisions fails loudly.
+- **Numbered siblings collide, and that is accepted rather than fixed.**
+  `Port P# (P#.# to P#.#) Input/Output` x8 on `ti_msp430f5529` (Ports P1-P8),
+  `GPIOR# - General Purpose I/O Register #` x3 on `micro_atmega328`, and
+  `D.#. # June #` x5 on `raspi_pico` (release dates). `ti_msp430f5529` pays
+  **0.820 -> 0.741**. Unfixable by inspecting titles alone -- `Page 1`/`Page 2`
+  and `Port P1`/`Port P2` are structurally identical, differing only in whether
+  the stem carries meaning -- and removing the masking is not an option, since it
+  is the whole mechanism. The corpus bounds the damage: on real documents
+  collisions are always a *minority* (worst measured **21%**, on `raspi_pico`),
+  whereas a degenerate outline collapses essentially every entry.
+- **Frequency, stated plainly: no degenerate outline appeared in any of the 26
+  documents.** The shape was observed on a real document earlier in development,
+  but among mainstream vendor datasheets it is rare. This is cheap insurance
+  against a demonstrably wrong gate, not a fix for a common case, and it should
+  not be described as one.
+- **A library-side LLM judge of ToC quality is out of scope.** The agent already
+  holds the full ToC, so a second model call would pay to reach a conclusion the
+  first model can already draw -- and it would put nondeterminism inside a cached
+  artifact. The score stays a cheap deterministic floor, because `[llm]` is
+  optional and a credential-free build must still emit a `toc_quality` block;
+  judging belongs to the agent, which is what `regenerate_toc` is for.
+- **A consequence taken knowingly:** `recommend_summaries` is
+  `score < 0.5 or entry_count > 40`, so every newly low-scoring document now
+  recommends summaries too. Defensible -- a useless ToC is where summaries help --
+  but it is an LLM cost that follows automatically from the score change.
+
 ### Figure indexing
 
 A second top-level key, `figures`, sits alongside `toc` -- page-keyed rather
@@ -995,7 +1122,8 @@ class DatasheetIndex:
               llm_callable: Callable = None,
               output_stem: str | None = None,
               caption_figures: bool = True,
-              max_figure_captions: int = 20) -> DatasheetArtifacts:
+              max_figure_captions: int = 20,
+              regenerate_toc: bool = False) -> DatasheetArtifacts:
         """Build the enriched ToC JSON and page-matched text file.
 
         Args:
@@ -1018,6 +1146,10 @@ class DatasheetIndex:
             max_figure_captions: Per-document ceiling on VLM caption calls.
                                  Must be an integer >= 0; raises ValueError
                                  otherwise.
+            regenerate_toc: Force the LLM ToC fallback regardless of the
+                            baseline's quality score. Requires an LLM client;
+                            raises RuntimeError if none can be obtained,
+                            rather than silently keeping the old ToC.
 
         Returns:
             DatasheetArtifacts with .json_path, .text_path, and in-memory data.
@@ -1055,7 +1187,7 @@ class DatasheetIndex:
         # figures must not turn `include_summaries=True` into per-section calls.
         active_llm_callable = llm_callable
         llm_client_origin = "caller" if llm_callable is not None else None
-        needs_toc_fallback = toc_quality.score < 0.3
+        needs_toc_fallback = regenerate_toc or toc_quality.score < 0.3
         has_caption_candidates = eligible_caption_count(scan.figures, ...) > 0
         if active_llm_callable is None and (
             needs_toc_fallback or has_caption_candidates
@@ -1604,7 +1736,7 @@ Output: {"parameter": "Supply voltage VS relative", "symbol": "VVS_rel_max",
 - **Page alignment validation** — ensure JSON page numbers match text file markers
 - **Zero extra dependencies** — only PyMuPDF needed for the happy path (no pymupdf4llm, no pdfplumber)
 - **LLM as injectable callable** — the LLM fallback and summarizer accept a `llm_callable: (system, user) -> str` parameter rather than depending on a specific LLM client library. The consuming application provides its own LLM client (e.g., LiteLLM gateway with gpt-4.1 over Chat Completions). This keeps the library dependency-free for the happy path while allowing LLM features when needed.
-- **Structured-output ToC fallback with candidate gating** — when the injected callable also exposes `structured_json(...)` (detected via `get_structured_output_client()`, an optional extension of the base callable protocol), `toc_fallback.py` requests Chat Completions' `response_format={"type": "json_schema", ...}` mode per chunk instead of best-effort-parsing free text. Failure is isolated per chunk: an incomplete or malformed chunk response is logged and skipped, never fatal to the chunks around it, and a structured path that yields nothing at all (a model that rejects `json_schema`) degrades to the free-text prompt for the whole document. Deciding whether the surviving entries are good enough is a separate job from parsing them, and it belongs to the gate below. Either way, the regenerated ToC is only a *candidate*: `index.py` scores it with the same `assess_toc_quality()` used for the original and only replaces the original ToC if `_accept_llm_toc_candidate()` judges it clearly not worse (a strictly better score, no page-coverage regression, and — only when there is a real ToC to protect — enough entries for the document's size). This exists because `assess_toc_quality()`'s page-coverage term can score a single fallback node deceptively well once `build_tree()` extends its `end_page` to the document's last page — without gating, that thin result would silently replace a working original ToC. The gate deliberately does *not* punish a candidate for having fewer entries than the baseline: the score already weights entry count, coverage, and depth, so rejecting a higher-scoring candidate for being smaller than a bloated pseudo-ToC would keep the junk it was called in to replace.
+- **Structured-output ToC fallback with candidate gating** — when the injected callable also exposes `structured_json(...)` (detected via `get_structured_output_client()`, an optional extension of the base callable protocol), `toc_fallback.py` requests Chat Completions' `response_format={"type": "json_schema", ...}` mode per chunk instead of best-effort-parsing free text. Failure is isolated per chunk: an incomplete or malformed chunk response is logged and skipped, never fatal to the chunks around it, and a structured path that yields nothing at all (a model that rejects `json_schema`) degrades to the free-text prompt for the whole document. Deciding whether the surviving entries are good enough is a separate job from parsing them, and it belongs to the gate below. Either way, the regenerated ToC is only a *candidate*: `index.py` scores it with the same `assess_toc_quality()` used for the original and only replaces the original ToC if `_accept_llm_toc_candidate()` judges it clearly not worse (a strictly better score, no page-coverage regression, and — only when there is a real ToC to protect — enough entries for the document's size). This exists because `assess_toc_quality()`'s page-coverage term can score a single fallback node deceptively well once `build_tree()` extends its `end_page` to the document's last page — without gating, that thin result would silently replace a working original ToC. The gate deliberately does *not* punish a candidate for having fewer entries than the baseline: the score already weights entry count, coverage, and depth, so rejecting a higher-scoring candidate for being smaller than a bloated pseudo-ToC would keep the junk it was called in to replace. An explicit `regenerate_toc=True` skips the score comparison and nothing else, because that comparison is precisely what the escalation routes around — see "ToC quality: what the score decides, and how a caller overrules it" above.
 
 ### Lessons from Google's LangExtract
 
