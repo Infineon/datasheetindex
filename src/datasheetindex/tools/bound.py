@@ -46,7 +46,7 @@ from datasheetindex.core.textfile import (
     furniture_enabled_by_env,
 )
 from datasheetindex.core.textfile import search_text as search_text_content
-from datasheetindex.index import DatasheetIndex
+from datasheetindex.index import REGENERATE_TOC_REQUIRES_CLIENT, DatasheetIndex
 from datasheetindex.llm.client import (
     close_llm_client,
     ensure_dotenv_loaded,
@@ -219,6 +219,16 @@ class _VisionResolver:
         The ToC fallback needs a text client, not a vision one -- see ``take``.
         Forces construction through ``get`` so the answer is real, then reports
         on the owned client rather than the vision-filtered result.
+
+        **No rebuild loop exists, and one line of code is why:**
+        ``_build_or_reuse`` passes ``resolver.take()`` into ``index.build``, so
+        the client this answered True about IS the client the fallback uses.
+        The gate and the build cannot disagree, so an artifact invalidated for
+        ``toc_fallback_pending`` is rebuilt with the fallback actually running
+        and comes back with the flag cleared. A refactor that constructed a
+        client inside ``build`` instead would reintroduce the loop: this could
+        answer True while ``build`` found nothing, leaving the flag set and
+        every later call invalidating and rebuilding forever.
 
         Not idempotent across ``close()``: closing nulls ``_owned`` but leaves
         ``_resolved`` set, so calling this after ``close()`` answers False even
@@ -470,11 +480,21 @@ class DatasheetTools:
         include_summaries: bool = False,
         model: str | None = None,
         force_rebuild: bool = False,
-        regenerate_toc: bool = False,
         caption_figures: bool = True,
         max_figure_captions: int = DEFAULT_MAX_FIGURE_CAPTIONS,
+        regenerate_toc: bool = False,
     ) -> DatasheetArtifacts:
-        """Build and cache datasheet artifacts for later MCP queries."""
+        """Build and cache datasheet artifacts for later MCP queries.
+
+        ``regenerate_toc`` is **appended**, not inserted mid-signature, and
+        deliberately: this is a public entry point with external consumers, and
+        ``DatasheetIndex.build`` appends it too. Adding it between
+        ``force_rebuild`` and ``caption_figures`` shifted positions 6-8, so an
+        existing positional call silently bound its ``caption_figures``
+        argument to ``regenerate_toc`` -- enabling LLM regeneration nobody
+        asked for -- and its caption cap to ``caption_figures``. Keep the two
+        entry points' tails in the same order.
+        """
         # Normalised exactly as ``create_llm_client`` resolves it, and once, so
         # that "did the caller name a model?" has one answer on this path. The
         # two disagreed while this read the raw string and the factory stripped
@@ -528,6 +548,16 @@ class DatasheetTools:
         # client rather than three.
         resolver = _VisionResolver(named_model)
         try:
+            # Refuse an impossible request BEFORE ``_build_or_reuse`` reaches
+            # its ``remove_sidecar``. ``index.build`` raises this too, and that
+            # guard stays -- it covers the Python API path -- but it fires only
+            # after the cache has already been invalidated, so on a keyless
+            # install a ``regenerate_toc=True`` call destroyed the sidecar of a
+            # perfectly good artifact on its way to failing, costing a full
+            # rebuild in the next process. Same resolver, so the probe is the
+            # very client the build would have used; see ``has_client``.
+            if regenerate_toc and not resolver.has_client():
+                raise RuntimeError(REGENERATE_TOC_REQUIRES_CLIENT)
             return self._build_or_reuse(options, resolver, force_rebuild)
         finally:
             resolver.close()

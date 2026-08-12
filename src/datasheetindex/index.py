@@ -76,6 +76,19 @@ _OUTPUT_DIR_ENV_VAR = "DATASHEETINDEX_OUTPUT_DIR"
 #: the direction that fails safely.
 _SUMMARY_CLIENT_ORIGINS = frozenset({"caller", "toc_fallback"})
 
+#: Stated when an explicit ToC regeneration cannot be honoured.
+#:
+#: Module-level because two layers must refuse the same request: ``build()``
+#: guards the Python API, and ``DatasheetTools.build_datasheet`` has to refuse
+#: *earlier* still -- before it removes the sidecar -- so a call that cannot
+#: succeed does not destroy a valid cached artifact on its way to failing. One
+#: string so the two cannot drift apart.
+REGENERATE_TOC_REQUIRES_CLIENT = (
+    "regenerate_toc=True requires an LLM client, but none could be created. "
+    "Install the [llm] extra and configure LITELLM_BASE_URL and "
+    "LITELLM_MASTER_KEY."
+)
+
 
 def _minimum_fallback_candidate_entries(total_pages: int) -> int:
     """Minimum entry count before an LLM-generated ToC is trusted."""
@@ -671,33 +684,53 @@ class DatasheetIndex:
                 llm_client_origin = (
                     "toc_fallback" if needs_toc_fallback else "figure_captions"
                 )
-            # Checked before toc_fallback_pending is set: with regenerate_toc=True
-            # and no client, this raises and no artifacts are ever produced, so
-            # there is nothing for a "stays reusable" flag to describe.
-            if active_llm_callable is None and regenerate_toc:
-                raise RuntimeError(
-                    "regenerate_toc=True requires an LLM client, but none could "
-                    "be created. Install the [llm] extra and configure "
-                    "LITELLM_BASE_URL and LITELLM_MASTER_KEY."
-                )
 
-            toc_fallback_pending = active_llm_callable is None and needs_toc_fallback
-            if toc_fallback_pending:
-                logger.info(
-                    "ToC quality below threshold but no LLM client is available; "
-                    "the ToC is left as-is and these artifacts stay reusable "
-                    "until a client appears"
-                )
+        # Both statements below are about the *outcome* -- is there a client,
+        # and was one wanted -- not about whether this method tried to build
+        # one, so neither is nested in the construction branch above. Nesting
+        # them made their reachability incidental rather than stated: dropping
+        # ``regenerate_toc`` from ``needs_toc_fallback`` left the guard
+        # unreachable on exactly the document it exists for (a good ToC and no
+        # figures enters no branch at all) instead of merely wrong. Behaviour is
+        # unchanged: a caller-supplied callable makes ``active_llm_callable``
+        # non-None, so neither fires.
+        #
+        # The raise comes first, before toc_fallback_pending is set: with
+        # regenerate_toc=True and no client no artifacts are ever produced, so
+        # there is nothing for a "stays reusable" flag to describe.
+        if active_llm_callable is None and regenerate_toc:
+            raise RuntimeError(REGENERATE_TOC_REQUIRES_CLIENT)
+
+        toc_fallback_pending = active_llm_callable is None and needs_toc_fallback
+        if toc_fallback_pending:
+            logger.info(
+                "ToC quality below threshold but no LLM client is available; "
+                "the ToC is left as-is and these artifacts stay reusable "
+                "until a client appears"
+            )
 
         try:
             # 5. LLM fallback: regenerate ToC if quality is poor
             if active_llm_callable and needs_toc_fallback:
                 t_llm = time.monotonic()
-                logger.info(
-                    "ToC quality below threshold (%.2f < %.2f), running LLM fallback",
-                    toc_quality.score,
-                    TOC_FALLBACK_THRESHOLD,
-                )
+                # Two routes reach this branch and only one of them is about the
+                # threshold. Logging the threshold sentence for an explicit
+                # request printed "ToC quality below threshold (0.82 < 0.30)",
+                # which is a false statement in an operator-facing log and hides
+                # the fact that a caller asked for this.
+                if regenerate_toc:
+                    logger.info(
+                        "ToC regeneration was requested explicitly (score %.2f); "
+                        "running LLM fallback",
+                        toc_quality.score,
+                    )
+                else:
+                    logger.info(
+                        "ToC quality below threshold (%.2f < %.2f), running "
+                        "LLM fallback",
+                        toc_quality.score,
+                        TOC_FALLBACK_THRESHOLD,
+                    )
                 try:
                     from datasheetindex.llm.toc_fallback import generate_toc_from_text
 
