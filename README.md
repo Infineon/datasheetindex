@@ -345,10 +345,20 @@ rewritten from the body text regardless of the score. `force_rebuild` is not the
 same lever -- it re-runs the same deterministic scoring and reaches the same
 decision.
 
-It needs the `[llm]` extra and gateway credentials, and raises if neither is
-available rather than quietly returning the ToC you asked to replace. It is part
-of the artifact-reuse key, so a regenerated build and a normal one are separate
-artifacts rather than one overwriting the other.
+It needs both the `[llm]` extra and gateway credentials, and raises if either is
+missing rather than quietly returning the ToC you asked to replace. It is part
+of the artifact-reuse key, so a normal build's artifacts are never *served* for a
+regeneration request or the reverse. They do not coexist: there is one
+`doc.json`, one `doc.txt` and one `doc.build.json` per document, so alternating
+between the two rebuilds fully each time and overwrites the other's output.
+
+Escalating is not a guarantee. The regenerated ToC is only a candidate, and the
+page-coverage guard still rejects it if it covers less of the document than the
+outline it would replace -- which is the tightest remaining barrier for the very
+case this exists for, since a `Page 1..N` outline has `page_coverage == 1.0` and
+any candidate must match it. A rejected candidate returns the same ToC with no
+explanation attached; the way to detect it is `toc_source`, which stays
+`pdf_outline` instead of becoming `llm_reconstructed`.
 
 ### Figure indexing and captions
 

@@ -359,9 +359,16 @@ same conclusion. Four details carry the weight:
   beat the baseline would let the broken number veto its own repair. The
   non-empty, entry-floor and coverage-regression guards still apply: they protect
   against a degenerate *candidate*, which an explicit request says nothing about.
-- **Without a client it raises**, before any artifacts are produced, rather than
-  returning the un-regenerated ToC. A tool that appears to ignore the parameter
-  invites the agent to retry forever.
+- **Without a client it raises** rather than returning the un-regenerated ToC. A
+  tool that appears to ignore the parameter invites the agent to retry forever.
+  The guard is in **two** places, and the second is not redundant.
+  `DatasheetIndex.build` raises for the Python API path, but by the time it runs
+  `DatasheetTools._build_or_reuse` has already called `remove_sidecar` -- so a
+  keyless `regenerate_toc=True` used to destroy the sidecar of a perfectly good
+  cached artifact on its way to failing, costing a full rebuild in the next
+  process. `build_datasheet` therefore resolves the requirement up front, with
+  the same `_VisionResolver` the build would have used, before any invalidation.
+  Message text lives once, in `index.REGENERATE_TOC_REQUIRES_CLIENT`.
 - **The description names the next action** and the parameter is in the tool's
   `input_schema`, not only in the Python signature -- an MCP host validates
   against the schema, so a Python-only parameter is unreachable.
