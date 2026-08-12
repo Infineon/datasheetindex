@@ -106,6 +106,9 @@ _DIGIT_RUN_RE = re.compile(r"\d+")
 _CAPTION_PREFIX_RE = re.compile(r"(?i)^(figure\b|fig\.|table\b|chart\b)")
 
 
+#: Also consumed by ``core/quality.py``, which keys ToC entries through this to
+#: measure how distinguishable they are. A change to the masking rules moves
+#: ToC quality scores as well as furniture detection.
 def normalize_key(text: str) -> str:
     """Collapse whitespace and mask digit runs, giving a cross-page key.
 

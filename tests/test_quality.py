@@ -1,6 +1,9 @@
 """Tests for ToC quality scoring."""
 
+import pytest
+
 from datasheetindex.core.quality import assess_toc_quality
+from datasheetindex.index import TOC_FALLBACK_THRESHOLD
 from datasheetindex.models import TocNode
 
 
@@ -93,3 +96,216 @@ def test_single_entry_low_score():
     quality = assess_toc_quality(nodes, total_pages=10)
     assert quality.score < 0.7
     assert quality.entry_count == 1
+
+
+def _enumerated(count, template="Page %d"):
+    return [
+        TocNode(title=template % i, level=1, start_page=i, end_page=i)
+        for i in range(1, count + 1)
+    ]
+
+
+def test_page_enumeration_falls_below_the_fallback_threshold():
+    """One entry per page maximises entry count and page coverage by
+    construction, so the structural factors cannot catch this."""
+    for pages in (20, 134):
+        quality = assess_toc_quality(_enumerated(pages), total_pages=pages)
+        assert quality.score < TOC_FALLBACK_THRESHOLD, pages
+
+
+def test_section_enumeration_falls_below_the_threshold():
+    quality = assess_toc_quality(_enumerated(49, "Section %d"), total_pages=49)
+    assert quality.score < TOC_FALLBACK_THRESHOLD
+
+
+_DISTINCT_TOPICS = [
+    "Introduction",
+    "System Overview",
+    "Electrical Characteristics",
+    "Absolute Maximum Ratings",
+    "Operating Conditions",
+    "Pin Configuration",
+    "Package Information",
+    "Ordering Information",
+    "Functional Description",
+    "Timer Module",
+    "UART Interface",
+    "SPI Interface",
+    "I2C Interface",
+    "ADC Module",
+    "DAC Module",
+    "PWM Generator",
+    "GPIO Configuration",
+    "Interrupt Controller",
+    "Clock System",
+    "Reset Behavior",
+    "Power Management",
+    "Low Power Modes",
+    "Memory Map",
+    "Flash Programming",
+    "Bootloader",
+    "Watchdog Timer",
+    "Real Time Clock",
+    "CAN Controller",
+    "USB Interface",
+    "Ethernet MAC",
+    "Security Features",
+    "Cryptography Engine",
+    "Random Number Generator",
+    "Temperature Sensor",
+    "Comparator Block",
+    "Operational Amplifier",
+    "Voltage Reference",
+    "Brown Out Detector",
+    "Debug Interface",
+    "Revision History",
+]
+
+
+def test_a_half_enumerated_outline_is_degraded_but_not_condemned():
+    """The factor is continuous, not a cliff.
+
+    Uses distinct topic titles rather than a "Topic %d description" template:
+    that template collides under digit masking exactly like "Page %d" does,
+    so a uniformly-numbered "real" half does not actually exercise a
+    half-real, half-enumerated split.
+    """
+    assert len(_DISTINCT_TOPICS) == 40
+    real = [
+        TocNode(title=topic, level=1, start_page=i, end_page=i)
+        for i, topic in enumerate(_DISTINCT_TOPICS, start=1)
+    ]
+    nodes = real + [
+        TocNode(title=f"Page {i}", level=1, start_page=i, end_page=i)
+        for i in range(41, 81)
+    ]
+    quality = assess_toc_quality(nodes, total_pages=80)
+    assert quality.score < 0.5
+    assert quality.score > TOC_FALLBACK_THRESHOLD
+
+
+def test_same_named_subsections_under_different_parents_are_not_penalised():
+    """The false positive the breadcrumb keying exists to prevent. Two chapters
+    can both contain 'Register description' and both are real."""
+    nodes = [
+        TocNode(
+            title="1 Timer",
+            level=1,
+            start_page=1,
+            end_page=4,
+            breadcrumb="1 Timer",
+            nodes=[
+                TocNode(
+                    title="1.1 Register description",
+                    level=2,
+                    start_page=1,
+                    end_page=4,
+                    breadcrumb="1 Timer > 1.1 Register description",
+                )
+            ],
+        ),
+        TocNode(
+            title="2 UART",
+            level=1,
+            start_page=5,
+            end_page=10,
+            breadcrumb="2 UART",
+            nodes=[
+                TocNode(
+                    title="2.1 Register description",
+                    level=2,
+                    start_page=5,
+                    end_page=10,
+                    breadcrumb="2 UART > 2.1 Register description",
+                )
+            ],
+        ),
+    ]
+    quality = assess_toc_quality(nodes, total_pages=10)
+    assert quality.score > 0.5
+
+
+def test_numbered_siblings_survive():
+    """Digit masking collapses Port P1..P8, which are genuinely distinct
+    sections -- the ti_msp430f5529 shape. A minority of collisions must not
+    condemn a real outline.
+
+    The Ports subtree alone is 8 of its own 9 entries colliding -- a
+    majority, not the minority the docstring on ``_informativeness``
+    describes -- so it is embedded in a handful of other chapters here,
+    the way it sits inside a much larger real ToC. That dilution is what
+    the "minority" claim is actually about; the corpus check confirms it
+    (ti_msp430f5529 0.741 -> 0.670, nowhere near the 0.3 fallback line).
+    """
+    other_chapters = [
+        TocNode(title=title, level=1, start_page=p, end_page=p)
+        for p, title in enumerate(
+            ["1 Introduction", "2 System Overview", "4 Revision History"],
+            start=41,
+        )
+    ]
+    nodes = [
+        TocNode(
+            title="3 Ports",
+            level=1,
+            start_page=1,
+            end_page=40,
+            breadcrumb="3 Ports",
+            nodes=[
+                TocNode(
+                    title=f"3.{i} Port P{i} input/output",
+                    level=2,
+                    start_page=i * 4,
+                    end_page=i * 4 + 3,
+                    breadcrumb=f"3 Ports > 3.{i} Port P{i} input/output",
+                )
+                for i in range(1, 9)
+            ],
+        )
+    ] + other_chapters
+    quality = assess_toc_quality(nodes, total_pages=43)
+    assert quality.score > TOC_FALLBACK_THRESHOLD
+
+
+def test_nodes_without_a_breadcrumb_fall_back_to_the_title():
+    """TocNode.breadcrumb defaults to '' and tests construct nodes directly."""
+    nodes = [
+        TocNode(title="Alpha", level=1, start_page=1, end_page=5),
+        TocNode(title="Beta", level=1, start_page=6, end_page=10),
+    ]
+    quality = assess_toc_quality(nodes, total_pages=10)
+    assert quality.score > 0.5
+
+
+def test_the_bundled_datasheet_is_unaffected():
+    """The only assertion tying this heuristic to a real document. A change to
+    normalize_key that reintroduces collisions must fail loudly here.
+
+    0.82 is measured, not a round target: the outline's 89 entries produce 89
+    distinct breadcrumb keys, so informativeness is exactly 1.000 and the
+    score is unchanged by this factor.
+    """
+    from pathlib import Path
+
+    import pymupdf
+
+    from datasheetindex.core.structure import (
+        build_tree,
+        compute_end_pages,
+        extract_toc,
+    )
+
+    pdf = Path(__file__).resolve().parent.parent / (
+        "infineon-psoc-6-mcu-cy8c62x8-cy8c62xa-datasheet-datasheet-en.pdf"
+    )
+    if not pdf.exists():
+        pytest.skip("bundled PSoC datasheet not present")
+
+    doc = pymupdf.open(str(pdf))
+    try:
+        nodes = build_tree(extract_toc(doc), doc.page_count)
+        compute_end_pages(nodes, doc.page_count)
+        quality = assess_toc_quality(nodes, doc.page_count)
+    finally:
+        doc.close()
+    assert quality.score == 0.82
