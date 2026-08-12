@@ -671,19 +671,22 @@ class DatasheetIndex:
                 llm_client_origin = (
                     "toc_fallback" if needs_toc_fallback else "figure_captions"
                 )
+            # Checked before toc_fallback_pending is set: with regenerate_toc=True
+            # and no client, this raises and no artifacts are ever produced, so
+            # there is nothing for a "stays reusable" flag to describe.
+            if active_llm_callable is None and regenerate_toc:
+                raise RuntimeError(
+                    "regenerate_toc=True requires an LLM client, but none could "
+                    "be created. Install the [llm] extra and configure "
+                    "LITELLM_BASE_URL and LITELLM_MASTER_KEY."
+                )
+
             toc_fallback_pending = active_llm_callable is None and needs_toc_fallback
             if toc_fallback_pending:
                 logger.info(
                     "ToC quality below threshold but no LLM client is available; "
                     "the ToC is left as-is and these artifacts stay reusable "
                     "until a client appears"
-                )
-
-            if active_llm_callable is None and regenerate_toc:
-                raise RuntimeError(
-                    "regenerate_toc=True requires an LLM client, but none could "
-                    "be created. Install the [llm] extra and configure "
-                    "LITELLM_BASE_URL and LITELLM_MASTER_KEY."
                 )
 
         try:

@@ -219,6 +219,13 @@ class _VisionResolver:
         The ToC fallback needs a text client, not a vision one -- see ``take``.
         Forces construction through ``get`` so the answer is real, then reports
         on the owned client rather than the vision-filtered result.
+
+        Not idempotent across ``close()``: closing nulls ``_owned`` but leaves
+        ``_resolved`` set, so calling this after ``close()`` answers False even
+        though ``get()`` still returns the (now-closed) vision client. Not
+        reachable today -- ``close()`` runs in a ``finally`` after
+        ``_build_or_reuse`` has already returned -- but do not call either
+        method on a resolver past its ``close()``.
         """
         self.get()
         return self._owned is not None
@@ -548,9 +555,9 @@ class DatasheetTools:
             # Pending captions are not a defect, so the artifact above is
             # complete and every check so far has passed it. They become a
             # reason to rebuild only once vision capability actually exists --
-            # which is why this is last: the probe is real, and it must not be
-            # constructed on a path that was going to reject the artifact
-            # anyway.
+            # which is why this and the toc_fallback_pending clause below are
+            # last: the probe is real, and it must not be constructed on a
+            # path that was going to reject the artifact anyway.
             and not (
                 self._artifacts.figure_captions_pending > 0
                 and resolver.get() is not None

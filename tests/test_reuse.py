@@ -1622,12 +1622,18 @@ def test_the_probe_does_not_upgrade_an_empty_model_to_the_default(monkeypatch):
     assert seen == [{"model": ""}]
 
 
-def test_a_missing_llm_client_no_longer_blocks_reuse():
+def test_a_missing_llm_client_no_longer_blocks_reuse(tmp_path):
     """No credentials is a fact about the environment, not a failed build.
     Rebuilding cannot create credentials, so refusing reuse costs a full
-    rebuild on every request and buys nothing."""
+    rebuild on every request and buys nothing.
+
+    Uses a synthetic source under ``tmp_path`` rather than a real PDF: this is
+    a pure ``reuse_blocker`` fingerprint check, which only ever reads bytes
+    and stat results, so a hermetic placeholder source is exact -- and unlike
+    a real datasheet checked into the working tree but not into git, it exists
+    on every clone, including the CI runner that gates a release tag.
+    """
     from importlib.metadata import version
-    from pathlib import Path
 
     from datasheetindex.core.artifact_cache import (
         ArtifactRecord,
@@ -1635,7 +1641,8 @@ def test_a_missing_llm_client_no_longer_blocks_reuse():
         sha256_file,
     )
 
-    src = Path("infineon-psoc-6-mcu-cy8c62x8-cy8c62xa-datasheet-datasheet-en.pdf")
+    src = tmp_path / "source.pdf"
+    src.write_bytes(b"%PDF-1.4 not a real pdf")
     v = version("datasheetindex")
     record = ArtifactRecord(
         source_sha256=sha256_file(src),
@@ -1655,11 +1662,14 @@ def test_a_missing_llm_client_no_longer_blocks_reuse():
     )
 
 
-def test_a_transient_llm_failure_still_blocks_reuse():
+def test_a_transient_llm_failure_still_blocks_reuse(tmp_path):
     """toc_fallback_raised and figure_caption_failed are real failures worth
-    retrying; only the no-client case is a stable environment fact."""
+    retrying; only the no-client case is a stable environment fact.
+
+    See ``test_a_missing_llm_client_no_longer_blocks_reuse`` for why the
+    source is a synthetic ``tmp_path`` file rather than a real PDF.
+    """
     from importlib.metadata import version
-    from pathlib import Path
 
     from datasheetindex.core.artifact_cache import (
         ArtifactRecord,
@@ -1667,7 +1677,8 @@ def test_a_transient_llm_failure_still_blocks_reuse():
         sha256_file,
     )
 
-    src = Path("infineon-psoc-6-mcu-cy8c62x8-cy8c62xa-datasheet-datasheet-en.pdf")
+    src = tmp_path / "source.pdf"
+    src.write_bytes(b"%PDF-1.4 not a real pdf")
     v = version("datasheetindex")
     record = ArtifactRecord(
         source_sha256=sha256_file(src),
@@ -1707,3 +1718,115 @@ def test_a_sidecar_written_before_the_field_existed_still_loads():
         "llm_enrichment_notes": [],
     }
     assert ArtifactRecord.from_dict(payload).toc_fallback_pending is False
+
+
+def test_toc_fallback_pending_invalidates_on_disk_when_a_client_appears(
+    tmp_path, toc_pdf, not_editable, build_spy, monkeypatch, caplog
+):
+    """The disk gate's half of the rule, mirroring
+    ``test_capability_appearing_invalidates_the_artifact`` for
+    ``figure_captions_pending``.
+
+    Without ``_reuse_from_disk``'s ``toc_fallback_pending`` check, a document
+    built while keyless would be served from disk forever even after
+    credentials appeared, freezing its ToC at the original weak quality. This
+    is the regression test for deleting that check.
+    """
+    _force_weak_quality(monkeypatch)
+    _keyless(monkeypatch)
+    out = str(tmp_path / "out")
+    with DatasheetTools(str(toc_pdf)) as tools:
+        first = tools.build_datasheet(output_dir=out)
+    assert first.toc_fallback_pending is True
+    assert first.llm_enrichment_incomplete is False
+
+    opened, closed = [], []
+    _with_vision(monkeypatch, opened, closed)
+    with caplog.at_level("DEBUG", logger="datasheetindex.tools.bound"):
+        with DatasheetTools(str(toc_pdf)) as tools:
+            tools.build_datasheet(output_dir=out)
+
+    assert len(build_spy) == 2, "credentials appeared and nothing was rebuilt"
+    assert "toc_fallback_pending" in caplog.text, "rebuilt for the wrong reason"
+
+
+def test_has_client_answers_a_different_question_than_get(monkeypatch):
+    """The entire reason ``has_client`` exists instead of reusing ``get``.
+
+    ``get`` returns the vision-filtered client, which is ``None`` for a real
+    but non-vision-capable client; the ToC fallback needs any text client, so
+    ``has_client`` must see it where ``get`` cannot. Also pins that asking
+    both questions in one call constructs at most one client -- ``has_client``
+    must reuse ``get``'s own memoization rather than probing a second time.
+    """
+    from datasheetindex.tools.bound import _VisionResolver
+
+    seen: list[dict] = []
+
+    class _TextOnlyClient:
+        def __call__(self, _system, _user):
+            return "unused"
+
+    def fake_create(**kwargs):
+        seen.append(kwargs)
+        return _TextOnlyClient()
+
+    monkeypatch.setattr("datasheetindex.llm.client.create_llm_client", fake_create)
+
+    resolver = _VisionResolver(None)
+    assert resolver.get() is None
+    assert resolver.has_client() is True
+    assert len(seen) == 1, "get() + has_client() constructed more than one client"
+
+
+def test_toc_fallback_pending_is_false_when_a_client_is_obtained(tmp_path, monkeypatch):
+    """The other side of the guard: dropping ``active_llm_callable is None``
+    would set this even when a client WAS constructed, poisoning reuse with a
+    pending flag the environment already satisfies."""
+    pdf_path = tmp_path / "weak.pdf"
+    doc = pymupdf.open()
+    for _ in range(3):
+        page = doc.new_page()
+        writer = pymupdf.TextWriter(page.rect)
+        writer.append((72, 400), "Body text for this page of the datasheet")
+        writer.write_text(page)
+    doc.save(str(pdf_path))
+    doc.close()
+
+    def dummy_callable(system, user):
+        return "unused"
+
+    monkeypatch.setattr(
+        DatasheetIndex, "_try_create_default_llm_client", lambda _self: dummy_callable
+    )
+
+    idx = DatasheetIndex(str(pdf_path))
+    try:
+        artifacts = idx.build(output_dir=str(tmp_path / "out"))
+    finally:
+        idx.close()
+
+    assert artifacts.toc_quality is not None
+    assert artifacts.toc_quality.score < TOC_FALLBACK_THRESHOLD
+    assert artifacts.toc_fallback_pending is False
+
+
+def test_toc_fallback_pending_is_false_with_a_caller_supplied_client(
+    tmp_path, toc_pdf, monkeypatch
+):
+    """A caller-supplied callable suppresses construction entirely, so the
+    no-client branch never runs and must never mark this pending."""
+    _force_weak_quality(monkeypatch)
+
+    def dummy_callable(system, user):
+        return "unused"
+
+    idx = DatasheetIndex(str(toc_pdf))
+    try:
+        artifacts = idx.build(
+            output_dir=str(tmp_path / "out"), llm_callable=dummy_callable
+        )
+    finally:
+        idx.close()
+
+    assert artifacts.toc_fallback_pending is False
