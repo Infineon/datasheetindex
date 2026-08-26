@@ -36,10 +36,12 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 from chamberbench.claimsio import archive_dir, data_dir
+from chamberbench.grading import DEFAULT_CONFIDENCE_FLOOR
 
 CLAIMS = data_dir() / "claims.yaml"
 BASELINE = archive_dir() / "baseline_chamber.json"
-DEFAULT_FLOOR = 0.7
+# Shared with `evaluate_case`; see grading.DEFAULT_CONFIDENCE_FLOOR.
+DEFAULT_FLOOR = DEFAULT_CONFIDENCE_FLOOR
 
 
 def _evaluator() -> Any:

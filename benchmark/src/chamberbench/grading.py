@@ -11,6 +11,14 @@ from chamberbench.models import ExtractionResult, ParameterResult
 LIST_MATCH_THRESHOLD = 0.70
 
 
+# The confidence floor applied when a claim does not state one. Named here,
+# once, because three independent copies of this literal used to agree only by
+# coincidence -- this one, `ClaimSpec.confidence_min`'s default, and
+# `score_rederivation.DEFAULT_FLOOR`. Changing any one of them silently made
+# two scorers grade the same claim at different floors, with no error.
+DEFAULT_CONFIDENCE_FLOOR = 0.7
+
+
 def find_result(
     extraction: ExtractionResult, parameter_name: str
 ) -> ParameterResult | None:
@@ -137,7 +145,9 @@ def evaluate_case(
     )
     found_correct = (expected_found == result.found) or explicit_absence
     confidence = result.confidence
-    confidence_ok = confidence >= expected.get("confidence_min", 0.7)
+    confidence_ok = confidence >= expected.get(
+        "confidence_min", DEFAULT_CONFIDENCE_FLOOR
+    )
 
     evaluation: dict[str, Any] = {
         "found_expected": expected_found,
@@ -161,7 +171,7 @@ def evaluate_case(
         evaluation["overall_pass"] = found_correct and confidence_ok
         if not confidence_ok:
             evaluation["failure_reason"] = (
-                f"Confidence {confidence:.2f} < {expected.get('confidence_min', 0.7)}"
+                f"Confidence {confidence:.2f} < {expected.get('confidence_min', DEFAULT_CONFIDENCE_FLOOR)}"
             )
         return evaluation
 
@@ -215,7 +225,7 @@ def evaluate_case(
         reasons.append(failure_reason)
     if not confidence_ok:
         reasons.append(
-            f"Confidence {confidence:.2f} < {expected.get('confidence_min', 0.7)}"
+            f"Confidence {confidence:.2f} < {expected.get('confidence_min', DEFAULT_CONFIDENCE_FLOOR)}"
         )
     if reasons:
         evaluation["failure_reason"] = "; ".join(reasons)

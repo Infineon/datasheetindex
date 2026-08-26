@@ -14,6 +14,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_serializer
 
+from chamberbench.grading import DEFAULT_CONFIDENCE_FLOOR
 from chamberbench.models import NOT_SPECIFIED, ParameterResult
 
 ClaimKind = Literal["dc_accuracy", "range", "typical", "max", "min", "linearity"]
@@ -146,7 +147,7 @@ class ClaimSpec(BaseModel):
     source_page: list[int] = Field(default_factory=list)
     source_text: str = ""
     value_contains: list[str] = Field(default_factory=list)
-    confidence_min: float = 0.7
+    confidence_min: float = DEFAULT_CONFIDENCE_FLOOR
     # Reproducibility-side hooks.
     chamber_dataset: str = "wt_validate_v1"
     chamber_experiment_hint: str = ""

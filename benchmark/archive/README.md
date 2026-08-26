@@ -40,7 +40,7 @@ see [`../docs/reproducing.md`](../docs/reproducing.md).
 
 | File | What it holds | Used by |
 |---|---|---|
-| `baseline_chamber.json` | The full post-audit matrix: per claim x engine x model, including `claim_result` (the raw extraction). **The only file that can be re-graded**, because it is the only one that kept the extractions. | most analyses; `regrade_archive.py` |
+| `baseline_chamber.json` | The full post-audit matrix: per claim x engine x model, including `claim_result` (the raw extraction). The re-gradable file: `regrade_archive.py` reads its 149 stored extractions. The `latest_chamber.{model}.json` copies carry the same 149 cells byte-identically; `latest_chamber.qwen3.5-27b.json` and `a4988_fidelity_rerun.*` hold further extractions outside the published matrix. | most analyses; `regrade_archive.py` |
 | `variance_chamber.json` | Three repeats per model, reduced to Table 1. Stores verdicts **without** extractions, so it cannot be re-graded. A primary artifact: it was NOT produced by `consolidate_variance.py` from the inputs below — see that script's guard. | `render_paper_tables.py` |
 | `latest_chamber.{model}.json` | Per-model single-run detail behind the cost figures. `latest_chamber.json` is a byte-identical copy of the Sonnet file, kept because scripts referenced both names. | `chamber_cost_summary.py` |
 | `latest_traces.{model}.jsonl` | Per-step trace events: tool calls, tokens, latency. The sole input to the latency and dispatch decompositions. | `chamber_cost_summary.py`, classifier |

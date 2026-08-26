@@ -77,12 +77,22 @@ the Qwen instability headline, **cannot be re-graded from what is shipped**.
 Those verdicts have to be taken on trust, and the earlier answer to "can you
 check our arithmetic" is qualified by exactly that.
 
-Run with no override and you should see **148 agree, 1 flip**. The flip is
-`acs70331-saturation-low`, and it is expected: that claim's needle was
-`VSAT_LOW`, a symbol that can never appear in the string needles are matched
-against, so the cell was recorded as a failure. The repaired needle (`20`,
-`mV`) matches, and the archive still holds the pre-repair verdict. The paper
-discloses the repair; this is what it looks like from the outside.
+Run with no override and you should see **148 agree, 1 flip**, on
+`acs70331-saturation-low`. It is expected, and the reason is worth
+understanding because it is about the *matcher*, not the claim set.
+
+That claim was gated on the symbol `VSAT_LOW`. At the time the archive was
+produced, the string a needle was matched against still included the model's
+own quoted span, so the symbol was reachable — five of the claim's six cells
+quoted a span containing it and passed; the sixth did not and failed. The span
+was then removed from the matched text, precisely so that quoting the right
+table row could not by itself satisfy a value check. That made `VSAT_LOW`
+unsatisfiable, and the needle was replaced with the value and its unit.
+
+So the archive is internally consistent: every one of those six verdicts is
+exactly predicted by whether that cell's quoted span contained the symbol. What
+the flip measures is the grading-surface change, not a stale cell. The paper
+documents the repair in its appendix on the claim list.
 
 [`annotator_guide.md`](annotator_guide.md) is the instruction set the
 independent annotator worked from. A disagreement is a finding; please report

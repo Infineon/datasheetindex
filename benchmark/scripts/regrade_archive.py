@@ -32,10 +32,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
 from typing import Any
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 from chamberbench.claimsio import archive_dir, data_dir, load_claims
 from chamberbench.grading import evaluate_case
@@ -53,8 +50,11 @@ def _expectation(claim: Any) -> dict[str, Any]:
         "found": True,
         "value_contains": [str(x) for x in (claim.value_contains or [])],
     }
-    if claim.confidence_min is not None:
-        spec["confidence_min"] = float(claim.confidence_min)
+    # `ClaimSpec.confidence_min` is a non-Optional float defaulting to
+    # `grading.DEFAULT_CONFIDENCE_FLOOR`, so it is always set. Passing it
+    # explicitly (rather than relying on evaluate_case's own default) keeps this
+    # correct if the field ever becomes optional.
+    spec["confidence_min"] = float(claim.confidence_min)
     return spec
 
 
@@ -75,7 +75,31 @@ def main() -> int:
         print(f"ERROR: {baseline_path} not found.", file=sys.stderr)
         return 1
 
-    claims = {c.id: c for c in load_claims(args.claims)}
+    try:
+        claims = {c.id: c for c in load_claims(args.claims)}
+    except FileNotFoundError:
+        print(
+            f"ERROR: no claim file at {data_dir() / args.claims}.\n"
+            "  CHAMBERBENCH_DATA_DIR must point at a directory containing a file\n"
+            f"  named {args.claims!r}. The simplest way to make one is to copy the\n"
+            "  shipped data/ directory and edit the fields you want to change --\n"
+            "  keep every claim and every other field, or coverage drops silently.",
+            file=sys.stderr,
+        )
+        return 1
+    except Exception as exc:  # noqa: BLE001 - yaml.YAMLError or pydantic ValidationError
+        print(
+            f"ERROR: {data_dir() / args.claims} could not be parsed as a claim set.\n"
+            f"  {type(exc).__name__}: {str(exc)[:800]}\n"
+            "  Each entry must be a complete ClaimSpec: quote numeric needles as\n"
+            "  strings (value_contains: ['20', 'mV'], not [20, mV]), give\n"
+            "  confidence_min a number rather than leaving it blank, and add no\n"
+            "  extra keys. Copying data/claims.yaml and editing in place avoids\n"
+            "  all three.",
+            file=sys.stderr,
+        )
+        return 1
+
     doc = json.loads(baseline_path.read_text(encoding="utf-8"))
 
     print("Re-grading archived extractions")
@@ -83,7 +107,32 @@ def main() -> int:
     print(f"  archive: {baseline_path}")
     print()
 
-    agree = disagree = ungradable = 0
+    # Coverage, reported BEFORE any verdict. A claim set that omits ids simply
+    # grades fewer cells, and without this the tool answers a smaller question
+    # while looking like it answered the whole one -- an abstention, which the
+    # annotator guide explicitly invites, would produce a CLEANER result than
+    # our own self-check with nothing to say that cells had vanished.
+    archive_ids = set(doc.get("results") or {})
+    claim_ids = set(claims)
+    missing_from_claims = sorted(archive_ids - claim_ids)
+    missing_from_archive = sorted(claim_ids - archive_ids)
+
+    print(f"  claims in set:        {len(claim_ids)}")
+    print(f"  claim ids in archive: {len(archive_ids)}")
+    if missing_from_claims:
+        print(
+            f"  NOT GRADED ({len(missing_from_claims)} archive ids absent from your claim set):"
+        )
+        for cid in missing_from_claims:
+            print(f"    - {cid}")
+    if missing_from_archive:
+        print(
+            f"  no archive cells ({len(missing_from_archive)} claims unused): "
+            + ", ".join(missing_from_archive)
+        )
+    print()
+
+    agree = disagree = ungradable = no_extraction = 0
     flips: list[str] = []
 
     for cid, engines in (doc.get("results") or {}).items():
@@ -98,6 +147,11 @@ def main() -> int:
                     continue
                 raw = ((cell.get("claim_result") or {}).get("extracted")) or {}
                 if not raw:
+                    # No stored extraction (e.g. the submit tool was never
+                    # called). Correctly un-re-gradable, but it must be counted
+                    # or the denominator cannot be checked against the
+                    # archive's own cell count.
+                    no_extraction += 1
                     continue
                 published = bool((cell.get("fidelity") or {}).get("overall_pass"))
                 try:
@@ -127,7 +181,11 @@ def main() -> int:
         print()
 
     total = agree + disagree
-    print(f"re-gradable cells: {total}  (ungradable: {ungradable})")
+    print(f"cells considered:      {total + ungradable + no_extraction}")
+    print(f"  with an extraction:  {total + ungradable}")
+    print(f"  without one:         {no_extraction}  (no verdict to re-check)")
+    print(f"  failed to parse:     {ungradable}")
+    print(f"re-graded:             {total}")
     print(f"  agree with published verdict:    {agree}")
     print(f"  disagree (verdict would change): {disagree}")
 
@@ -138,9 +196,17 @@ def main() -> int:
         )
         return 1
 
+    if missing_from_claims:
+        print(
+            f"\nPARTIAL: {len(missing_from_claims)} of {len(archive_ids)} archive claims "
+            "were not covered by your claim set,\n         so the counts above describe a "
+            "subset of the corpus."
+        )
+        return 2
+
     print(
-        "\nNOTE: only baseline_chamber.json retains raw extractions. The variance\n"
-        "      repeats store verdicts only and are NOT re-graded here."
+        "\nNOTE: the variance repeats store verdicts without the extractions that\n"
+        "      produced them, so they are not re-gradable here."
     )
     # A disagreement is a finding, not an error: it is exactly what an
     # alternative grading surface is meant to surface. Exit 0 either way, and
