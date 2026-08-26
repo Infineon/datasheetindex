@@ -23,7 +23,6 @@ SCRIPT = BENCHMARK_ROOT / "scripts" / "regrade_archive.py"
 
 
 def _run(data_dir_override=None):
-    env = {"PATH": "/usr/bin:/bin"}
     import os
 
     env = dict(os.environ)
@@ -152,7 +151,21 @@ def test_a_missing_claim_file_says_what_is_required(tmp_path):
 
 def test_the_archive_is_not_written_to():
     """Re-grading is read-only; it must never touch the evidence."""
-    before = {p.name: p.stat().st_mtime_ns for p in archive_dir().glob("*.json")}
-    _run()
-    after = {p.name: p.stat().st_mtime_ns for p in archive_dir().glob("*.json")}
-    assert before == after, "regrade_archive modified the archive"
+    # Hash every file, not just top-level *.json by mtime: the real mutation
+    # paths found in review wrote a .md, some .jsonl and figures/*.png, all of
+    # which the narrower check was blind to.
+    import hashlib
+
+    def digest():
+        return {
+            str(p.relative_to(archive_dir())): hashlib.sha256(
+                p.read_bytes()
+            ).hexdigest()
+            for p in sorted(archive_dir().rglob("*"))
+            if p.is_file()
+        }
+
+    before = digest()
+    proc = _run()
+    assert proc.returncode == 0, proc.stderr[-1000:]
+    assert before == digest(), "regrade_archive modified the archive"

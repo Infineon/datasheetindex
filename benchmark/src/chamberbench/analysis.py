@@ -30,6 +30,7 @@ Run:
 from __future__ import annotations
 
 import json
+import os
 import statistics
 from collections import defaultdict
 from pathlib import Path
@@ -47,7 +48,10 @@ from chamberbench.claimsio import archive_dir, short_path
 # Only used to shorten paths in printed output.
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 RESULTS_DIR = archive_dir()
-FIGURES_DIR = RESULTS_DIR / "figures"
+# NOT inside the archive: these are outputs, and writing them there put
+# generated files into the evidence directory. Same override as
+# scripts/render_paper_figures.py.
+FIGURES_DIR = Path(os.environ.get("CHAMBERBENCH_FIGURE_DIR", PROJECT_ROOT / "figures"))
 
 # Public-list pricing per 1M tokens (input, output). Mirrors
 # ``scripts/chamber_cost_summary.py`` so the two artefacts agree.

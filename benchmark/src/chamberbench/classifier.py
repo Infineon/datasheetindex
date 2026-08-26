@@ -553,11 +553,18 @@ def main() -> int:
     # the no-argument invocation replace primary evidence in place. Refuse,
     # unless the caller says otherwise.
     if not args.force:
-        inside = [
-            p
-            for p in (args.traces, args.summary)
-            if archive_dir() in Path(p).resolve().parents
-        ]
+        # Resolve BOTH sides. `archive_dir()` returns the env var verbatim, so
+        # comparing it against a resolved path let any non-canonical spelling
+        # walk straight through -- `CHAMBERBENCH_ARCHIVE_DIR=archive`, the
+        # obvious thing to type from the benchmark root, defeated this guard
+        # entirely. Compare inclusively too, so a path equal to the archive dir
+        # counts as inside it.
+        arch = archive_dir().resolve()
+        inside = []
+        for p in (args.traces, args.summary):
+            rp = Path(p).resolve()
+            if rp == arch or arch in rp.parents:
+                inside.append(p)
         if inside:
             print(
                 "REFUSING to classify in place: this rewrites the files it reads,\n"

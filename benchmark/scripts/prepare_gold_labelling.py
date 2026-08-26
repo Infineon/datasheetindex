@@ -239,6 +239,7 @@ def stratified_sample(
 
 def run_classifier_per_model(
     per_model_events: dict[str, list[dict[str, Any]]],
+    rebuild_auto: bool = False,
 ) -> dict[str, dict[str, Any]]:
     """Run the manual-rule classifier per model and write per-model
     auto-label files.
@@ -257,6 +258,19 @@ def run_classifier_per_model(
         # Materialise inputs for the classifier (writes back in place).
         merged_trace = RESULTS_DIR / f"classifier_auto.{m}.jsonl"
         merged_summary = RESULTS_DIR / f"classifier_auto.{m}.json"
+        # These are shipped evidence -- the inputs to the paper's Cohen's kappa
+        # -- and they CANNOT be reproduced faithfully here: the merge below
+        # reads `snapshot_layer2_traces.{m}.jsonl`, which is not part of this
+        # release, and silently yields truncated attribution lists when absent.
+        # Overwriting them would therefore downgrade the archive rather than
+        # rebuild it.
+        if merged_summary.exists() and not rebuild_auto:
+            print(
+                f"  {m}: keeping the shipped classifier_auto.{m}.* "
+                "(pass --rebuild-auto-labels to regenerate; note the snapshot "
+                "traces they were built from are not shipped)"
+            )
+            continue
         shutil.copyfile(src_summary, merged_summary)
         events = per_model_events[m]
         with merged_trace.open("w", encoding="utf-8") as fh:
@@ -589,6 +603,13 @@ def main() -> int:
         help="Pre-fill the annotator name in the metadata block",
     )
     ap.add_argument(
+        "--rebuild-auto-labels",
+        action="store_true",
+        help="Regenerate archive/classifier_auto.* from the (unshipped) snapshot "
+        "traces. Without those, the result is a truncated downgrade of the "
+        "shipped files -- which is why this is separate from --force.",
+    )
+    ap.add_argument(
         "--force",
         action="store_true",
         help="Overwrite an --out file that already carries labels (destroys annotation work)",
@@ -672,7 +693,7 @@ def main() -> int:
 
     print()
     print("== Step 4: running classifier per model (manual rule pass) ==")
-    run_classifier_per_model(per_model_events)
+    run_classifier_per_model(per_model_events, rebuild_auto=args.rebuild_auto_labels)
 
     print()
     print("== Step 5: writing gold-labelling YAML skeleton (blind) ==")

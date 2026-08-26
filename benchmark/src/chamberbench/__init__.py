@@ -90,4 +90,6 @@ def __getattr__(name: str) -> Any:
 
 
 def __dir__() -> list[str]:
-    return sorted(__all__)
+    # Augment rather than replace: replacing hid submodules and dunders that
+    # `hasattr` still reports, so `dir()` and `hasattr` disagreed.
+    return sorted(set(globals()) | set(__all__))

@@ -49,6 +49,11 @@ needing chamber data are exactly the ones that can produce a non-inconclusive
 verdict, so an unreachable dataset must not be reported as "no failures found".
 An exit of 1 there means *incomplete*, not *failed*.
 
+`regrade_archive.py` uses the same convention: **exit 2** means your claim set
+did not cover every claim in the archive, so the counts describe a subset. It
+names the claims it could not grade. Exit 1 means nothing was gradable at all;
+disagreements alone are a finding, not an error, and exit 0.
+
 `tests/test_reproduces_paper.py` pins the headline numbers directly, so a
 drift in the archive or the grading surface fails a test rather than quietly
 changing a table.
@@ -140,9 +145,11 @@ be verified against the one we used:
 | current sensor | ACS70331 | Allegro MicroSystems | 2 | 26 | `c5e78d82d561d3e2` |
 | motor driver (off corpus) | A4988 | Allegro MicroSystems | 5 | 20 | `c7341f95ab7d571d` |
 
-The first three are mirrored in the Causal Chambers repository under
-`hardware/datasheets/`, which is the easiest place to fetch them. The A4988 is
-not mirrored there — fetch it from Allegro MicroSystems by part number.
+All four are mirrored in the Causal Chambers repository under
+`hardware/datasheets/` (`barometer.pdf`, `light_sensor.pdf`,
+`current_sensor.pdf`, `motor_driver.pdf`), which is the easiest place to fetch
+them; the checksums above are what you should get. They are of course also
+available from each manufacturer by part number.
 
 **If a checksum does not match, the vendor has reissued the document.** That is
 expected over time and is not a failure of the benchmark; it does mean the

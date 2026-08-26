@@ -13,6 +13,60 @@ WHAT IS MIT-LICENSED
     evaluated models produced, together with our own scoring of them.
 
 THIRD-PARTY DATASHEET TEXT INSIDE THE ARCHIVE
+  The archive records an agent navigating technical datasheets published by
+  third parties, and it quotes those documents at length. The quoted text lives
+  in `archive/*.jsonl` (fields `tool_output_summary` and `agent_reasoning`) and
+  also in `archive/*.json` (fields `source_text` and `submitted_source_text`).
+
+    - Si115x                Silicon Laboratories Inc.
+    - ACS70331, A4988       Allegro MicroSystems, LLC
+    - DPS310                Infineon Technologies AG (ours, but see below)
+
+  We would rather state the extent plainly than characterise it favourably.
+  Measuring verbatim six-word sequences shared between each document's text
+  layer and the whole archive, two ways -- by position (what share of the
+  document's running text appears verbatim somewhere) and by distinct sequence:
+
+                    by position      distinct sequences
+    Si115x              ~44%               ~35%
+    DPS310              ~53%               ~27%
+    ACS70331            ~26%               ~25%
+    A4988                ~3%                ~3%
+
+  Individual `tool_output_summary` records are capped at about 1,500
+  characters; `agent_reasoning` is not capped. The longest contiguous verbatim
+  run in a single record is roughly 260 words of prose, and one 596-word run
+  that is a table of contents. Some individual pages are covered far more
+  heavily than the document average, and complete parametric tables -- for
+  example the Si115x recommended-operating-conditions table -- appear in full,
+  with their row and column structure intact.
+
+  Partial reconstruction is possible, and we would rather say so than imply
+  otherwise. Tool outputs carry explicit page attribution (`Page 9:`,
+  `=== Page 1 of 41 ===`), so fragments can be grouped by the page they came
+  from; for the most heavily covered documents a number of individual pages can
+  be recovered at high fidelity. What is NOT present is any figure, diagram or
+  image; any page geometry or layout coordinates; and any complete document.
+
+  This text is reproduced for one purpose: so that published evaluation
+  results can be independently verified. That is a transformative,
+  non-commercial research use, and the underlying datasheets are deliberately
+  not included in this repository. The text nevertheless remains the copyright
+  of the respective manufacturers and is NOT covered by the MIT grant above.
+  No permission to redistribute the underlying datasheets is granted or
+  implied.
+
+  The DPS310 is Infineon's own document, so its copyright sits with the same
+  party as this repository. It is listed here because the MIT grant above still
+  does not extend to it: publishing a datasheet's contents under MIT is not
+  something this release intends, for our own document any more than for
+  anyone else's.
+
+  If you are a rights holder and would like material removed, please open an
+  issue at https://github.com/Infineon/datasheetindex/issues and we will
+  respond promptly.
+
+THIRD-PARTY DATASHEET TEXT INSIDE THE ARCHIVE
   The archived traces in archive/*.jsonl record an agent navigating technical
   datasheets published by third parties. Two kinds of field quote those
   documents: `tool_output_summary` (what a tool returned) and `agent_reasoning`

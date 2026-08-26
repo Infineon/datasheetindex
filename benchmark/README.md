@@ -55,7 +55,7 @@ cd benchmark
 uv venv && uv pip install -e '.[test]'
 uv run python scripts/render_paper_tables.py    # the paper's model-comparison tables
 uv run python scripts/render_paper_figures.py   # its figures
-uv run pytest -q                                # 141 tests, incl. the paper's numbers
+uv run pytest -q                                # 145 tests, incl. the paper's numbers
 ```
 
 `uv.lock` pins the numeric stack (numpy, pandas, matplotlib) so that a future
@@ -129,9 +129,10 @@ MIT for everything we wrote — the code, the docs, the claim sets, and the
 archived model outputs. **That licence does not extend to everything in
 `archive/`.** The archived traces record what tools returned to the model, and
 those outputs — and the model's own reasoning about them — quote third-party
-datasheets (Silicon Laboratories, Allegro MicroSystems) at length: roughly a
-quarter to a third of each document's body text appears verbatim somewhere in
-the archive. That text remains its authors' copyright and is reproduced only so
+datasheets (Silicon Laboratories, Allegro MicroSystems) at length — for the
+three heavily-navigated documents, between a quarter and half of the body text
+appears verbatim somewhere in the archive, and individual pages can be partly
+reconstructed. That text remains its authors' copyright and is reproduced only so
 that published results can be verified. The datasheets themselves are not
 included here. [`NOTICE`](./NOTICE) states the extent and scope precisely, with
 measurements and a takedown contact.

@@ -23,8 +23,13 @@ def main() -> int:
     for claim in _load_claims():
         try:
             m = run_protocol(claim)
-        except (OSError, ImportError, AttributeError) as exc:
-            # Chamber data or its protocol module could not be loaded
+        except (OSError, ImportError) as exc:
+            # Chamber data or its protocol module could not be loaded.
+            # AttributeError is deliberately NOT caught: run_protocol raises it
+            # for a protocol with no run(), but the same handler would also
+            # swallow an AttributeError raised INSIDE a protocol -- reporting a
+            # code defect as missing chamber data, in an artifact whose subject
+            # is exactly that kind of misattribution.
             # (URLError subclasses OSError; ImportError covers a claim whose
             # chamber_protocol names no real module, e.g. the not_gradable
             # sentinel in the off-corpus claim set) -- almost always a missing or

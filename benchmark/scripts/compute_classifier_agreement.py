@@ -231,6 +231,17 @@ def main() -> int:
         action="append",
         help="Gold-label YAML. Repeat once to add a second annotator and get inter-annotator agreement.",
     )
+    ap.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="Where to write the agreement report (default: beside the shipped one).",
+    )
+    ap.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite the shipped archive/classifier_agreement.md in place.",
+    )
     args = ap.parse_args()
     golds = args.gold or [GOLD_YAML]
 
@@ -243,12 +254,12 @@ def main() -> int:
         # Then fall through and score each against the classifier.
         for path in golds:
             print()
-            rc = max(rc, _score_one(path))
+            rc = max(rc, _score_one(path, args.out, args.force))
         return rc
     return _score_one(golds[0])
 
 
-def _score_one(gold_path: Path) -> int:
+def _score_one(gold_path: Path, out_md: Path | None = None, force: bool = False) -> int:
     global GOLD_YAML
     GOLD_YAML = gold_path
     if not GOLD_YAML.exists():
@@ -478,8 +489,17 @@ def _score_one(gold_path: Path) -> int:
         + "The per-tool error-rate plot in this paper should be read with this "
         + f"~{(1 - agreement_rate) * 100:.0f}% classifier-disagreement bound in mind.*"
     )
-    AGREEMENT_MD.write_text("\n".join(md_lines) + "\n", encoding="utf-8")
-    print(f"  wrote {short_path(AGREEMENT_MD)}")
+    # `classifier_agreement.md` is tracked evidence, and this script is a
+    # DOCUMENTED read-only analysis -- so writing it by default meant the
+    # documented command churned the archive on every run. Regenerable, so the
+    # default now writes beside it rather than refusing.
+    out_md = out_md or AGREEMENT_MD
+    if out_md == AGREEMENT_MD and AGREEMENT_MD.exists() and not force:
+        out_md = PROJECT_ROOT / "classifier_agreement.regenerated.md"
+        print(f"  (archive copy left intact; writing {short_path(out_md)})")
+        print("   pass --force to overwrite the shipped report, or --out <path>)")
+    out_md.write_text("\n".join(md_lines) + "\n", encoding="utf-8")
+    print(f"  wrote {short_path(out_md)}")
 
     return 0
 
