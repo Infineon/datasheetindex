@@ -1,6 +1,6 @@
 """Consolidate per-model chamber runs into the 3-axis frozen baseline.
 
-Day 16 part 2. Reads multiple `latest_chamber.{model}.json` files and
+Reads multiple `latest_chamber.{model}.json` files and
 their pre-rerun snapshots, then writes `baseline_chamber.json` with the
 new `claim_id × engine × model` shape.
 

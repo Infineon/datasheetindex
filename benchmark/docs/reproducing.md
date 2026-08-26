@@ -35,6 +35,14 @@ Every command below reads only `archive/` and `data/`, except the one marked
 | Cost summary | `python scripts/chamber_cost_summary.py` |
 | Baseline vs agentic | `python scripts/baseline_vs_agentic.py` |
 
+**Create the cache directory first** — `causalchamber` does not create it, so a
+first run otherwise reports that the dataset could not be fetched when the
+network was fine:
+
+```bash
+mkdir -p /tmp/cc_data     # or $CHAMBER_CACHE_ROOT
+```
+
 The **(net)** command exits **1** if the Causal Chambers dataset cannot be
 fetched, and prints which claims were skipped. That is deliberate: the claims
 needing chamber data are exactly the ones that can produce a non-inconclusive
@@ -127,10 +135,14 @@ be verified against the one we used:
 
 | Role | Part | Vendor | Rev | Pages | SHA-256 (first 16) |
 |---|---|---|---|---|---|
-| barometer | DPS310 | Infineon | — | 41 | `440d2b01d1e9851a` |
+| barometer | DPS310 | Infineon | V1.1 | 41 | `440d2b01d1e9851a` |
 | light sensor | Si115x | Silicon Laboratories | 1.4 | 65 | `d3e0f16e6fc95572` |
 | current sensor | ACS70331 | Allegro MicroSystems | 2 | 26 | `c5e78d82d561d3e2` |
 | motor driver (off corpus) | A4988 | Allegro MicroSystems | 5 | 20 | `c7341f95ab7d571d` |
+
+The first three are mirrored in the Causal Chambers repository under
+`hardware/datasheets/`, which is the easiest place to fetch them. The A4988 is
+not mirrored there — fetch it from Allegro MicroSystems by part number.
 
 **If a checksum does not match, the vendor has reissued the document.** That is
 expected over time and is not a failure of the benchmark; it does mean the

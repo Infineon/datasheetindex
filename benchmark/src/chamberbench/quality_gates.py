@@ -6,7 +6,7 @@ matrix) and optionally `archive/baseline_chamber.json`
 
 Baseline schemas supported:
   v1 (legacy, Sonnet-only): top-level `results` is keyed `<cid>|<eng>`.
-  v2 (Day 16 part 2): `results[claim_id][engine][model] -> cell`. Each
+  v2: `results[claim_id][engine][model] -> cell`. Each
       cell carries a `status` in {"ok", "not_applicable", "pending_rerun"}.
 
 Hard gates (exit 1 on failure):
@@ -344,7 +344,7 @@ def _check_per_model_improvements(
 
 def _check_engine_errors(cells: dict[str, dict[str, Any]]) -> list[str]:
     """Engine errors are populated on either:
-    - cell["engine_error"]            (Day 4 review fix, current schema)
+    - cell["engine_error"]            (current schema)
     - cell["fidelity"]["engine_error"](mirrored boolean)
     - cell["error"]                   (back-compat, older traces)
     """
@@ -377,7 +377,7 @@ def _check_protocol_errors(cells: dict[str, dict[str, Any]]) -> list[str]:
     the short-circuit branch of every protocol module. Earlier versions
     of this gate keyed on `unmatched_conditions` being non-empty, which
     became dangerously permissive once `match_conditions` started
-    reporting non-load-bearing constraints as unmatched (Day 8 onward):
+    reporting non-load-bearing constraints as unmatched:
     a future NaN bug in the full-run path of a claim with any
     non-load-bearing constraint would have been silently swallowed.
     """

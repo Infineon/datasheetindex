@@ -1,6 +1,6 @@
 """Unit tests for `chamber_eval.protocols._common` -- pure logic, no chamber.
 
-These verify the tightened condition-matching that lands on Day 8 of the
+These verify the tightened condition-matching introduced in the
 chamber-paper plan. The behavioural change vs. the original
 `barometer_dc_accuracy._match_conditions` is that a recorded column whose
 values lie outside the claim's stated value/min/max window now reports as
@@ -204,7 +204,7 @@ class TestMatchConditions:
     def test_empty_dataframe_no_constraint_matches(self):
         # Contract pinned in the docstring: structural existence is enough
         # when no value/min/max is set, even on an empty frame. Earlier
-        # implementations had this swapped -- see the Day-8 review.
+        # implementations had this swapped.
         claim = _claim_with(OperatingCondition(name="t", chamber_variable="res_in"))
         df = pd.DataFrame({"res_in": pd.Series([], dtype=float)})
         matched, _ = match_conditions(claim, df)
@@ -303,7 +303,7 @@ class TestStubVerdict:
     def test_reason_stub_yields_inconclusive_verdict(self):
         # The reason-based stub (e.g. linearity-not-implemented) must
         # also route to inconclusive even though no operating condition
-        # is unmatched. This pins the W1 fix from the Day-9 review.
+        # is unmatched. This pins a later fix.
         from chamberbench.protocols._common import (
             make_stub_measurement,
         )

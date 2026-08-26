@@ -1,9 +1,9 @@
 chamberbench — chamber-grounded benchmark
 Copyright (c) 2026 Infineon Technologies AG
 
-This project is licensed under the MIT License (see ./LICENSE). The scope of
-that licence is narrower than the directory it sits in, and the distinction
-matters:
+This project is licensed under the MIT License (see the LICENSE file beside
+this one). The scope of that licence is narrower than the directory it sits in,
+and the distinction matters.
 
 WHAT IS MIT-LICENSED
   - All source under src/, scripts/ and tests/.
@@ -12,26 +12,48 @@ WHAT IS MIT-LICENSED
   - The archived model outputs under archive/ -- that is, the responses our
     evaluated models produced, together with our own scoring of them.
 
-WHAT IS NOT OURS TO LICENSE
-  The archived traces in archive/*.jsonl record what tools returned to the
-  model during a run. Those tool outputs contain SHORT EXCERPTS of technical
-  datasheets published by third parties:
+THIRD-PARTY DATASHEET TEXT INSIDE THE ARCHIVE
+  The archived traces in archive/*.jsonl record an agent navigating technical
+  datasheets published by third parties. Two kinds of field quote those
+  documents: `tool_output_summary` (what a tool returned) and `agent_reasoning`
+  (the model's own working, which frequently restates what it read).
 
     - Si115x                Silicon Laboratories Inc.
     - ACS70331, A4988       Allegro MicroSystems, LLC
-    - DPS310                Infineon Technologies AG
+    - DPS310                Infineon Technologies AG (ours, but see below)
 
-  Each excerpt is capped at roughly 1,500 characters, and no document is
-  reproduced in full or in a form from which it could be reconstructed:
-  figures and images are omitted entirely, and the text appears as
-  discontiguous fragments selected by the model's own navigation.
+  We would rather state the extent plainly than characterise it favourably.
+  Measured as verbatim six-word-sequence overlap between each document's text
+  layer and the whole archive:
 
-  These excerpts are reproduced for the sole purpose of allowing published
-  evaluation results to be independently verified -- a transformative,
-  non-commercial research use. They remain the copyright of the respective
-  manufacturers and are NOT covered by the MIT licence above. No permission
-  to redistribute the underlying datasheets is granted or implied, and the
-  datasheets themselves are deliberately not included in this repository.
+    Si115x    ~35%      ACS70331  ~25%
+    DPS310    ~27%      A4988     <1%
+
+  Individual `tool_output_summary` records are capped at about 1,500
+  characters, and `agent_reasoning` is not capped. The longest contiguous
+  verbatim run we measured is roughly 270 words. Some individual pages are
+  covered far more heavily than the document average, and complete parametric
+  tables (for example the Si115x recommended-operating-conditions table) appear
+  in full.
+
+  What is NOT present: any figure, diagram or image; any page layout; and any
+  ordering that would let a document be reassembled -- the material is
+  scattered across thousands of records in the order an agent happened to read
+  it, interleaved with model output.
+
+  This text is reproduced for one purpose: so that published evaluation
+  results can be independently verified. That is a transformative,
+  non-commercial research use, and the underlying datasheets are deliberately
+  not included in this repository. The text nevertheless remains the copyright
+  of the respective manufacturers and is NOT covered by the MIT grant above.
+  No permission to redistribute the underlying datasheets is granted or
+  implied.
+
+  The DPS310 is Infineon's own document, so its copyright sits with the same
+  party as this repository. It is listed here because the MIT grant above still
+  does not extend to it: publishing a datasheet's contents under MIT is not
+  something this release intends, for our own document any more than for
+  anyone else's.
 
   If you are a rights holder and would like material removed, please open an
   issue at https://github.com/Infineon/datasheetindex/issues and we will
@@ -44,6 +66,6 @@ THIRD-PARTY DATA
     Real-World Physical Testbed for AI Methodology. Nature Machine
     Intelligence 7(1), 107-118. https://doi.org/10.1038/s42256-024-00964-x
 
-  The dataset is distributed under CC BY 4.0 and requires attribution; that
-  grant covers the images and .csv files in its datasets, and does NOT extend
-  to the manufacturer datasheets mirrored in that repository.
+  The dataset is distributed under CC BY 4.0 and requires attribution. That
+  grant covers the images and .csv files in its datasets; it does NOT extend to
+  the manufacturer datasheets mirrored in that repository.

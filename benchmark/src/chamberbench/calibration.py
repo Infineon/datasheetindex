@@ -1,6 +1,6 @@
 """Chamber benchmark -- confidence behavior analysis.
 
-Day 17 of the chamber paper plan was originally scoped as a traditional
+This analysis was originally scoped as a traditional
 calibration analysis (reliability diagram, ECE, Brier score) of the
 agent's self-reported ``ClaimResult.confidence`` against the matrix
 verdicts. That scope is *degenerate on this benchmark*: across the 95

@@ -1,6 +1,6 @@
 """Prepare the failure-attribution gold-labelling exercise.
 
-Day 18 of the chamber paper plan. Produces three artifacts:
+Produces three artifacts:
 
   1. ``archive/classifier_auto.{model}.json`` -- per-model
      classifier auto-labels (the existing manual-rule pass), computed
@@ -646,6 +646,14 @@ def main() -> int:
     print(f"  sampled {len(sample)} cells:")
     for k in sorted(by_strat):
         print(f"    {k:<32s} {by_strat[k]}")
+    # `sampled_cells.json` is shipped evidence (it records which cells the blind
+    # gold labelling drew). Regenerating it re-draws the sample, which would
+    # silently detach the shipped gold files from the cells they describe.
+    if SAMPLED_CELLS.exists() and not args.force:
+        print(f"REFUSING to overwrite {short_path(SAMPLED_CELLS)}.")
+        print("  It records the sample the shipped gold labels were drawn from;")
+        print("  re-drawing it would orphan them. Pass --force to overwrite.")
+        return 1
     SAMPLED_CELLS.write_text(
         json.dumps(
             {

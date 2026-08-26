@@ -16,7 +16,7 @@ ever opening the datasheet.** Fidelity alone cannot see that, which is why
 this repository ships the dispatch-level detector rules alongside the scorer.
 
 > **Paper.** *Fidelity Is Not Enough: Dispatch-Level Instrumentation for
-> Datasheet-Extraction Agents.* EMNLP 2026 Industry Track.
+> Agentic Datasheet Extraction.* EMNLP 2026 Industry Track.
 > <!-- arXiv link goes here once posted; see docs/reproducing.md for which
 >      numbers in the paper each artifact below regenerates. -->
 
@@ -58,10 +58,13 @@ uv run python scripts/render_paper_figures.py   # its figures
 uv run pytest -q                                # 141 tests, incl. the paper's numbers
 ```
 
-`uv.lock` pins the numeric stack (numpy, pandas, matplotlib) the published
-numbers were computed with; `uv sync` uses it. An unpinned numpy is a real
-hazard for an artifact like this — a future change to a percentile or
-summation default would move a table with nothing failing.
+`uv.lock` pins the numeric stack (numpy, pandas, matplotlib) so that a future
+release cannot silently move a table — a changed percentile or summation
+default would otherwise do exactly that, with nothing failing. Note `uv sync`
+reads the lock; the `uv pip install` above does not. The pin records **today's**
+resolution, not the versions in use on the run dates (numpy 2.4.5/2.4.6, pandas
+3.0.3, matplotlib 3.10.9); it freezes the analysis stack going forward rather
+than reconstructing the original one.
 
 Everything under `scripts/` runs against `archive/` alone. That is the point
 of shipping the archive: the derivations are checkable without re-running a
@@ -99,16 +102,21 @@ structural rather than a convention, and it is what lets the two verdicts
 disagree informatively.
 
 **The detector rules** (`chamberbench.silent_failure`) are the dispatch-level
-signals: `tool_bypass` (a document-grounded answer submitted without reading
-the document) and `tool_read_failed` (every read errored). Both are predicates
+signals: `tool_bypass` (a document-grounded answer submitted without any
+navigation call) and `verification_skipped` (the agent navigated but never
+cross-checked what it found). Both are predicates
 over the `datasheetindex` tool surface rather than over anything private,
 which is why the benchmark lives in this repository — the surface they read
 can be stood up from the library itself.
 
 ## Version pinning
 
-**The benchmark is pinned to a `datasheetindex` version, and this matters.**
-The tool surface changed between 0.31 and 0.34: `build_datasheet` now nudges
+**This benchmark does not import `datasheetindex`, and that is worth being
+precise about.** The scoring code here is pure Python over archived outputs, so
+nothing in it depends on the library version. What *did* depend on it was the
+agent run that produced the archive — and the tool surface has moved a long way
+since. The published runs used 0.13.0 and 0.14.0; this repository's `main` is
+0.34.0. Between 0.31 and 0.34 alone: `build_datasheet` now nudges
 `search_text` on LLM-reconstructed tables of contents, and running-headers are
 stripped from page-matched text. **Tool-call counts are not comparable across
 that boundary.** The published numbers were produced against the version
@@ -120,11 +128,13 @@ HEAD is a valid experiment but not a reproduction of the paper.
 MIT for everything we wrote — the code, the docs, the claim sets, and the
 archived model outputs. **That licence does not extend to everything in
 `archive/`.** The archived traces record what tools returned to the model, and
-those tool outputs contain short excerpts of third-party datasheets (Silicon
-Laboratories, Allegro MicroSystems) which remain their authors' copyright and
-are reproduced only so that published results can be verified. The datasheets
-themselves are not included here. [`NOTICE`](./NOTICE) states the scope
-precisely and gives a takedown contact.
+those outputs — and the model's own reasoning about them — quote third-party
+datasheets (Silicon Laboratories, Allegro MicroSystems) at length: roughly a
+quarter to a third of each document's body text appears verbatim somewhere in
+the archive. That text remains its authors' copyright and is reproduced only so
+that published results can be verified. The datasheets themselves are not
+included here. [`NOTICE`](./NOTICE) states the extent and scope precisely, with
+measurements and a takedown contact.
 
 Physical measurements come from the Causal Chambers dataset, distributed under
 CC BY 4.0, which requires attribution:

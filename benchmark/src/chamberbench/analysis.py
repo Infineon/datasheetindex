@@ -73,7 +73,7 @@ MODEL_COLOURS: dict[str, str] = {
 MODEL_LABELS: dict[str, str] = {
     "claudesonnet4.6": "Claude Sonnet 4.6",
     "gpt-5.1": "GPT-5.1",
-    "qwen3.6-27b": "Qwen3.5-27B",
+    "qwen3.6-27b": "Qwen3.6-27B",
 }
 
 # Claims in the headline matrix (DPS310 + Si115x). ACS70331 cells are
@@ -201,7 +201,7 @@ def fidelity_heatmap() -> Path:
                 fontsize=7,
                 fontweight="bold",
             )
-    ax.set_title("Cross-model agentic fidelity (Layer 2; confidence shown in cell)")
+    ax.set_title("Cross-model agentic fidelity (confidence shown in cell)")
     fig.tight_layout()
     out = FIGURES_DIR / "fidelity_heatmap.png"
     fig.savefig(out, dpi=180, bbox_inches="tight")
@@ -218,7 +218,7 @@ def tool_dispatch_heatmap() -> Path:
     """Tool name x model, coloured by mean calls per cell.
 
     Visualises the apples-to-apples engagement claim: all three
-    models exercise the tool surface comparably under Layer 2.
+    models exercise the tool surface comparably.
     """
     by_model_tool: dict[str, dict[str, list[int]]] = defaultdict(
         lambda: defaultdict(list)
@@ -279,7 +279,7 @@ def tool_dispatch_heatmap() -> Path:
                 j, i, f"{v:.2f}", ha="center", va="center", color=colour, fontsize=8
             )
     fig.colorbar(im, ax=ax, label="mean calls per cell")
-    ax.set_title("Per-tool dispatch by model (Layer 2; submit tools excluded)")
+    ax.set_title("Per-tool dispatch by model (submit tools excluded)")
     fig.tight_layout()
     out = FIGURES_DIR / "tool_dispatch_heatmap.png"
     fig.savefig(out, dpi=180, bbox_inches="tight")
@@ -338,7 +338,7 @@ def cost_latency_scatter() -> Path:
     ax.set_xscale("log")
     ax.set_xlabel("cost per cell (USD, public-list pricing; log scale)")
     ax.set_ylabel("latency per cell (s)")
-    ax.set_title("Cost vs. latency, agentic 60-cell matrix (Layer 2)")
+    ax.set_title("Cost vs. latency, agentic 60-cell matrix")
     ax.grid(True, which="both", alpha=0.25, linestyle="--")
     ax.legend(loc="best")
     fig.tight_layout()

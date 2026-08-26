@@ -1,6 +1,6 @@
 # Chamber classifier-vs-gold agreement
 
-Generated: 2026-08-26T09:06:21.816037+00:00
+Generated: 2026-08-26T09:11:46.321365+00:00
 Annotator: [redacted for review; identity recorded in the gold file metadata]
 
 ## Headline

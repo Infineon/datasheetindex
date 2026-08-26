@@ -30,13 +30,13 @@ What this module CAN test cleanly, decomposed by `claim_kind`:
                       best-effort steady-state mean -- caller's
                       responsibility.
 
-What this module deliberately does NOT implement on Day 9:
+What this module deliberately does NOT implement on an earlier revision:
 
 * ``linearity`` -> regression of channel vs. swept input axis. Requires a
                    univariate sweep dataset (`lt_walks_v1` or similar)
                    for clean isolation, or a multivariate-regression
                    framing on `lt_interventions_standard_v1`. Decision
-                   on dataset + framing deferred to Day 13+. Linearity
+                   on dataset + framing deferred to an earlier revision+. Linearity
                    claims today raise NotImplementedError so the test
                    runner fails loudly rather than silently routing to
                    the wrong path.
@@ -92,7 +92,7 @@ def run(claim: ClaimSpec) -> ChamberMeasurement:
             claim,
             reason=(
                 "linearity protocol not yet implemented in light_sensor "
-                "(deferred to Day 13+ pending dataset and framing decisions)"
+                "(deferred to an earlier revision+ pending dataset and framing decisions)"
             ),
         )
 

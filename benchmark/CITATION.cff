@@ -8,7 +8,7 @@ authors:
   - name: "Infineon Technologies AG"
 preferred-citation:
   type: conference-paper
-  title: "Fidelity Is Not Enough: Dispatch-Level Instrumentation for Datasheet-Extraction Agents"
+  title: "Fidelity Is Not Enough: Dispatch-Level Instrumentation for Agentic Datasheet Extraction"
   year: 2026
   collection-title: "Proceedings of the 2026 Conference on Empirical Methods in Natural Language Processing: Industry Track"
   authors:
