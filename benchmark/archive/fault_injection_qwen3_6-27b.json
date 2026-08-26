@@ -1,0 +1,682 @@
+{
+  "timestamp": "2026-06-04T13:26:30.340913+00:00",
+  "model": "qwen3.6-27b",
+  "arm_a": {
+    "F1": {
+      "label": "tool-bypass",
+      "expected_rule": "tool_bypass",
+      "planted": 25,
+      "engine_errors": 7,
+      "no_clean_reference": 2,
+      "silent_failures": 16,
+      "detector_caught": 16,
+      "recall": 1.0,
+      "cells": [
+        {
+          "claim_id": "dps310-relative-accuracy",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 53.12927277199924,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "dps310-absolute-accuracy",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 17.488498171966057,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "dps310-pressure-precision-high",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 20.269946949963924,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "dps310-pressure-temp-sensitivity",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 39.400394483993296,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "dps310-temperature-accuracy",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 17.38350878597703,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "dps310-current-1hz-low-precision",
+          "fault": "F1",
+          "engine_error": "SubmitToolNotCalledError: agent exhausted max_turns=30 without calling submit_claim_result (claim dps310-current-1hz-low-precision)",
+          "n_tool_calls_by_tool": {},
+          "latency_s": 18.86148060898995,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "dps310-supply-voltage-vdd",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 17.320093346002977,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "dps310-meas-time-standard",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 20.404396139958408,
+          "fidelity_pass": false,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "dps310-pressure-rate-range",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 14.502897798025515,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "dps310-pressure-data-resolution",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 13.488051095977426,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "dps310-operating-range",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 6.193739993963391,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "si115x-adc-bit-depth",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 19.399185263027903,
+          "fidelity_pass": false,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "si115x-operating-temperature",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 13.206355839967728,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "si115x-supply-voltage-vdd",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 15.588044561969582,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "si115x-standby-current-1v8",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 30.506585566035938,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "si115x-active-current-3v3",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 37.28460470098071,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "si115x-processing-time",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 14.603737599973101,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "si115x-vis-response-525nm",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 13.385795466019772,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "si115x-als-resolution-mlx",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 31.263021775987,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "si115x-supply-ripple",
+          "fault": "F1",
+          "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim si115x-supply-ripple)",
+          "n_tool_calls_by_tool": {},
+          "latency_s": 10.699968635977712,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "acs70331-bandwidth",
+          "fault": "F1",
+          "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim acs70331-bandwidth)",
+          "n_tool_calls_by_tool": {},
+          "latency_s": 5.077911676024087,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "acs70331-supply-current-max",
+          "fault": "F1",
+          "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim acs70331-supply-current-max)",
+          "n_tool_calls_by_tool": {},
+          "latency_s": 4.096516171994153,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "acs70331-rise-time",
+          "fault": "F1",
+          "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim acs70331-rise-time)",
+          "n_tool_calls_by_tool": {},
+          "latency_s": 2.7842047970043495,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "acs70331-primary-resistance-qfn",
+          "fault": "F1",
+          "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim acs70331-primary-resistance-qfn)",
+          "n_tool_calls_by_tool": {},
+          "latency_s": 45.862755263980944,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "acs70331-saturation-low",
+          "fault": "F1",
+          "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim acs70331-saturation-low)",
+          "n_tool_calls_by_tool": {},
+          "latency_s": 4.498511312005576,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        }
+      ]
+    },
+    "F5": {
+      "label": "verification-skipped",
+      "expected_rule": "verification_skipped",
+      "planted": 25,
+      "engine_errors": 20,
+      "no_clean_reference": 0,
+      "silent_failures": 5,
+      "detector_caught": 5,
+      "recall": 1.0,
+      "cells": [
+        {
+          "claim_id": "dps310-relative-accuracy",
+          "fault": "F5",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 3,
+            "list_experiments": 1,
+            "get_experiment_metadata": 2,
+            "get_ground_truth_graph": 1,
+            "query_dataset": 1,
+            "submit_claim_result": 1
+          },
+          "latency_s": 35.319813660986256,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "verification_skipped"
+          ]
+        },
+        {
+          "claim_id": "dps310-absolute-accuracy",
+          "fault": "F5",
+          "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim dps310-absolute-accuracy)",
+          "n_tool_calls_by_tool": {},
+          "latency_s": 1.9886553369578905,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "dps310-pressure-precision-high",
+          "fault": "F5",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 4,
+            "list_experiments": 1,
+            "get_experiment_metadata": 2,
+            "get_ground_truth_graph": 1,
+            "query_dataset": 4,
+            "submit_claim_result": 1
+          },
+          "latency_s": 46.12010892498074,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "verification_skipped"
+          ]
+        },
+        {
+          "claim_id": "dps310-pressure-temp-sensitivity",
+          "fault": "F5",
+          "engine_error": "AuthenticationError: Error code: 401 - {'error': {'message': 'Authentication Error, All connection attempts failed', 'type': 'auth_error', 'param': 'None', 'code': '401'}}",
+          "n_tool_calls_by_tool": {},
+          "latency_s": 2.4183533280156553,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "dps310-temperature-accuracy",
+          "fault": "F5",
+          "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim dps310-temperature-accuracy)",
+          "n_tool_calls_by_tool": {},
+          "latency_s": 0.7040663299849257,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "dps310-current-1hz-low-precision",
+          "fault": "F5",
+          "engine_error": "ValidationError: 13 validation errors for ClaimResult\nfound\n  Field required [type=missing, input_value={'\"claim_id': '\"', '\"clai...ers': [], 'values': []}}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing\nconfidence\n  Field required [type=missing, input_value={'\"claim_id': '\"', '\"clai...ers': [], 'values': []}}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing\nextracted.parameter\n  Field required [type=missing, input_value={'bool_value': False, 'li...bers': [], 'values': []}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing\nextracted.found\n  Field required [type=missing, input_value={'bool_value': False, 'li...bers': [], 'values': []}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing\nextracted.confidence\n  Field required [type=missing, input_value={'bool_value': False, 'li...bers': [], 'values': []}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing\n\"claim_id\n  Extra inputs are not permitted [type=extra_forbidden, input_value='\"', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden\n\"claim_id\"\n  Extra inputs are not permitted [type=extra_forbidden, input_value='dps310-current-1hz-low-precision', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden\n\"found\"\n  Extra inputs are not permitted [type=extra_forbidden, input_value='True', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden\n\"confidence\"\n  Extra inputs are not permitted [type=extra_forbidden, input_value='0.9', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden\n\"reason\"\n  Extra inputs are not permitted [type=extra_forbidden, input_value='The claim is found in mu... at 1 Hz low precision.', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden\n\"extracted\"\n  Extra inputs are not permitted [type=extra_forbidden, input_value='{\"parameter\": \"Current c...A for Low precision\"}]}', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden\n\"extracted_conditions\"\n  Extra inputs are not permitted [type=extra_forbidden, input_value='{\"name\": \"barometer_supp..., \"load_bearing\": true}', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden\n\"expected_chamber_outcome\"\n  Extra inputs are not permitted [type=extra_forbidden, input_value='\"The chamber dataset (wt..., low precision mode).\"', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 4,
+            "list_experiments": 1,
+            "get_experiment_metadata": 1,
+            "get_ground_truth_graph": 1,
+            "submit_claim_result": 1
+          },
+          "latency_s": 27.667146481049713,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "dps310-supply-voltage-vdd",
+          "fault": "F5",
+          "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim dps310-supply-voltage-vdd)",
+          "n_tool_calls_by_tool": {},
+          "latency_s": 2.18794681399595,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "dps310-meas-time-standard",
+          "fault": "F5",
+          "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim dps310-meas-time-standard)",
+          "n_tool_calls_by_tool": {},
+          "latency_s": 44.57745593204163,
+          "fidelity_pass": false,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "dps310-pressure-rate-range",
+          "fault": "F5",
+          "engine_error": "ValidationError: 1 validation error for ClaimResult\nextracted_conditions\n  Input should be a valid list [type=list_type, input_value={'name': 'internal_sampli...', 'load_bearing': True}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/list_type",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 5,
+            "list_experiments": 1,
+            "get_ground_truth_graph": 1,
+            "query_dataset": 1,
+            "get_experiment_metadata": 1,
+            "submit_claim_result": 1
+          },
+          "latency_s": 22.829852008027956,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "dps310-pressure-data-resolution",
+          "fault": "F5",
+          "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim dps310-pressure-data-resolution)",
+          "n_tool_calls_by_tool": {},
+          "latency_s": 1.2503899869625457,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "dps310-operating-range",
+          "fault": "F5",
+          "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim dps310-operating-range)",
+          "n_tool_calls_by_tool": {},
+          "latency_s": 4.84668216999853,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "si115x-adc-bit-depth",
+          "fault": "F5",
+          "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim si115x-adc-bit-depth)",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1
+          },
+          "latency_s": 7.052486344997305,
+          "fidelity_pass": false,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "si115x-operating-temperature",
+          "fault": "F5",
+          "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim si115x-operating-temperature)",
+          "n_tool_calls_by_tool": {},
+          "latency_s": 11.305957294011023,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "si115x-supply-voltage-vdd",
+          "fault": "F5",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 3,
+            "list_experiments": 1,
+            "get_ground_truth_graph": 1,
+            "get_experiment_metadata": 1,
+            "query_dataset": 2,
+            "submit_claim_result": 1
+          },
+          "latency_s": 31.74953990697395,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "verification_skipped"
+          ]
+        },
+        {
+          "claim_id": "si115x-standby-current-1v8",
+          "fault": "F5",
+          "engine_error": "ValidationError: 2 validation errors for ClaimResult\nextracted\n  Input should be a valid dictionary or instance of ParameterResult [type=model_type, input_value='True', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/model_type\nextracted_conditions\n  Input should be a valid list [type=list_type, input_value='True', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/list_type",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 7,
+            "inspect_page": 1,
+            "list_experiments": 1,
+            "get_experiment_metadata": 1,
+            "submit_claim_result": 1
+          },
+          "latency_s": 46.846072201034985,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "si115x-active-current-3v3",
+          "fault": "F5",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 6,
+            "list_experiments": 1,
+            "query_dataset": 2,
+            "get_experiment_metadata": 1,
+            "submit_claim_result": 1
+          },
+          "latency_s": 42.053551673016045,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "verification_skipped"
+          ]
+        },
+        {
+          "claim_id": "si115x-processing-time",
+          "fault": "F5",
+          "engine_error": "ValidationError: 5 validation errors for ClaimResult\nfound\n  Field required [type=missing, input_value={'claim_id': 'si115x-proc...ers': [], 'values': []}}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing\nconfidence\n  Field required [type=missing, input_value={'claim_id': 'si115x-proc...ers': [], 'values': []}}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing\nextracted.parameter\n  Field required [type=missing, input_value={'bool_value': False, 'li...bers': [], 'values': []}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing\nextracted.found\n  Field required [type=missing, input_value={'bool_value': False, 'li...bers': [], 'values': []}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing\nextracted.confidence\n  Field required [type=missing, input_value={'bool_value': False, 'li...bers': [], 'values': []}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 2,
+            "get_section_text": 6,
+            "inspect_page": 1,
+            "list_experiments": 1,
+            "get_experiment_metadata": 1,
+            "submit_claim_result": 1
+          },
+          "latency_s": 50.15788333094679,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "si115x-vis-response-525nm",
+          "fault": "F5",
+          "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim si115x-vis-response-525nm)",
+          "n_tool_calls_by_tool": {},
+          "latency_s": 1.0690005109645426,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "si115x-als-resolution-mlx",
+          "fault": "F5",
+          "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim si115x-als-resolution-mlx)",
+          "n_tool_calls_by_tool": {},
+          "latency_s": 1.7294925349997357,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "si115x-supply-ripple",
+          "fault": "F5",
+          "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim si115x-supply-ripple)",
+          "n_tool_calls_by_tool": {},
+          "latency_s": 6.676068084023427,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "acs70331-bandwidth",
+          "fault": "F5",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 2,
+            "get_section_text": 4,
+            "list_experiments": 1,
+            "get_ground_truth_graph": 1,
+            "inspect_page": 1,
+            "submit_claim_result": 1
+          },
+          "latency_s": 66.76873670099303,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "verification_skipped"
+          ]
+        },
+        {
+          "claim_id": "acs70331-supply-current-max",
+          "fault": "F5",
+          "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim acs70331-supply-current-max)",
+          "n_tool_calls_by_tool": {},
+          "latency_s": 0.9809164199978113,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "acs70331-rise-time",
+          "fault": "F5",
+          "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim acs70331-rise-time)",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1
+          },
+          "latency_s": 18.259072658023797,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "acs70331-primary-resistance-qfn",
+          "fault": "F5",
+          "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim acs70331-primary-resistance-qfn)",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 2
+          },
+          "latency_s": 28.964400414028205,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "acs70331-saturation-low",
+          "fault": "F5",
+          "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim acs70331-saturation-low)",
+          "n_tool_calls_by_tool": {},
+          "latency_s": 1.216206852986943,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        }
+      ]
+    }
+  }
+}

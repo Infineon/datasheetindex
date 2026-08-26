@@ -34,6 +34,24 @@ the full [Infineon product portfolio](https://www.infineon.com/cms/en/product/)
 power, sensors, and connectivity devices). It has no dependency on a specific
 product line or family.
 
+## Benchmark
+
+[`benchmark/`](./benchmark/) holds the chamber-grounded benchmark that
+accompanies our EMNLP 2026 Industry Track paper: the grading surface, the
+archived model outputs behind every published number, and the analyses that
+turn one into the other. It grades an extraction agent on two axes -- whether
+it reported what the datasheet says, and whether that claim is physically true
+as measured in a [Causal Chamber](https://causalchamber.org).
+
+The two dispatch-level detector rules it ships are predicates over *this*
+library's tool surface, which is why the benchmark lives here. They catch a
+failure fidelity scoring cannot see: an agent that answers correctly without
+ever opening the document.
+
+It is a separate project under this repository, not part of the library. A
+plain `uv sync` at the root installs none of it, and the published wheel
+contains none of it. See [`benchmark/README.md`](./benchmark/README.md).
+
 ## Links
 
 - [Infineon Developer Community](https://community.infineon.com/) - forums and

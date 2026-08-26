@@ -1,0 +1,334 @@
+# Fourth component: fidelity-only extension of the chamber benchmark.
+#
+# R-LsrC's reasons-to-reject 1 and 7 ask whether the dispatch-instrumentation
+# result generalises past the three-component corpus. The chamber's bill of
+# materials already includes this Allegro A4988 motor driver, which the paper's
+# Appendix D excluded "because it adds no agentic-navigation stress" -- a
+# rationale about difficulty, not about measurability, and one that stops
+# applying once the physical oracle is demoted to a secondary contribution.
+#
+# These claims are deliberately kept OUT of data/claims.yaml. The
+# 25-claim set is frozen and every number in the paper is measured on it; this
+# is a separate population, reported separately, so the generalisation step is
+# visible rather than folded into a headline.
+#
+# Fidelity only. The chamber cannot stage a motor driver, so no claim here
+# receives a reproducibility verdict -- `chamber_protocol` and
+# `primary_chamber_variable` are present because ClaimSpec requires them, and
+# they are never exercised. Do not read a reproducibility number off this file.
+#
+# Curation follows the same rule as the frozen set: a quantitative parameter
+# with an explicit value, unit and stated operating condition, transcribed from
+# the datasheet's own tables. `description` carries no value, no page and no
+# unit -- the oracle-leak audit (Appendix C) applies here too, and these
+# descriptions were written to the post-audit contract, and (since 2026-07-26)
+# are enforced by the same lint as claims.yaml: `tests/test_chamber_prompts.py`
+# parametrises TestClaimsYamlHygiene over both files.
+#
+# Provenance. `source_page`, `source_text`, `verified_by` and `verified_date` are
+# populated for all 12, because their absence was a fair objection: this is the
+# only gold set authored *after* its models' output had been observed, so it is
+# the one that most needs an audit trail, and it shipped with the weakest one.
+# Each `source_text` is the table row as the PDF's text layer reads it and was
+# machine-checked present in the named page under whitespace normalisation --
+# hence `verified_by: pdf_text_layer` rather than the frozen set's `manual`,
+# which would misdescribe how these were produced.
+#
+# `tolerance_value` / `tolerance_kind` are deliberately left at their defaults.
+# They feed chamber grading, no claim here receives a chamber verdict, and
+# inventing tolerances so a field-completeness table looks full would be a worse
+# defect than the empty field it hides.
+#
+# Independence, stated because it is not obvious: this PDF is also the decoy the
+# rebuttal's wrong-content arm served. Both models had therefore already been
+# observed transcribing some of these rows correctly before these claims were
+# written. The rules were never developed against this document; the *document*
+# was not unseen. Treat 12/12 accordingly.
+#
+# Needle quality. The frozen set has 8 of 30 numeric needles at <= 2 characters
+# (scripts/strict_fidelity_rescore.py), which makes a substring match weak
+# evidence on those claims. Here 7 of **18** numeric needles are <= 2 characters
+# -- "35", "8", "11", "30", "40", "85", "4" -- because those are the datasheet's
+# actual values and shortening them is not an option. That is 39% against the
+# frozen set's 27%, so this file's needles are *weaker* than the ones already
+# conceded to be weak, not comparable to them. The mitigation is to report both
+# matchers: exact numeric matching is the primary score for this component, with
+# the substring score alongside for comparability with the frozen 25.
+
+meta:
+  component: "A4988"
+  vendor: "Allegro MicroSystems"
+  description: "DMOS microstepping driver with translator and overcurrent protection"
+  pages: 20
+  scope: "fidelity-only; no chamber-side verdict"
+
+datasheets:
+  a4988: "A4988"
+
+claims:
+  # --- Electrical Characteristics, Output Drivers ---------------------------
+- id: "a4988-logic-supply-voltage-range"
+  pdf_source: "A4988"
+  parameter: "Logic supply voltage range"
+  description: >
+    Operating range of the logic supply rail, as given in the electrical
+    characteristics table.
+  expected_unit: "V"
+  claim_kind: "range"
+  claimed_min: 3.0
+  claimed_max: 5.5
+  value_contains: ["3.0", "5.5", "V"]
+  confidence_min: 0.7
+  operating_conditions:
+  - {name: "mode", value: 0.0, unit: "", chamber_variable: "", load_bearing: false}
+  chamber_protocol: "chamberbench.protocols.not_gradable"
+  primary_chamber_variable: ""
+
+  source_page:
+  - 4
+  source_text: Logic Supply Voltage Range VDD Operating 3.0 – 5.5 V
+  verified_by: pdf_text_layer
+  verified_date: '2026-07-26'
+- id: "a4988-load-supply-voltage-range"
+  pdf_source: "A4988"
+  parameter: "Load supply voltage range"
+  description: >
+    Operating range of the motor load supply rail, as given in the electrical
+    characteristics table.
+  expected_unit: "V"
+  claim_kind: "range"
+  claimed_min: 8.0
+  claimed_max: 35.0
+  value_contains: ["35", "V"]
+  confidence_min: 0.7
+  operating_conditions:
+  - {name: "mode", value: 0.0, unit: "", chamber_variable: "", load_bearing: false}
+  chamber_protocol: "chamberbench.protocols.not_gradable"
+  primary_chamber_variable: ""
+
+  source_page:
+  - 4
+  source_text: Load Supply Voltage Range VBB Operating 8 – 35 V
+  verified_by: pdf_text_layer
+  verified_date: '2026-07-26'
+- id: "a4988-output-on-resistance"
+  pdf_source: "A4988"
+  parameter: "Output on resistance"
+  description: >
+    Drain-source on resistance of the output drivers at the stated output
+    current. Both the source and the sink driver are specified.
+  expected_unit: "mOhm"
+  claim_kind: "dc_accuracy"
+  claimed_typical: 320.0
+  claimed_max: 430.0
+  value_contains: ["320", "430"]
+  confidence_min: 0.7
+  operating_conditions:
+  - {name: "output_current_A", value: 1.5, unit: "A", chamber_variable: "", load_bearing: true}
+  - {name: "ambient_temperature_C", value: 25.0, unit: "C", chamber_variable: "", load_bearing: true}
+  chamber_protocol: "chamberbench.protocols.not_gradable"
+  primary_chamber_variable: ""
+
+  source_page:
+  - 4
+  source_text: Output On Resistance RDSON Source Driver, IOUT = –1.5 A – 320 430 mΩ
+  verified_by: pdf_text_layer
+  verified_date: '2026-07-26'
+- id: "a4988-body-diode-forward-voltage"
+  pdf_source: "A4988"
+  parameter: "Body diode forward voltage"
+  description: >
+    Forward voltage of the output body diode at the stated diode current.
+  expected_unit: "V"
+  claim_kind: "max"
+  claimed_max: 1.2
+  value_contains: ["1.2", "V"]
+  confidence_min: 0.7
+  operating_conditions:
+  - {name: "diode_current_A", value: 1.5, unit: "A", chamber_variable: "", load_bearing: true}
+  chamber_protocol: "chamberbench.protocols.not_gradable"
+  primary_chamber_variable: ""
+
+  source_page:
+  - 4
+  source_text: Body Diode Forward Voltage VF Source Diode, IF = –1.5 A – – 1.2 V
+  verified_by: pdf_text_layer
+  verified_date: '2026-07-26'
+- id: "a4988-logic-supply-current-max"
+  pdf_source: "A4988"
+  parameter: "Logic supply current"
+  description: >
+    Maximum current drawn from the logic supply. The table distinguishes a
+    switching condition from an outputs-off condition; the switching
+    condition is the one asked for here.
+  expected_unit: "mA"
+  claim_kind: "max"
+  claimed_max: 8.0
+  value_contains: ["8", "mA"]
+  confidence_min: 0.7
+  operating_conditions:
+  - {name: "pwm_frequency_kHz", max_value: 50.0, unit: "kHz", chamber_variable: "", load_bearing: true}
+  chamber_protocol: "chamberbench.protocols.not_gradable"
+  primary_chamber_variable: ""
+
+  # --- Electrical Characteristics, Control Logic ----------------------------
+  source_page:
+  - 4
+  source_text: Logic Supply Current IDD fPWM < 50 kHz – – 8 mA
+  verified_by: pdf_text_layer
+  verified_date: '2026-07-26'
+- id: "a4988-logic-input-hysteresis"
+  pdf_source: "A4988"
+  parameter: "Logic input hysteresis"
+  description: >
+    Input hysteresis of the logic pins, specified as a proportion of the
+    logic supply rail.
+  expected_unit: "%"
+  claim_kind: "dc_accuracy"
+  claimed_min: 5.0
+  claimed_typical: 11.0
+  claimed_max: 19.0
+  value_contains: ["11", "%"]
+  confidence_min: 0.7
+  operating_conditions:
+  - {name: "referenced_to", value: 0.0, unit: "", chamber_variable: "", load_bearing: false}
+  chamber_protocol: "chamberbench.protocols.not_gradable"
+  primary_chamber_variable: ""
+
+  source_page:
+  - 4
+  source_text: Logic Input Hysteresis VHYS(IN) As a % of VDD 5 11 19 %
+  verified_by: pdf_text_layer
+  verified_date: '2026-07-26'
+- id: "a4988-blank-time"
+  pdf_source: "A4988"
+  parameter: "Blank time"
+  description: >
+    Duration of the current-sense blanking interval, as given in the
+    electrical characteristics table.
+  expected_unit: "us"
+  claim_kind: "typical"
+  claimed_min: 0.7
+  claimed_typical: 1.0
+  claimed_max: 1.3
+  value_contains: ["0.7", "1.3"]
+  confidence_min: 0.7
+  operating_conditions:
+  - {name: "ambient_temperature_C", value: 25.0, unit: "C", chamber_variable: "", load_bearing: false}
+  chamber_protocol: "chamberbench.protocols.not_gradable"
+  primary_chamber_variable: ""
+
+  source_page:
+  - 4
+  source_text: Blank Time tBLANK 0.7 1 1.3 μs
+  verified_by: pdf_text_layer
+  verified_date: '2026-07-26'
+- id: "a4988-fixed-off-time"
+  pdf_source: "A4988"
+  parameter: "Fixed off-time"
+  description: >
+    Duration of the fixed off-time interval under the stated oscillator pin
+    configuration.
+  expected_unit: "us"
+  claim_kind: "typical"
+  claimed_min: 20.0
+  claimed_typical: 30.0
+  claimed_max: 40.0
+  value_contains: ["30", "40"]
+  confidence_min: 0.7
+  operating_conditions:
+  - {name: "osc_pin_state", value: 0.0, unit: "", chamber_variable: "", load_bearing: true}
+  chamber_protocol: "chamberbench.protocols.not_gradable"
+  primary_chamber_variable: ""
+
+  source_page:
+  - 4
+  source_text: Fixed Off-Time tOFF OSC = VDD or GND 20 30 40 μs
+  verified_by: pdf_text_layer
+  verified_date: '2026-07-26'
+- id: "a4988-thermal-shutdown-temperature"
+  pdf_source: "A4988"
+  parameter: "Thermal shutdown temperature"
+  description: >
+    Junction temperature at which the device's thermal protection engages.
+  expected_unit: "C"
+  claim_kind: "max"
+  claimed_typical: 165.0
+  value_contains: ["165"]
+  confidence_min: 0.7
+  operating_conditions:
+  - {name: "junction", value: 0.0, unit: "", chamber_variable: "", load_bearing: false}
+  chamber_protocol: "chamberbench.protocols.not_gradable"
+  primary_chamber_variable: ""
+
+  # --- Absolute Maximum Ratings --------------------------------------------
+  source_page:
+  - 4
+  source_text: Thermal Shutdown Temperature TTSD – 165 – °C
+  verified_by: pdf_text_layer
+  verified_date: '2026-07-26'
+- id: "a4988-operating-ambient-temperature"
+  pdf_source: "A4988"
+  parameter: "Operating ambient temperature"
+  description: >
+    Ambient temperature range over which the part is rated to operate, for
+    the temperature range suffix this datasheet specifies.
+  expected_unit: "C"
+  claim_kind: "range"
+  claimed_min: -20.0
+  claimed_max: 85.0
+  value_contains: ["-20", "85"]
+  confidence_min: 0.7
+  operating_conditions:
+  - {name: "range_suffix", value: 0.0, unit: "", chamber_variable: "", load_bearing: false}
+  chamber_protocol: "chamberbench.protocols.not_gradable"
+  primary_chamber_variable: ""
+
+  source_page:
+  - 2
+  source_text: Operating Ambient Temperature TA Range S –20 to 85 ºC
+  verified_by: pdf_text_layer
+  verified_date: '2026-07-26'
+- id: "a4988-storage-temperature"
+  pdf_source: "A4988"
+  parameter: "Storage temperature"
+  description: >
+    Temperature range over which the part may be stored, from the absolute
+    maximum ratings table.
+  expected_unit: "C"
+  claim_kind: "max"
+  claimed_min: -55.0
+  claimed_max: 150.0
+  value_contains: ["-55", "150"]
+  confidence_min: 0.7
+  operating_conditions:
+  - {name: "storage", value: 0.0, unit: "", chamber_variable: "", load_bearing: false}
+  chamber_protocol: "chamberbench.protocols.not_gradable"
+  primary_chamber_variable: ""
+
+  source_page:
+  - 2
+  source_text: Storage Temperature Tstg –55 to 150 ºC
+  verified_by: pdf_text_layer
+  verified_date: '2026-07-26'
+- id: "a4988-reference-input-voltage-range"
+  pdf_source: "A4988"
+  parameter: "Reference input voltage range"
+  description: >
+    Range of the current-reference input, as given in the electrical
+    characteristics table.
+  expected_unit: "V"
+  claim_kind: "range"
+  claimed_min: 0.0
+  claimed_max: 4.0
+  value_contains: ["4", "V"]
+  confidence_min: 0.7
+  operating_conditions:
+  - {name: "mode", value: 0.0, unit: "", chamber_variable: "", load_bearing: false}
+  chamber_protocol: "chamberbench.protocols.not_gradable"
+  primary_chamber_variable: ""
+  source_page:
+  - 4
+  source_text: Reference Input Voltage Range VREF 0 – 4 V
+  verified_by: pdf_text_layer
+  verified_date: '2026-07-26'

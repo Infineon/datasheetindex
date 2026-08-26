@@ -1,0 +1,415 @@
+# BLIND RE-DERIVATION OF THE GRADING SURFACE
+#
+# INSTRUCTIONS: docs/annotator_guide.md -- read that first.
+#
+# For each claim below, read the named datasheet and decide, on your own:
+#   value_contains -- the substrings an extraction MUST contain to count
+#                     as correct for this claim (see the guide for how
+#                     many and what kind).
+#   confidence_min -- the confidence floor below which you would not
+#                     accept the answer even if the substrings matched.
+#
+# Do NOT open data/claims.yaml. It holds the values you are
+# re-deriving, and the whole exercise is whether you land on them
+# independently. Also avoid archive/*.json (model runs).
+#
+# If you cannot find the parameter in the datasheet, leave value_contains
+# empty and say so in notes. An honest abstention is a result; a guess is
+# not, and abstentions are reported separately.
+metadata:
+  annotator: 'Anna Polizzotto'  # FILL IN: your name
+  n_claims: 25
+  withheld_fields:
+    - value_contains
+    - confidence_min
+    - source_page
+    - source_text
+    - claimed_min
+    - claimed_max
+claims:
+
+  # ======================================================================
+  # CLAIM: dps310-relative-accuracy
+  # ======================================================================
+  # PARAMETER:  Relative pressure accuracy
+  # DATASHEET:  datasheets/barometer.pdf
+  # UNIT:       hPa
+  # CONDITIONS: temperature_C=25.0C, supply_voltage_VDD_V=3.0V   (* = load-bearing)
+  # Stated relative accuracy of the DPS310 barometer. Tested against
+  # cross-sensor agreement among the four chamber DPS310s in steady
+  # state.
+  - id: 'dps310-relative-accuracy'
+    value_contains: []      # FILL IN: list of substrings, e.g. ['12.3', 'kOhm']
+    confidence_min:    0,8     # FILL IN: a number between 0 and 1
+    notes: ' the sample asks for: CONDITIONS: temperature_C=25.0C, supply_voltage_VDD_V=3.0V   (* = load-bearing) and the datasheet has: Test conditions (unless otherwise specified in the table): VDD= 1.8V and VDDIO=1.8V. Typ. values (PA=1000hPa and TA=25°C).'
+
+  # ======================================================================
+  # CLAIM: dps310-absolute-accuracy
+  # ======================================================================
+  # PARAMETER:  Absolute pressure accuracy
+  # DATASHEET:  datasheets/barometer.pdf
+  # UNIT:       hPa
+  # CONDITIONS: temperature_C=25.0C, external_pressure_reference=None hPa*   (* = load-bearing)
+  # Stated absolute pressure accuracy of the DPS310 barometer. The
+  # chamber cannot test the absolute-reference part of this claim; we
+  # report the inter-unit offset as a within-spec sanity check and
+  # flag the missing external reference as an unmatched condition.
+  - id: 'dps310-absolute-accuracy'
+    value_contains: ['+/-100', 'Pa']      # FILL IN: list of substrings, e.g. ['12.3', 'kOhm']
+    confidence_min:  1       # FILL IN: a number between 0 and 1
+    notes: ''
+
+  # ======================================================================
+  # CLAIM: dps310-pressure-precision-high
+  # ======================================================================
+  # PARAMETER:  Pressure precision (high precision mode)
+  # DATASHEET:  datasheets/barometer.pdf
+  # UNIT:       Pa
+  # CONDITIONS: precision_mode_high=0.0*, supply_voltage_VDD_V=1.8V   (* = load-bearing)
+  # Pressure precision in High Precision mode (units: Pa RMS). Tested
+  # against the chamber's per-sensor steady-state std on a steady
+  # actuator experiment.
+  - id: 'dps310-pressure-precision-high'
+    value_contains: ['0.2', ' Pa RMS']      # FILL IN: list of substrings, e.g. ['12.3', 'kOhm']
+    confidence_min:         # FILL IN: a number between 0 and 1
+    notes: ''
+
+  # ======================================================================
+  # CLAIM: dps310-pressure-temp-sensitivity
+  # ======================================================================
+  # PARAMETER:  Pressure temperature sensitivity
+  # DATASHEET:  datasheets/barometer.pdf
+  # UNIT:       Pa/K
+  # CONDITIONS: controlled_temperature=25.0C*   (* = load-bearing)
+  # Pressure-vs-temperature sensitivity coefficient (Ap_tmp) of
+  # calibrated measurements. Chamber temperature is uncontrolled
+  # (load_bearing condition unmatched), so the verdict is forced
+  # inconclusive; the claim still scores fidelity.
+  - id: 'dps310-pressure-temp-sensitivity'
+    value_contains: ['0.5', ' Pa/K']      # FILL IN: list of substrings, e.g. ['12.3', 'kOhm']
+    confidence_min:    1     # FILL IN: a number between 0 and 1
+    notes: ''
+
+  # ======================================================================
+  # CLAIM: dps310-temperature-accuracy
+  # ======================================================================
+  # PARAMETER:  Temperature accuracy
+  # DATASHEET:  datasheets/barometer.pdf
+  # UNIT:       C
+  # CONDITIONS: external_temperature_reference=NoneC*   (* = load-bearing)
+  # Datasheet-stated temperature-accuracy band across the operating
+  # range. Chamber lacks an external Tj reference, so the load-bearing
+  # condition is unmatched and the verdict is inconclusive.
+  - id: 'dps310-temperature-accuracy'
+    value_contains: ['+/-0.5', ' °C']      # FILL IN: list of substrings, e.g. ['12.3', 'kOhm']
+    confidence_min:   1      # FILL IN: a number between 0 and 1
+    notes: ''
+
+  # ======================================================================
+  # CLAIM: dps310-current-1hz-low-precision
+  # ======================================================================
+  # PARAMETER:  Current consumption at 1 Hz (low precision)
+  # DATASHEET:  datasheets/barometer.pdf
+  # UNIT:       uA
+  # CONDITIONS: barometer_supply_current_measurement=NoneuA*   (* = load-bearing)
+  # Typical supply current at the slowest sampling rate (1 Hz), Low
+  # precision mode. Chamber records fan currents only, not the
+  # barometer's supply current; load-bearing condition unmatched ->
+  # inconclusive.
+  - id: 'dps310-current-1hz-low-precision'
+    value_contains: ['2.1', ' µA']      # FILL IN: list of substrings, e.g. ['12.3', 'kOhm']
+    confidence_min: 1        # FILL IN: a number between 0 and 1
+    notes: ''
+
+  # ======================================================================
+  # CLAIM: dps310-supply-voltage-vdd
+  # ======================================================================
+  # PARAMETER:  Supply voltage VDD
+  # DATASHEET:  datasheets/barometer.pdf
+  # UNIT:       V
+  # CONDITIONS: controlled_VDD_sweep=NoneV*   (* = load-bearing)
+  # Datasheet-stated VDD operating-voltage range. Chamber does not
+  # vary VDD during recordings; load-bearing condition unmatched.
+  - id: 'dps310-supply-voltage-vdd'
+    value_contains: ['min 1.7', 'max 3.6', 'V']      # FILL IN: list of substrings, e.g. ['12.3', 'kOhm']
+    confidence_min:    1     # FILL IN: a number between 0 and 1
+    notes: ''
+
+  # ======================================================================
+  # CLAIM: dps310-meas-time-standard
+  # ======================================================================
+  # PARAMETER:  Pressure measurement time (standard mode)
+  # DATASHEET:  datasheets/barometer.pdf
+  # UNIT:       ms
+  # CONDITIONS: single_conversion_timing=Nonems*   (* = load-bearing)
+  # Typical single-conversion time in Standard precision mode. Chamber
+  # doesn't expose per-conversion timing; inconclusive.
+  - id: 'dps310-meas-time-standard'
+    value_contains: ['27.6', 'ms']      # FILL IN: list of substrings, e.g. ['12.3', 'kOhm']
+    confidence_min: 1        # FILL IN: a number between 0 and 1
+    notes: ''
+
+  # ======================================================================
+  # CLAIM: dps310-pressure-rate-range
+  # ======================================================================
+  # PARAMETER:  Pressure measurement rate
+  # DATASHEET:  datasheets/barometer.pdf
+  # UNIT:       Hz
+  # CONDITIONS: internal_sampling_rate_observable=NoneHz*   (* = load-bearing)
+  # Datasheet-stated internal pressure-measurement rate range. Chamber
+  # records time-stamped data; per-DPS310 internal sampling rate is
+  # not directly observable.
+  - id: 'dps310-pressure-rate-range'
+    value_contains: ['min 1', 'max 128', 'Hz']      # FILL IN: list of substrings, e.g. ['12.3', 'kOhm']
+    confidence_min:         # FILL IN: a number between 0 and 1
+    notes: ''
+
+  # ======================================================================
+  # CLAIM: dps310-pressure-data-resolution
+  # ======================================================================
+  # PARAMETER:  Pressure data resolution
+  # DATASHEET:  datasheets/barometer.pdf
+  # UNIT:       Pa
+  # CONDITIONS: precision_mode_observable=None*, supply_voltage_VDD_V=1.8V   (* = load-bearing)
+  # Pressure data-resolution coefficient (Ap_res, Pa RMS). Chamber
+  # records the raw readout but not the configured precision mode, so
+  # this maps to inconclusive: a real test needs the part configured
+  # at the claimed mode.
+  - id: 'dps310-pressure-data-resolution'
+    value_contains: ['0.06', 'Pa RMS']      # FILL IN: list of substrings, e.g. ['12.3', 'kOhm']
+    confidence_min:   1      # FILL IN: a number between 0 and 1
+    notes: ''
+
+  # ======================================================================
+  # CLAIM: dps310-operating-range
+  # ======================================================================
+  # PARAMETER:  Operating pressure range
+  # DATASHEET:  datasheets/barometer.pdf
+  # UNIT:       hPa
+  # CONDITIONS: temperature_C=NoneC   (* = load-bearing)
+  # Datasheet-stated operating pressure range (hPa). The chamber
+  # operates comfortably inside that window. Reproducibility check is
+  # whether the chamber's observed pressures lie inside the claimed
+  # range; the realizable_subset narrows the verdict to the
+  # chamber-exercisable subset of that window.
+  - id: 'dps310-operating-range'
+    value_contains: []      # FILL IN: list of substrings, e.g. ['12.3', 'kOhm']
+    confidence_min:  1       # FILL IN: a number between 0 and 1
+    notes: 'cannot find parameter in given file'
+
+  # ======================================================================
+  # CLAIM: si115x-adc-bit-depth
+  # ======================================================================
+  # PARAMETER:  ADC bit depth (visible channel envelope)
+  # DATASHEET:  datasheets/fce10002ec99_light_sensor.pdf
+  # UNIT:       counts
+  # CONDITIONS: (none stated)   (* = load-bearing)
+  # Datasheet-stated ADC resolution (bit depth). Reproducibility test:
+  # chamber's vis_1 readings fall inside the implied count envelope.
+  - id: 'si115x-adc-bit-depth'
+    value_contains: ['23-bit']      # FILL IN: list of substrings, e.g. ['12.3', 'kOhm']
+    confidence_min:   0.5      # FILL IN: a number between 0 and 1
+    notes: 'not sure it refers to the depth'
+
+  # ======================================================================
+  # CLAIM: si115x-operating-temperature
+  # ======================================================================
+  # PARAMETER:  Operating temperature range
+  # DATASHEET:  datasheets/fce10002ec99_light_sensor.pdf
+  # UNIT:       C
+  # CONDITIONS: external_temperature_reference=NoneC*   (* = load-bearing)
+  # Datasheet-stated operating ambient-temperature range (C). Chamber
+  # records the Si115x's internal temperature register as a raw
+  # integer, not calibrated C; load-bearing condition unmatched ->
+  # inconclusive.
+  - id: 'si115x-operating-temperature'
+    value_contains: ['-40', '85', '°C']      # FILL IN: list of substrings, e.g. ['12.3', 'kOhm']
+    confidence_min:   1      # FILL IN: a number between 0 and 1
+    notes: ''
+
+  # ======================================================================
+  # CLAIM: si115x-supply-voltage-vdd
+  # ======================================================================
+  # PARAMETER:  VDD supply voltage range
+  # DATASHEET:  datasheets/fce10002ec99_light_sensor.pdf
+  # UNIT:       V
+  # CONDITIONS: controlled_VDD_sweep=NoneV*   (* = load-bearing)
+  # Datasheet-stated VDD operating-voltage range. Chamber does not
+  # vary VDD during recordings; load-bearing condition unmatched.
+  - id: 'si115x-supply-voltage-vdd'
+    value_contains: ['min 1.62', 'max 3.6', 'V']      # FILL IN: list of substrings, e.g. ['12.3', 'kOhm']
+    confidence_min:  1       # FILL IN: a number between 0 and 1
+    notes: ''
+
+  # ======================================================================
+  # CLAIM: si115x-standby-current-1v8
+  # ======================================================================
+  # PARAMETER:  Standby supply current at VDD=1.8 V
+  # DATASHEET:  datasheets/fce10002ec99_light_sensor.pdf
+  # UNIT:       nA
+  # CONDITIONS: supply_current_measurement_at_VDD_1v8=NonenA*, no_adc_no_i2c_activity=None*   (* = load-bearing)
+  # Typical sleep-mode supply current (no ADC, no I2C activity) at the
+  # table's nominal low VDD. Chamber's `current` column is the LED
+  # current draw, not the Si115x supply; load-bearing condition
+  # unmatched -> inconclusive.
+  - id: 'si115x-standby-current-1v8'
+    value_contains: ['125', 'nA']      # FILL IN: list of substrings, e.g. ['12.3', 'kOhm']
+    confidence_min:   1      # FILL IN: a number between 0 and 1
+    notes: ''
+
+  # ======================================================================
+  # CLAIM: si115x-active-current-3v3
+  # ======================================================================
+  # PARAMETER:  Active mode current at VDD=3.3 V
+  # DATASHEET:  datasheets/fce10002ec99_light_sensor.pdf
+  # UNIT:       mA
+  # CONDITIONS: supply_current_measurement_at_VDD_3v3=NonemA*   (* = load-bearing)
+  # Typical supply current while responding to commands and
+  # calculating, at the table's nominal high VDD. Chamber does not
+  # measure the Si115x supply current; inconclusive.
+  - id: 'si115x-active-current-3v3'
+    value_contains: ['4.5', 'mA']      # FILL IN: list of substrings, e.g. ['12.3', 'kOhm']
+    confidence_min:    1     # FILL IN: a number between 0 and 1
+    notes: ''
+
+  # ======================================================================
+  # CLAIM: si115x-processing-time
+  # ======================================================================
+  # PARAMETER:  Processing time per measurement
+  # DATASHEET:  datasheets/fce10002ec99_light_sensor.pdf
+  # UNIT:       us
+  # CONDITIONS: per_conversion_timing_observable=Noneus*   (* = load-bearing)
+  # Typical per-measurement processing time (tprocess) for ALS or
+  # Proximity. Chamber does not expose per-conversion timing;
+  # load-bearing unmatched.
+  - id: 'si115x-processing-time'
+    value_contains: ['155', 'µs']      # FILL IN: list of substrings, e.g. ['12.3', 'kOhm']
+    confidence_min:  1       # FILL IN: a number between 0 and 1
+    notes: ''
+
+  # ======================================================================
+  # CLAIM: si115x-vis-response-525nm
+  # ======================================================================
+  # PARAMETER:  Small visible photodiode response at 525 nm
+  # DATASHEET:  datasheets/fce10002ec99_light_sensor.pdf
+  # UNIT:       counts/(W/m^2)
+  # CONDITIONS: external_optical_reference_W_per_m2=NoneW/m^2*, ADCMUX_setting=17*   (* = load-bearing)
+  # Typical absolute responsivity (ADC counts per W/m^2) at 525 nm
+  # green for the small visible photodiode (ADCMUX=0x11, default
+  # config). Chamber's LED is not NIST-calibrated to absolute W/m^2;
+  # the load-bearing external_optical_reference condition is unmatched
+  # -> inconclusive.
+  - id: 'si115x-vis-response-525nm'
+    value_contains: ['125',' W/m^2']      # FILL IN: list of substrings, e.g. ['12.3', 'kOhm']
+    confidence_min:   0.8      # FILL IN: a number between 0 and 1
+    notes: ''
+
+  # ======================================================================
+  # CLAIM: si115x-als-resolution-mlx
+  # ======================================================================
+  # PARAMETER:  ALS resolution (mlx)
+  # DATASHEET:  datasheets/fce10002ec99_light_sensor.pdf
+  # UNIT:       mlx
+  # CONDITIONS: count_to_mlx_calibration=Nonemlx/count*   (* = load-bearing)
+  # Datasheet-stated minimum-detectable ALS resolution (mlx). Chamber
+  # records vis_1 in raw counts; the count-to-mlx conversion needs the
+  # integration-time and spectral-content calibration, which is not
+  # exposed. Load-bearing condition unmatched -> inconclusive.
+  - id: 'si115x-als-resolution-mlx'
+    value_contains: ['<100', 'mlx']      # FILL IN: list of substrings, e.g. ['12.3', 'kOhm']
+    confidence_min:  1       # FILL IN: a number between 0 and 1
+    notes: ''
+
+  # ======================================================================
+  # CLAIM: si115x-supply-ripple
+  # ======================================================================
+  # PARAMETER:  VDD supply ripple voltage
+  # DATASHEET:  datasheets/fce10002ec99_light_sensor.pdf
+  # UNIT:       mVpp
+  # CONDITIONS: VDD_ripple_measurement=NonemVpp*   (* = load-bearing)
+  # Maximum allowed VDD ripple (mVpp) over the spec frequency band at
+  # the nominal high VDD. Chamber does not measure VDD ripple;
+  # inconclusive.
+  - id: 'si115x-supply-ripple'
+    value_contains: ['50', ' mVpp ']      # FILL IN: list of substrings, e.g. ['12.3', 'kOhm']
+    confidence_min:  1       # FILL IN: a number between 0 and 1
+    notes: ''
+
+  # ======================================================================
+  # CLAIM: acs70331-bandwidth
+  # ======================================================================
+  # PARAMETER:  Sensor -3 dB bandwidth
+  # DATASHEET:  datasheets/current_sensor.pdf
+  # UNIT:       MHz
+  # CONDITIONS: VCC_V=3.3V*   (* = load-bearing)
+  # Engagement-diagnostic claim (tier EASY). The sensor's typical
+  # small-signal -3 dB bandwidth appears in the front-page features
+  # list AND in the electrical-characteristics table. Almost any LLM
+  # should be able to answer this from memory; this cell exists as the
+  # easy-control for the engagement plot.
+  - id: 'acs70331-bandwidth'
+    value_contains: ['1', 'MHz']      # FILL IN: list of substrings, e.g. ['12.3', 'kOhm']
+    confidence_min:  1       # FILL IN: a number between 0 and 1
+    notes: ''
+
+  # ======================================================================
+  # CLAIM: acs70331-supply-current-max
+  # ======================================================================
+  # PARAMETER:  Supply current ICC max (steady state, fuses powered down)
+  # DATASHEET:  datasheets/current_sensor.pdf
+  # UNIT:       mA
+  # CONDITIONS: VCC_V=3.3V*, fuses_powered_down=1.0*, no_load=1.0   (* = load-bearing)
+  # Engagement-diagnostic claim (tier MEDIUM). Maximum steady-state
+  # supply current (ICC) under the test conditions "fuses powered
+  # down, no load" from the electrical-characteristics table.
+  - id: 'acs70331-supply-current-max'
+    value_contains: ['6', 'mA']      # FILL IN: list of substrings, e.g. ['12.3', 'kOhm']
+    confidence_min:  1       # FILL IN: a number between 0 and 1
+    notes: ''
+
+  # ======================================================================
+  # CLAIM: acs70331-rise-time
+  # ======================================================================
+  # PARAMETER:  Rise time tr (10% to 90%) at 1 V output swing
+  # DATASHEET:  datasheets/current_sensor.pdf
+  # UNIT:       ns
+  # CONDITIONS: VCC_V=3.3V*, output_swing_V=1.0V*, rise_definition=90.0%*   (* = load-bearing)
+  # Engagement-diagnostic claim (tier HARD). Typical rise time tr
+  # under the output-characteristics row whose test condition is "1 V
+  # swing on VIOUT, 10% to 90%".
+  - id: 'acs70331-rise-time'
+    value_contains: ['460', 'ns']      # FILL IN: list of substrings, e.g. ['12.3', 'kOhm']
+    confidence_min:    1     # FILL IN: a number between 0 and 1
+    notes: ''
+
+  # ======================================================================
+  # CLAIM: acs70331-primary-resistance-qfn
+  # ======================================================================
+  # PARAMETER:  Primary conductor resistance RIP, QFN-12 package
+  # DATASHEET:  datasheets/current_sensor.pdf
+  # UNIT:       mOhm
+  # CONDITIONS: package=12.0pin_count_QFN*, TA_C=25.0C*   (* = load-bearing)
+  # Engagement-diagnostic claim (tier HARD). Typical primary-conductor
+  # resistance (RIP) for the QFN-12 variant from the electrical-
+  # characteristics table.
+  - id: 'acs70331-primary-resistance-qfn'
+    value_contains: ['1.1', 'mOhm']      # FILL IN: list of substrings, e.g. ['12.3', 'kOhm']
+    confidence_min:    1     # FILL IN: a number between 0 and 1
+    notes: ''
+
+  # ======================================================================
+  # CLAIM: acs70331-saturation-low
+  # ======================================================================
+  # PARAMETER:  Output saturation voltage VSAT_LOW (typical)
+  # DATASHEET:  datasheets/current_sensor.pdf
+  # UNIT:       mV
+  # CONDITIONS: VCC_V=3.3V*, RL_kohm=22.0kOhm*   (* = load-bearing)
+  # Engagement-diagnostic claim (tier MEDIUM-HARD). Output saturation
+  # voltage VSAT_LOW from the output-characteristics table. Output-
+  # saturation specs are not headline; they are buried in the table
+  # without a front-page mention. Distinct from VSAT_HIGH (a much
+  # larger, near-VCC value in an adjacent row).
+  - id: 'acs70331-saturation-low'
+    value_contains: ['20', 'mV']      # FILL IN: list of substrings, e.g. ['12.3', 'kOhm']
+    confidence_min:   1      # FILL IN: a number between 0 and 1
+    notes: ''

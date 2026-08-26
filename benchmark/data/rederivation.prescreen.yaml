@@ -1,0 +1,213 @@
+metadata:
+  annotator: llm-prescreen (3 blind agents, one per datasheet)
+  n_claims: 25
+claims:
+- id: dps310-relative-accuracy
+  value_contains:
+  - '0.06'
+  - hPa
+  confidence_min: 0.7
+  notes: 'p9 Table 7 Pressure Transfer Function, row "Relative pressure accuracy" (Ap_rel) = +/-6 Pa typ; same spec restated on p1 Features as "Relative accuracy: +/- 0.06 hPa (or +/-0.5 m)". Claim UNIT
+    is hPa so the hPa spelling (0.06) is required. AMBIGUITY: the value appears in two units (6 Pa on p9, 0.06 hPa on p1); an answer quoting "+/-6 Pa" would fail this substring set. Table 7 test conditions
+    are VDD=1.8V and TA=20..+60C, not the claim''s 3.0V, but that condition is not load-bearing. "+/-" deliberately not required: an answer giving the magnitude without the sign is still correct.'
+- id: dps310-absolute-accuracy
+  value_contains:
+  - '1'
+  - hPa
+  confidence_min: 0.8
+  notes: 'p9 Table 7, row "Absolute pressure accuracy" (Ap_abs) = +/-100 Pa typ (Pa=300-1200hPa, TA=0..+65C, excluding solder effects); same spec on p1 Features as "Absolute accuracy: +/- 1 hPa (or +/-8
+    m)". Claim UNIT is hPa so the value is 1 hPa. WEAK GUARD, flagged deliberately: "1" is a near-vacuous substring (it matches almost any numeric answer), so the substring test carries very little here
+    and I raised confidence_min from my 0.7 default to 0.8 to compensate. AMBIGUITY: as with the relative-accuracy claim, the datasheet states this in Pa on p9 (100 Pa) and in hPa on p1; an answer quoting
+    "+/-100 Pa" would pass ["1","hPa"] only if it also mentions hPa (it likely will, since the row''s test condition names hPa) -- another reason not to lean on the substrings alone.'
+- id: dps310-pressure-precision-high
+  value_contains:
+  - '0.2'
+  - Pa
+  confidence_min: 0.7
+  notes: p9 Table 7, row "Pressure precision" (Ap_prc), High Precision sub-row = 0.2 PaRMS typ; test conditions of the table are VDD=VDDIO=1.8V, PA=1000hPa, TA=25C, matching the claim. Corroborated on p30
+    Table 16 (64x oversampling = 0.2 PaRMS) and on p1 Features ("+/- 0.002 hPa ... high precision mode"). Requiring "Pa" (not "PaRMS") keeps an answer that writes the unit as "Pa" or "Pa RMS" passing; note
+    "0.002" does not contain "0.2", so the hPa spelling correctly fails this Pa-unit claim.
+- id: dps310-pressure-temp-sensitivity
+  value_contains:
+  - '0.5'
+  - Pa/K
+  confidence_min: 0.7
+  notes: 'p9 Table 7, row "Pressure temperature sensitivity of calibrated measurements" (Ap_tmp) = 0.5 Pa/K typ, note "1000hPa, 25...+65C". Restated on p1 Features ("Pressure temperature sensitivity: 0.5Pa/K").
+    "Pa/K" required because "0.5" alone collides with the temperature-accuracy value (+/-0.5 C) and with the standby current (0.5 uA); the compound unit is the discriminator.'
+- id: dps310-temperature-accuracy
+  value_contains:
+  - '0.5'
+  - C
+  confidence_min: 0.7
+  notes: 'p8 Table 6 Temperature Transfer Function, row "Temperature accuracy" (At) = +/-0.5 C typ; restated on p1 Features ("Temperature accuracy: +/- 0.5C"). Deliberately requiring plain "C" rather than
+    the degree-sign form: the datasheet prints the degree symbol, the claim UNIT field spells it "C", and requiring the symbol would fail a correct answer that writes "0.5 C" or "degC" on an encoding difference.
+    "C" is a weak substring on its own; "0.5" carries the discrimination.'
+- id: dps310-current-1hz-low-precision
+  value_contains:
+  - '2.1'
+  - A
+  confidence_min: 0.7
+  notes: 'p7 Table 5 Current Consumption, row "Current Consumption (1 pressure and temperature measurements per second)" (I1Hz), Low precision sub-row = 2.1 uA typ; test conditions VDD=VDDIO=1.8V, PA=1000hPa,
+    TA=25C. Corroborated on p30 Table 17 (1 meas/sec, single oversampling = 2.1 uA). AMBIGUITY: p1 Features quotes a different decomposition ("1.7 uA for Pressure Measurement, 1.5uA for Temperature measurement
+    @1Hz"); I read the claim ("typical supply current at 1 Hz, Low precision mode") as naming the Table 5 row, which is the only place a per-precision-mode 1 Hz current is given. Unit guard is only "A",
+    not "uA": the datasheet uses the micro sign in Table 5 but ASCII "uA" in Table 17/Table 10, so requiring either spelling would produce false failures.'
+- id: dps310-supply-voltage-vdd
+  value_contains:
+  - '1.7'
+  - '3.6'
+  - V
+  confidence_min: 0.7
+  notes: 'p6 Table 3 Operating Range, row "Supply voltage" (VDD) = 1.7 min / 3.6 max V; restated on p1 Features ("VDD: 1.7 - 3.6 V"). Both range ends required. The adjacent row VDDIO is 1.2-3.6 V, so 3.6
+    alone does not discriminate but 1.7 does; the symbol "VDD" is deliberately NOT required because "VDDIO" contains "VDD" and so would not discriminate anyway, while requiring it would fail an otherwise-correct
+    answer that omits the symbol. Not to be confused with p7 Table 4 Absolute Maximum Ratings (VDDxx_max = 4 V).'
+- id: dps310-meas-time-standard
+  value_contains:
+  - '27.6'
+  - ms
+  confidence_min: 0.7
+  notes: 'p9 Table 7, row "Pressure measurement time" (t), Standard sub-row = 27.6 ms typ; corroborated on p30 Table 16 (16x oversampling = 27.6 ms) and p1 Features ("Typical: 27.6 ms for standard mode
+    (16x)"). Sibling sub-rows are 5.2 ms (Low Power) and 105 ms (High Precision), so 27.6 uniquely picks the standard-mode row.'
+- id: dps310-pressure-rate-range
+  value_contains:
+  - '1'
+  - '128'
+  - Hz
+  confidence_min: 0.7
+  notes: p9 Table 7, row "Pressure measurement rate" (f) = 1 min / 128 max Hz. Both range ends listed per the range rule, though "1" is subsumed by "128" and therefore adds no real constraint; "128" plus
+    "Hz" is what binds. Note p8 Table 6 gives the identical 1-128 Hz range for the TEMPERATURE measurement rate, so the two rows are numerically indistinguishable -- resolved by the claim naming pressure,
+    not by a substring.
+- id: dps310-pressure-data-resolution
+  value_contains:
+  - '0.06'
+  - Pa
+  confidence_min: 0.7
+  notes: 'p9 Table 7, row "Pressure data resolution" (Ap_res) = 0.06 PaRMS (given in the Max. column, not Typ.); table test conditions VDD=VDDIO=1.8V, matching the claim. AMBIGUITY worth flagging: the digits
+    "0.06" also occur in this claim set as the relative accuracy 0.06 hPa (p1), and "0.06 hPa" contains the substring "Pa", so this guard cannot by itself separate the two rows -- I did not add the symbol
+    "Ap_res" because an extracted answer is not guaranteed to echo it, and I judged an extraction targeted at "pressure data resolution" quoting the relative-accuracy figure to be implausible. Also nearby:
+    power supply rejection Ap_psr = 0.063 PaRMS, which does contain "0.06"; same caveat.'
+- id: dps310-operating-range
+  value_contains:
+  - '300'
+  - '1200'
+  - hPa
+  confidence_min: 0.7
+  notes: 'p6 Table 3 Operating Range, row "Pressure" (Pa) = 300 min / 1200 max hPa; restated on p1 Features ("Operation range: Pressure: 300 - 1200 hPa"). Both range ends required. Distinct from p7 Table
+    4 Absolute Maximum Ratings (Pmax = 10,000 hPa), which 1200 excludes.'
+- id: si115x-adc-bit-depth
+  value_contains:
+  - '23'
+  - bit
+  confidence_min: 0.6
+  notes: 'p1 (product description, first paragraph): "dual 23-bit analog-to-digital converters". This is the ONLY statement of ADC resolution in the document; there is no bit-depth row in any Electrical
+    Specifications table. Genuinely ambiguous: the output-format sections (p8, p9, p35, and ADCPOSTx.24BIT_OUT on p43) speak of "16-bit mode" and "24-bit mode", which is the OUTPUT word width, not the converter
+    resolution (24-bit mode saturates at 0x7FFFFF = 2^23-1, consistent with a 23-bit converter). I read the claim''s "ADC bit depth" as the converter resolution, so 23. Unit is given as "counts" but the
+    datasheet states this in bits, so I require ''bit'' (matches "bit", "bits", "23-bit") rather than a count unit. confidence_min lowered from my 0.8 default because a correct answer here has to choose
+    between 23/16/24 and may legitimately hedge; I do not want a hedged-but-right answer rejected.'
+- id: si115x-operating-temperature
+  value_contains:
+  - '40'
+  - '85'
+  - C
+  confidence_min: 0.8
+  notes: 'p47 Table 8.1 Recommended Operating Conditions, row "Operating Temperature" (symbol T): min -40, typ 25, max 85 degC. Same -40/85 range is repeated on p1, p4 ("Temperature Range: -40 to +85 degC")
+    and p52 Table 8.7 Absolute Maximum Ratings, so no conflict. ''40'' rather than ''-40'' because the datasheet uses an en-dash minus (U+2013) and an extraction will write ASCII ''-''; ''C'' matches "degC"/"C"
+    without depending on the degree sign.'
+- id: si115x-supply-voltage-vdd
+  value_contains:
+  - '1.62'
+  - '3.6'
+  - V
+  confidence_min: 0.8
+  notes: 'p47 Table 8.1 Recommended Operating Conditions, row "VDD Supply Voltage" (VDD): min 1.62, max 3.6 V. Repeated on p1 and p4 ("1.62 to 3.6 V supply voltage"). Deliberately NOT the p52 Table 8.7
+    Absolute Maximum Ratings row (-0.3 to 4 V) -- the claim says operating-voltage range. Both ends required since it is a range.'
+- id: si115x-standby-current-1v8
+  value_contains:
+  - '125'
+  - nA
+  confidence_min: 0.8
+  notes: 'p47 Table 8.2 Electrical Performance Characteristics, row "IDD Standby Mode (sleep)" (Isb), condition "No ADC Conversions / No I2C Activity / VDD = 1.8 V": typ 125 nA (min and max are dashes).
+    Column position verified by word x-coordinate (125 at x=418.5 vs Typ header at x=418.0). Note the adjacent distractors, all deliberately excluded: same row at VDD=3.3 V is 1.25 uA, and "IDD Standby
+    Mode (sleep) RTC On" (Isb,rtc) is 0.55 uA at 1.8 V. The p1/p4 feature bullet "<500 nA standby current" is marketing prose, not the table value.'
+- id: si115x-active-current-3v3
+  value_contains:
+  - '4.5'
+  - mA
+  confidence_min: 0.8
+  notes: 'p48 Table 8.2 (continued), row "I active, but not measuring" (I active), condition "Responding to commands, Preparing and calculating results of readings. / VDD = 3.3 V": 4.5 mA. Column position
+    verified by word x-coordinate (4.5 at x=419.7 vs Typ header at x=418.0), so this is the typical, with max shown as a dash. Distractors excluded: same row at VDD=1.8 V is 4.25 mA, and "IDD Suspend Mode"
+    (Isus) is 1.6 mA at 3.3 V.'
+- id: si115x-processing-time
+  value_contains:
+  - '155'
+  confidence_min: 0.8
+  notes: 'p48 Table 8.2 (continued), row "Processing Time per Measurement (During this time the current is I Active)" (tprocess), condition "ALS or Proximity": 155 us. Column position verified by word x-coordinate
+    (155 at x=418.5 vs Typ header at x=418.0), so typical; min/max blank. Unit deliberately omitted from value_contains: the datasheet renders it with the MICRO SIGN (U+00B5, "us" with a mu) and an extraction
+    may emit U+03BC, a literal "us", or "microseconds" -- a substring test on the unit would fail spuriously in either direction. ''155'' is unique in this table. Distractor excluded: tadstart (A/D startup
+    time) is 48.8 us on the next row.'
+- id: si115x-vis-response-525nm
+  value_contains:
+  - '160'
+  - W/m
+  confidence_min: 0.7
+  notes: 'p49 Table 8.3 Optical Performance Characteristics: Si115x-AB00, row "Small Visible Photodiode Response", condition "ADCMUX=0x11" / "525 nm (green)": typ 160 ADC Counts/(W/m2). Test conditions
+    above the table: DECIM=0, HW_GAIN=0, SW_GAIN=0, HSIG=0 (the claim''s "default config"). Genuinely ambiguous by part variant: p50 Table 8.4 gives the SAME parameter for the Si115x-AB09 (IR optical bandpass
+    filter) as 0 counts/(W/m2) at 525 nm, since the filter rejects visible light. Resolved to the AB00 table (160) because a responsivity claim quoting 0 is degenerate and the AB09 part is explicitly stated
+    (p8) to be unusable for ambient light sensing; if the chamber part is an AB09 this answer is wrong. Row-adjacent distractors excluded: same row at 460 nm is 190, and Medium Visible (ADCMUX=0x13) at
+    525 nm is 320. Unit entry is ''W/m'' only -- it survives "W/m2", "W/m^2" and "W/m2 (superscript)", where a longer unit string would not. confidence_min lowered from 0.8 for the AB00/AB09 ambiguity.'
+- id: si115x-als-resolution-mlx
+  value_contains:
+  - '100'
+  - mlx
+  confidence_min: 0.8
+  notes: 'p8 section 3.1 Ambient Light Sensing: "By increasing this integration time, the ADC can detect light levels as low as 100 mlx." Same figure as the feature bullet on p1 and p4, "<100 mlx resolution
+    possible, allowing operation under dark glass". Prose only -- there is no mlx row in any Electrical/Optical Specifications table. I did NOT require ''<'': the bullet says "<100 mlx" but the body text
+    says "as low as 100 mlx", so an answer giving 100 mlx without the inequality is correct against the body text and should not fail.'
+- id: si115x-supply-ripple
+  value_contains:
+  - '50'
+  - mV
+  confidence_min: 0.8
+  notes: 'p47 Table 8.1 Recommended Operating Conditions, row "VDD Supply Ripple Voltage", condition "VDD = 3.3 V / 1 kHz - 10 MHz": max 50 mVpp (min and typ are dashes). Unit entry is ''mV'' rather than
+    ''mVpp'' so that "mVpp", "mVp-p" and "mV peak-to-peak" all pass. I did not require the word ''max'' even though 50 is a maximum-only spec; the row has no other number, so a bare "50 mVpp" is unambiguous.'
+- id: acs70331-bandwidth
+  value_contains:
+  - '1'
+  - MHz
+  confidence_min: 0.8
+  notes: 'p5 COMMON ELECTRICAL CHARACTERISTICS table, row "Bandwidth / BW / -3 dB bandwidth": typ 1 MHz (min and max are dashes). Same value repeats on p1 features bullet ("1 MHz bandwidth"), the running
+    title, and p15 prose ("bandwidth of approximately 1 MHz"), so there is no competing row. The bare "1" is an extremely weak substring (it matches almost any answer), so in practice this cell is graded
+    on "MHz" alone; I kept "1" rather than "1 MHz" because a correct answer may render it "1.0 MHz". Table conditions are VCC = 3.3 V, full TA range, matching the claim.'
+- id: acs70331-supply-current-max
+  value_contains:
+  - '6'
+  - mA
+  confidence_min: 0.8
+  notes: 'p5 ELECTRICAL CHARACTERISTICS, row "Supply Current / ICC", test condition "VCC(min) <= VCC <= VCC(max), no load on VIOUT, fuses powered down": min -, typ 4.5, max 6 mA. The adjacent row ICC_START_UP
+    (fuses POWERED, during tFPD) has max 7.5 mA and is the plausible wrong pick; the claim condition fuses_powered_down selects the 6 mA row. Did not require the symbol ICC because the number already separates
+    the two rows; did not require "max" so that an answer listing typ and max still passes. Weakness: "6" would also match inside e.g. "6.x" or "16", but no such neighbouring value exists here.'
+- id: acs70331-rise-time
+  value_contains:
+  - '460'
+  - ns
+  confidence_min: 0.8
+  notes: 'p5 OUTPUT CHARACTERISTICS, row "Rise Time / tr", test condition "1 V swing on VIOUT, 10% to 90%": typ 460 ns. Neighbouring rows under the same 1 V swing condition are tRESPONSE (80% to 80%, 535
+    ns) and tpd (20% to 20%, 220 ns) - the 10%-to-90% definition in the claim is what selects 460. p24 has a definition/figure for tr (Figure 11) but quotes no competing number. 460 is distinctive enough
+    that the symbol is not needed.'
+- id: acs70331-primary-resistance-qfn
+  value_contains:
+  - '1.1'
+  confidence_min: 0.8
+  notes: 'p5 ELECTRICAL CHARACTERISTICS, row "Primary Conductor Resistance / RIP", sub-row "QFN-12 package, TA = 25 C": typ 1.1 mOhm. The immediately following sub-row is "SOIC-8 package, TA = 25 C" at
+    1.7 mOhm, which is the plausible wrong pick; also nearby is Primary Conductor Inductance LIP at 1.7 nH (QFN). Corroborated on p1 features ("1.1 mOhm primary conductor resistance") and p19 prose ("1.1
+    mOhm (ES) and 1.7 mOhm (OL)"), ES being the QFN part suffix. UNIT DELIBERATELY OMITTED: the datasheet prints the unit as the Unicode "mOhm" glyph (milli + Greek capital omega) while the claim spells
+    it mOhm, and a correct extraction may emit either form - requiring one spelling would fail correct answers using the other. "1.1" alone is unambiguous within this table.'
+- id: acs70331-saturation-low
+  value_contains:
+  - '20'
+  - mV
+  confidence_min: 0.8
+  notes: 'p5 OUTPUT CHARACTERISTICS, row "Saturation Voltage / VSAT_LOW", test condition "VCC(min) < VCC < VCC(max); RL = 22 kOhm to VIOUT": min -, typ 20, max 200 mV. The adjacent sub-row VSAT_HIGH (RL
+    = 22 kOhm to GND) is min 2.8 V / typ VCC - 0.15 V, i.e. a different unit and magnitude, so it cannot false-pass this test. KNOWN WEAKNESS I ACCEPTED: "20" is also a substring of "200", the max in the
+    SAME row, so an answer that reports only the 200 mV max would pass even though the claim asks for the typical. I chose it anyway over the tighter "20 mV" because extractions commonly render typ and
+    max together ("typ 20, max 200 mV"), where the literal "20 mV" would not appear and a correct answer would be failed. Also note "20" appears elsewhere on p5 (hysteresis 20 mA, tpd 220 ns), but the required
+    "mV" restricts it.'

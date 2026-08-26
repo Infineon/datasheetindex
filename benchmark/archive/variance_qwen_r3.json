@@ -1,0 +1,1576 @@
+{
+  "schema_version": 1,
+  "timestamp": "2026-05-22T14:33:53.972722+00:00",
+  "n_repeats": 2,
+  "engine": "agentic",
+  "models": [
+    "qwen3.6-27b"
+  ],
+  "claim_ids": [
+    "dps310-relative-accuracy",
+    "dps310-absolute-accuracy",
+    "dps310-pressure-precision-high",
+    "dps310-pressure-temp-sensitivity",
+    "dps310-temperature-accuracy",
+    "dps310-current-1hz-low-precision",
+    "dps310-supply-voltage-vdd",
+    "dps310-meas-time-standard",
+    "dps310-pressure-rate-range",
+    "dps310-pressure-data-resolution",
+    "dps310-operating-range",
+    "si115x-adc-bit-depth",
+    "si115x-operating-temperature",
+    "si115x-supply-voltage-vdd",
+    "si115x-standby-current-1v8",
+    "si115x-active-current-3v3",
+    "si115x-processing-time",
+    "si115x-vis-response-525nm",
+    "si115x-als-resolution-mlx",
+    "si115x-supply-ripple",
+    "acs70331-bandwidth",
+    "acs70331-supply-current-max",
+    "acs70331-rise-time",
+    "acs70331-primary-resistance-qfn",
+    "acs70331-saturation-low"
+  ],
+  "runs": {
+    "qwen3.6-27b": [
+      {
+        "repeat": 1,
+        "source": "imported:baseline_chamber.json",
+        "started": "2026-05-21T18:59:42.582930+00:00",
+        "cells": {
+          "dps310-relative-accuracy": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 337.41174568398856,
+            "usage": {
+              "input_tokens": 81370,
+              "output_tokens": 15680,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 2,
+              "get_section_text": 2,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 11
+          },
+          "dps310-absolute-accuracy": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 206.63923504998093,
+            "usage": {
+              "input_tokens": 115096,
+              "output_tokens": 9989,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "get_section_text": 3,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "cross_sensor_check": 1,
+              "get_ground_truth_graph": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 13
+          },
+          "dps310-pressure-precision-high": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 74.43020420899848,
+            "usage": {
+              "input_tokens": 97022,
+              "output_tokens": 4175,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 2,
+              "get_section_text": 2,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 10
+          },
+          "dps310-pressure-temp-sensitivity": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 65.80135647999123,
+            "usage": {
+              "input_tokens": 61961,
+              "output_tokens": 3927,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 2,
+              "get_section_text": 2,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 10
+          },
+          "dps310-temperature-accuracy": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 115.99078747598105,
+            "usage": {
+              "input_tokens": 82266,
+              "output_tokens": 5845,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 2,
+              "get_section_text": 4,
+              "list_experiments": 1,
+              "get_ground_truth_graph": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 11
+          },
+          "dps310-current-1hz-low-precision": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 91.13919197002542,
+            "usage": {
+              "input_tokens": 57125,
+              "output_tokens": 6104,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 1,
+              "get_section_text": 3,
+              "list_experiments": 1,
+              "get_ground_truth_graph": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 9
+          },
+          "dps310-supply-voltage-vdd": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 92.7875573070196,
+            "usage": {
+              "input_tokens": 74508,
+              "output_tokens": 4936,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 1,
+              "get_section_text": 2,
+              "extract_table_markdown": 2,
+              "list_experiments": 1,
+              "get_ground_truth_graph": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 10
+          },
+          "dps310-meas-time-standard": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": false,
+              "found_correct": false,
+              "value_pass": false,
+              "confidence": 0.0,
+              "failure_reason": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim dps310-meas-time-standard)",
+              "overall_pass": false,
+              "engine_error": true
+            },
+            "latency_s": 32.047137507994194,
+            "usage": {
+              "input_tokens": 49389,
+              "output_tokens": 970,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim dps310-meas-time-standard)",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 1,
+              "get_section_text": 2,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1
+            },
+            "n_steps": 8
+          },
+          "dps310-pressure-rate-range": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 79.81029305799166,
+            "usage": {
+              "input_tokens": 103918,
+              "output_tokens": 4126,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "get_section_text": 4,
+              "list_experiments": 1,
+              "get_experiment_metadata": 2,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 14
+          },
+          "dps310-pressure-data-resolution": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 152.7716434749891,
+            "usage": {
+              "input_tokens": 197104,
+              "output_tokens": 6970,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 4,
+              "get_section_text": 5,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 16
+          },
+          "dps310-operating-range": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 1.0,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 74.43057812700863,
+            "usage": {
+              "input_tokens": 104174,
+              "output_tokens": 3865,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 5,
+              "get_section_text": 3,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "get_ground_truth_graph": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 14
+          },
+          "si115x-adc-bit-depth": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.6,
+              "failure_reason": "Confidence 0.60 < 0.7",
+              "overall_pass": false
+            },
+            "latency_s": 372.0025958289916,
+            "usage": {
+              "input_tokens": 303965,
+              "output_tokens": 23586,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 8,
+              "get_section_text": 6,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "query_dataset": 3,
+              "submit_claim_result": 1
+            },
+            "n_steps": 22
+          },
+          "si115x-operating-temperature": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 114.03449472200009,
+            "usage": {
+              "input_tokens": 105675,
+              "output_tokens": 7685,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 1,
+              "get_section_text": 3,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "get_ground_truth_graph": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 10
+          },
+          "si115x-supply-voltage-vdd": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 1.0,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 71.07939124800032,
+            "usage": {
+              "input_tokens": 65106,
+              "output_tokens": 4434,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 1,
+              "get_section_text": 2,
+              "list_experiments": 1,
+              "get_ground_truth_graph": 1,
+              "get_experiment_metadata": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 9
+          },
+          "si115x-standby-current-1v8": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 87.1285559029784,
+            "usage": {
+              "input_tokens": 58132,
+              "output_tokens": 4768,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 1,
+              "get_section_text": 3,
+              "list_experiments": 1,
+              "get_ground_truth_graph": 1,
+              "get_experiment_metadata": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 10
+          },
+          "si115x-active-current-3v3": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 68.41195091701229,
+            "usage": {
+              "input_tokens": 92042,
+              "output_tokens": 3600,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 4,
+              "get_section_text": 2,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 12
+          },
+          "si115x-processing-time": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 142.78475728599005,
+            "usage": {
+              "input_tokens": 92966,
+              "output_tokens": 9843,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 2,
+              "extract_table_markdown": 1,
+              "get_section_text": 3,
+              "list_experiments": 1,
+              "get_experiment_metadata": 2,
+              "submit_claim_result": 1
+            },
+            "n_steps": 12
+          },
+          "si115x-vis-response-525nm": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 152.99049339300836,
+            "usage": {
+              "input_tokens": 212803,
+              "output_tokens": 7788,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 6,
+              "get_section_text": 3,
+              "extract_table_markdown": 2,
+              "list_experiments": 1,
+              "get_experiment_metadata": 2,
+              "submit_claim_result": 1
+            },
+            "n_steps": 17
+          },
+          "si115x-als-resolution-mlx": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.85,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 114.49439378001262,
+            "usage": {
+              "input_tokens": 133066,
+              "output_tokens": 7308,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 4,
+              "get_section_text": 3,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 12
+          },
+          "si115x-supply-ripple": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 197.22422315500444,
+            "usage": {
+              "input_tokens": 150972,
+              "output_tokens": 8806,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 5,
+              "get_section_text": 3,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "extract_table_markdown": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 14
+          },
+          "acs70331-bandwidth": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 77.02038523100782,
+            "usage": {
+              "input_tokens": 45261,
+              "output_tokens": 3104,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 2,
+              "get_section_text": 2,
+              "list_experiments": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 8
+          },
+          "acs70331-supply-current-max": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 99.10440002099494,
+            "usage": {
+              "input_tokens": 95440,
+              "output_tokens": 4488,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "extract_table_markdown": 1,
+              "get_section_text": 3,
+              "list_experiments": 1,
+              "get_ground_truth_graph": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 12
+          },
+          "acs70331-rise-time": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 109.84877707701526,
+            "usage": {
+              "input_tokens": 43867,
+              "output_tokens": 5998,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 1,
+              "extract_table_markdown": 1,
+              "get_section_text": 2,
+              "submit_claim_result": 1
+            },
+            "n_steps": 7
+          },
+          "acs70331-primary-resistance-qfn": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 1.0,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 88.90066484999261,
+            "usage": {
+              "input_tokens": 47794,
+              "output_tokens": 4078,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 1,
+              "get_section_text": 3,
+              "list_experiments": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 8
+          },
+          "acs70331-saturation-low": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 159.66539079201175,
+            "usage": {
+              "input_tokens": 282809,
+              "output_tokens": 6374,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "extract_table_markdown": 1,
+              "inspect_page": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 8
+          }
+        }
+      },
+      {
+        "repeat": 2,
+        "source": "live",
+        "started": "2026-05-22T13:55:31.138742+00:00",
+        "cells": {
+          "dps310-relative-accuracy": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 176.87290229598875,
+            "usage": {
+              "input_tokens": 86592,
+              "output_tokens": 10403,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "get_section_text": 2,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 12
+          },
+          "dps310-absolute-accuracy": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 1.0,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 93.56918352100183,
+            "usage": {
+              "input_tokens": 60296,
+              "output_tokens": 5638,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "get_section_text": 3,
+              "submit_claim_result": 1
+            },
+            "n_steps": 9
+          },
+          "dps310-pressure-precision-high": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": false,
+              "found_correct": false,
+              "value_pass": false,
+              "confidence": 0.0,
+              "failure_reason": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim dps310-pressure-precision-high)",
+              "overall_pass": false,
+              "engine_error": true
+            },
+            "latency_s": 24.24849315400934,
+            "usage": {
+              "input_tokens": 21717,
+              "output_tokens": 817,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim dps310-pressure-precision-high)",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 2,
+              "get_section_text": 1
+            },
+            "n_steps": 5
+          },
+          "dps310-pressure-temp-sensitivity": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": false,
+              "found_correct": false,
+              "value_pass": false,
+              "confidence": 0.0,
+              "failure_reason": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim dps310-pressure-temp-sensitivity)",
+              "overall_pass": false,
+              "engine_error": true
+            },
+            "latency_s": 16.312216612015618,
+            "usage": {
+              "input_tokens": 11437,
+              "output_tokens": 553,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim dps310-pressure-temp-sensitivity)",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 1
+            },
+            "n_steps": 3
+          },
+          "dps310-temperature-accuracy": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 129.52398733398877,
+            "usage": {
+              "input_tokens": 41059,
+              "output_tokens": 8987,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 1,
+              "get_section_text": 3,
+              "list_experiments": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 8
+          },
+          "dps310-current-1hz-low-precision": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": false,
+              "found_correct": false,
+              "value_pass": false,
+              "confidence": 0.0,
+              "failure_reason": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim dps310-current-1hz-low-precision)",
+              "overall_pass": false,
+              "engine_error": true
+            },
+            "latency_s": 19.76007056699018,
+            "usage": {
+              "input_tokens": 12550,
+              "output_tokens": 662,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim dps310-current-1hz-low-precision)",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3
+            },
+            "n_steps": 5
+          },
+          "dps310-supply-voltage-vdd": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 1.0,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 105.7376827300177,
+            "usage": {
+              "input_tokens": 70194,
+              "output_tokens": 6165,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 1,
+              "get_section_text": 2,
+              "list_experiments": 1,
+              "get_ground_truth_graph": 1,
+              "get_experiment_metadata": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 9
+          },
+          "dps310-meas-time-standard": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 1.0,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 121.76939438798581,
+            "usage": {
+              "input_tokens": 79605,
+              "output_tokens": 6374,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "get_section_text": 3,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "get_ground_truth_graph": 1,
+              "extract_table_markdown": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 13
+          },
+          "dps310-pressure-rate-range": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 78.36961587899714,
+            "usage": {
+              "input_tokens": 108249,
+              "output_tokens": 3010,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "get_section_text": 2,
+              "extract_table_markdown": 3,
+              "list_experiments": 1,
+              "get_ground_truth_graph": 1,
+              "get_experiment_metadata": 1,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 15
+          },
+          "dps310-pressure-data-resolution": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": false,
+              "found_correct": false,
+              "value_pass": false,
+              "confidence": 0.0,
+              "failure_reason": "timeout after 360s: ",
+              "overall_pass": false,
+              "engine_error": true
+            },
+            "latency_s": 360.12554415198974,
+            "usage": {
+              "input_tokens": 120951,
+              "output_tokens": 3271,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "timeout after 360s: ",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "get_section_text": 3,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "cross_sensor_check": 1
+            },
+            "n_steps": 11
+          },
+          "dps310-operating-range": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 1.0,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 92.24980185701861,
+            "usage": {
+              "input_tokens": 74680,
+              "output_tokens": 5315,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 2,
+              "get_section_text": 2,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 10
+          },
+          "si115x-adc-bit-depth": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": false,
+              "found_correct": false,
+              "value_pass": false,
+              "confidence": 0.0,
+              "failure_reason": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim si115x-adc-bit-depth)",
+              "overall_pass": false,
+              "engine_error": true
+            },
+            "latency_s": 29.167157857998973,
+            "usage": {
+              "input_tokens": 23217,
+              "output_tokens": 938,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim si115x-adc-bit-depth)",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "get_section_text": 2
+            },
+            "n_steps": 7
+          },
+          "si115x-operating-temperature": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": false,
+              "found_correct": false,
+              "value_pass": false,
+              "confidence": 0.0,
+              "failure_reason": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim si115x-operating-temperature)",
+              "overall_pass": false,
+              "engine_error": true
+            },
+            "latency_s": 48.28128495099372,
+            "usage": {
+              "input_tokens": 22650,
+              "output_tokens": 1010,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim si115x-operating-temperature)",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 1,
+              "extract_table_markdown": 2,
+              "get_section_text": 1
+            },
+            "n_steps": 6
+          },
+          "si115x-supply-voltage-vdd": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 1.0,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 73.22106287599308,
+            "usage": {
+              "input_tokens": 64501,
+              "output_tokens": 3837,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 1,
+              "extract_table_markdown": 1,
+              "get_section_text": 2,
+              "list_experiments": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 8
+          },
+          "si115x-standby-current-1v8": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": false,
+              "found_correct": false,
+              "value_pass": false,
+              "confidence": 0.0,
+              "failure_reason": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim si115x-standby-current-1v8)",
+              "overall_pass": false,
+              "engine_error": true
+            },
+            "latency_s": 29.658757564990083,
+            "usage": {
+              "input_tokens": 24490,
+              "output_tokens": 872,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim si115x-standby-current-1v8)",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 1,
+              "get_section_text": 2
+            },
+            "n_steps": 5
+          },
+          "si115x-active-current-3v3": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 135.26993429500726,
+            "usage": {
+              "input_tokens": 142869,
+              "output_tokens": 5705,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 7,
+              "extract_table_markdown": 2,
+              "get_section_text": 3,
+              "list_experiments": 1,
+              "get_experiment_metadata": 2,
+              "get_ground_truth_graph": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 19
+          },
+          "si115x-processing-time": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": false,
+              "found_correct": false,
+              "value_pass": false,
+              "confidence": 0.0,
+              "failure_reason": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim si115x-processing-time)",
+              "overall_pass": false,
+              "engine_error": true
+            },
+            "latency_s": 61.73435645698919,
+            "usage": {
+              "input_tokens": 45962,
+              "output_tokens": 1988,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim si115x-processing-time)",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 2,
+              "extract_table_markdown": 1,
+              "get_section_text": 2,
+              "list_experiments": 1
+            },
+            "n_steps": 8
+          },
+          "si115x-vis-response-525nm": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 61.96979256399209,
+            "usage": {
+              "input_tokens": 58663,
+              "output_tokens": 3063,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "get_section_text": 2,
+              "submit_claim_result": 1
+            },
+            "n_steps": 8
+          },
+          "si115x-als-resolution-mlx": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": false,
+              "found_correct": false,
+              "value_pass": false,
+              "confidence": 0.0,
+              "failure_reason": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim si115x-als-resolution-mlx)",
+              "overall_pass": false,
+              "engine_error": true
+            },
+            "latency_s": 132.50188810299733,
+            "usage": {
+              "input_tokens": 67672,
+              "output_tokens": 4645,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "SubmitToolNotCalledError: agent ended (stop_reason=end_turn) without calling submit_claim_result (claim si115x-als-resolution-mlx)",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 7,
+              "get_section_text": 2
+            },
+            "n_steps": 11
+          },
+          "si115x-supply-ripple": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 154.9581490389828,
+            "usage": {
+              "input_tokens": 92147,
+              "output_tokens": 8110,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 4,
+              "extract_table_markdown": 1,
+              "get_section_text": 2,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 12
+          },
+          "acs70331-bandwidth": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": false,
+              "found_correct": false,
+              "value_pass": false,
+              "confidence": 0.0,
+              "failure_reason": "InternalServerError: Error code: 503 - {'error': {'message': 'litellm.ServiceUnavailableError: ServiceUnavailableError: Hosted_vllmException - <html>\\r\\n  <head>\\r\\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\\r\\n\\r\\n    <style type=\"text/css\">\\r\\n      body {\\r\\n        font-family: \"Helvetica Neue\", Helvetica, Arial, sans-serif;\\r\\n        line-height: 1.66666667;\\r\\n        font-size: 16px;\\r\\n        color: #333;\\r\\n        background-color: #fff;\\r\\n        margin: 2em 1em;\\r\\n      }\\r\\n      h1 {\\r\\n        font-size: 28px;\\r\\n        font-weight: 400;\\r\\n      }\\r\\n      p {\\r\\n        margin: 0 0 10px;\\r\\n      }\\r\\n      .alert.alert-info {\\r\\n        background-color: #F0F0F0;\\r\\n        margin-top: 30px;\\r\\n        padding: 30px;\\r\\n      }\\r\\n      .alert p {\\r\\n        padding-left: 35px;\\r\\n      }\\r\\n      ul {\\r\\n        padding-left: 51px;\\r\\n        position: relative;\\r\\n      }\\r\\n      li {\\r\\n        font-size: 14px;\\r\\n        margin-bottom: 1em;\\r\\n      }\\r\\n      p.info {\\r\\n        position: relative;\\r\\n        font-size: 20px;\\r\\n      }\\r\\n      p.info:before, p.info:after {\\r\\n        content: \"\";\\r\\n        left: 0;\\r\\n        position: absolute;\\r\\n        top: 0;\\r\\n      }\\r\\n      p.info:before {\\r\\n        background: #0066CC;\\r\\n        border-radius: 16px;\\r\\n        color: #fff;\\r\\n        content: \"i\";\\r\\n        font: bold 16px/24px serif;\\r\\n        height: 24px;\\r\\n        left: 0px;\\r\\n        text-align: center;\\r\\n        top: 4px;\\r\\n        width: 24px;\\r\\n      }\\r\\n\\r\\n      @media (min-width: 768px) {\\r\\n        body {\\r\\n          margin: 6em;\\r\\n        }\\r\\n      }\\r\\n    </style>\\r\\n  </head>\\r\\n  <body>\\r\\n    <div>\\r\\n      <h1>Application is not available</h1>\\r\\n      <p>The application is currently not serving requests at this endpoint. It may not have been started or is still starting.</p>\\r\\n\\r\\n      <div class=\"alert alert-info\">\\r\\n        <p class=\"info\">\\r\\n          Possible reasons you are seeing this page:\\r\\n        </p>\\r\\n        <ul>\\r\\n          <li>\\r\\n            <strong>The host doesn\\'t exist.</strong>\\r\\n            Make sure the hostname was typed correctly and that a route matching this hostname exists.\\r\\n          </li>\\r\\n          <li>\\r\\n            <strong>The host exists, but doesn\\'t have a matching path.</strong>\\r\\n            Check if the URL path was typed correctly and that the route was created using the desired path.\\r\\n          </li>\\r\\n          <li>\\r\\n            <strong>Route and path matches, but all pods are down.</strong>\\r\\n            Make sure that the resources exposed by this route (pods, services, deployment configs, etc) have at least one pod running.\\r\\n          </li>\\r\\n        </ul>\\r\\n      </div>\\r\\n    </div>\\r\\n  </body>\\r\\n</html>\\r\\n. Received Model Group=qwen3.6-27b\\nAvailable Model Group Fallbacks=None', 'type': None, 'param': None, 'code': '503'}}",
+              "overall_pass": false,
+              "engine_error": true
+            },
+            "latency_s": 96.22334760800004,
+            "usage": {
+              "input_tokens": 3499,
+              "output_tokens": 54,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "InternalServerError: Error code: 503 - {'error': {'message': 'litellm.ServiceUnavailableError: ServiceUnavailableError: Hosted_vllmException - <html>\\r\\n  <head>\\r\\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\\r\\n\\r\\n    <style type=\"text/css\">\\r\\n      body {\\r\\n        font-family: \"Helvetica Neue\", Helvetica, Arial, sans-serif;\\r\\n        line-height: 1.66666667;\\r\\n        font-size: 16px;\\r\\n        color: #333;\\r\\n        background-color: #fff;\\r\\n        margin: 2em 1em;\\r\\n      }\\r\\n      h1 {\\r\\n        font-size: 28px;\\r\\n        font-weight: 400;\\r\\n      }\\r\\n      p {\\r\\n        margin: 0 0 10px;\\r\\n      }\\r\\n      .alert.alert-info {\\r\\n        background-color: #F0F0F0;\\r\\n        margin-top: 30px;\\r\\n        padding: 30px;\\r\\n      }\\r\\n      .alert p {\\r\\n        padding-left: 35px;\\r\\n      }\\r\\n      ul {\\r\\n        padding-left: 51px;\\r\\n        position: relative;\\r\\n      }\\r\\n      li {\\r\\n        font-size: 14px;\\r\\n        margin-bottom: 1em;\\r\\n      }\\r\\n      p.info {\\r\\n        position: relative;\\r\\n        font-size: 20px;\\r\\n      }\\r\\n      p.info:before, p.info:after {\\r\\n        content: \"\";\\r\\n        left: 0;\\r\\n        position: absolute;\\r\\n        top: 0;\\r\\n      }\\r\\n      p.info:before {\\r\\n        background: #0066CC;\\r\\n        border-radius: 16px;\\r\\n        color: #fff;\\r\\n        content: \"i\";\\r\\n        font: bold 16px/24px serif;\\r\\n        height: 24px;\\r\\n        left: 0px;\\r\\n        text-align: center;\\r\\n        top: 4px;\\r\\n        width: 24px;\\r\\n      }\\r\\n\\r\\n      @media (min-width: 768px) {\\r\\n        body {\\r\\n          margin: 6em;\\r\\n        }\\r\\n      }\\r\\n    </style>\\r\\n  </head>\\r\\n  <body>\\r\\n    <div>\\r\\n      <h1>Application is not available</h1>\\r\\n      <p>The application is currently not serving requests at this endpoint. It may not have been started or is still starting.</p>\\r\\n\\r\\n      <div class=\"alert alert-info\">\\r\\n        <p class=\"info\">\\r\\n          Possible reasons you are seeing this page:\\r\\n        </p>\\r\\n        <ul>\\r\\n          <li>\\r\\n            <strong>The host doesn\\'t exist.</strong>\\r\\n            Make sure the hostname was typed correctly and that a route matching this hostname exists.\\r\\n          </li>\\r\\n          <li>\\r\\n            <strong>The host exists, but doesn\\'t have a matching path.</strong>\\r\\n            Check if the URL path was typed correctly and that the route was created using the desired path.\\r\\n          </li>\\r\\n          <li>\\r\\n            <strong>Route and path matches, but all pods are down.</strong>\\r\\n            Make sure that the resources exposed by this route (pods, services, deployment configs, etc) have at least one pod running.\\r\\n          </li>\\r\\n        </ul>\\r\\n      </div>\\r\\n    </div>\\r\\n  </body>\\r\\n</html>\\r\\n. Received Model Group=qwen3.6-27b\\nAvailable Model Group Fallbacks=None', 'type': None, 'param': None, 'code': '503'}}",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1
+            },
+            "n_steps": 1
+          },
+          "acs70331-supply-current-max": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": false,
+              "found_correct": false,
+              "value_pass": false,
+              "confidence": 0.0,
+              "failure_reason": "InternalServerError: Error code: 503 - {'error': {'message': 'litellm.ServiceUnavailableError: ServiceUnavailableError: Hosted_vllmException - <html>\\r\\n  <head>\\r\\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\\r\\n\\r\\n    <style type=\"text/css\">\\r\\n      body {\\r\\n        font-family: \"Helvetica Neue\", Helvetica, Arial, sans-serif;\\r\\n        line-height: 1.66666667;\\r\\n        font-size: 16px;\\r\\n        color: #333;\\r\\n        background-color: #fff;\\r\\n        margin: 2em 1em;\\r\\n      }\\r\\n      h1 {\\r\\n        font-size: 28px;\\r\\n        font-weight: 400;\\r\\n      }\\r\\n      p {\\r\\n        margin: 0 0 10px;\\r\\n      }\\r\\n      .alert.alert-info {\\r\\n        background-color: #F0F0F0;\\r\\n        margin-top: 30px;\\r\\n        padding: 30px;\\r\\n      }\\r\\n      .alert p {\\r\\n        padding-left: 35px;\\r\\n      }\\r\\n      ul {\\r\\n        padding-left: 51px;\\r\\n        position: relative;\\r\\n      }\\r\\n      li {\\r\\n        font-size: 14px;\\r\\n        margin-bottom: 1em;\\r\\n      }\\r\\n      p.info {\\r\\n        position: relative;\\r\\n        font-size: 20px;\\r\\n      }\\r\\n      p.info:before, p.info:after {\\r\\n        content: \"\";\\r\\n        left: 0;\\r\\n        position: absolute;\\r\\n        top: 0;\\r\\n      }\\r\\n      p.info:before {\\r\\n        background: #0066CC;\\r\\n        border-radius: 16px;\\r\\n        color: #fff;\\r\\n        content: \"i\";\\r\\n        font: bold 16px/24px serif;\\r\\n        height: 24px;\\r\\n        left: 0px;\\r\\n        text-align: center;\\r\\n        top: 4px;\\r\\n        width: 24px;\\r\\n      }\\r\\n\\r\\n      @media (min-width: 768px) {\\r\\n        body {\\r\\n          margin: 6em;\\r\\n        }\\r\\n      }\\r\\n    </style>\\r\\n  </head>\\r\\n  <body>\\r\\n    <div>\\r\\n      <h1>Application is not available</h1>\\r\\n      <p>The application is currently not serving requests at this endpoint. It may not have been started or is still starting.</p>\\r\\n\\r\\n      <div class=\"alert alert-info\">\\r\\n        <p class=\"info\">\\r\\n          Possible reasons you are seeing this page:\\r\\n        </p>\\r\\n        <ul>\\r\\n          <li>\\r\\n            <strong>The host doesn\\'t exist.</strong>\\r\\n            Make sure the hostname was typed correctly and that a route matching this hostname exists.\\r\\n          </li>\\r\\n          <li>\\r\\n            <strong>The host exists, but doesn\\'t have a matching path.</strong>\\r\\n            Check if the URL path was typed correctly and that the route was created using the desired path.\\r\\n          </li>\\r\\n          <li>\\r\\n            <strong>Route and path matches, but all pods are down.</strong>\\r\\n            Make sure that the resources exposed by this route (pods, services, deployment configs, etc) have at least one pod running.\\r\\n          </li>\\r\\n        </ul>\\r\\n      </div>\\r\\n    </div>\\r\\n  </body>\\r\\n</html>\\r\\n. Received Model Group=qwen3.6-27b\\nAvailable Model Group Fallbacks=None', 'type': None, 'param': None, 'code': '503'}}",
+              "overall_pass": false,
+              "engine_error": true
+            },
+            "latency_s": 64.46760435501346,
+            "usage": {
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "InternalServerError: Error code: 503 - {'error': {'message': 'litellm.ServiceUnavailableError: ServiceUnavailableError: Hosted_vllmException - <html>\\r\\n  <head>\\r\\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\\r\\n\\r\\n    <style type=\"text/css\">\\r\\n      body {\\r\\n        font-family: \"Helvetica Neue\", Helvetica, Arial, sans-serif;\\r\\n        line-height: 1.66666667;\\r\\n        font-size: 16px;\\r\\n        color: #333;\\r\\n        background-color: #fff;\\r\\n        margin: 2em 1em;\\r\\n      }\\r\\n      h1 {\\r\\n        font-size: 28px;\\r\\n        font-weight: 400;\\r\\n      }\\r\\n      p {\\r\\n        margin: 0 0 10px;\\r\\n      }\\r\\n      .alert.alert-info {\\r\\n        background-color: #F0F0F0;\\r\\n        margin-top: 30px;\\r\\n        padding: 30px;\\r\\n      }\\r\\n      .alert p {\\r\\n        padding-left: 35px;\\r\\n      }\\r\\n      ul {\\r\\n        padding-left: 51px;\\r\\n        position: relative;\\r\\n      }\\r\\n      li {\\r\\n        font-size: 14px;\\r\\n        margin-bottom: 1em;\\r\\n      }\\r\\n      p.info {\\r\\n        position: relative;\\r\\n        font-size: 20px;\\r\\n      }\\r\\n      p.info:before, p.info:after {\\r\\n        content: \"\";\\r\\n        left: 0;\\r\\n        position: absolute;\\r\\n        top: 0;\\r\\n      }\\r\\n      p.info:before {\\r\\n        background: #0066CC;\\r\\n        border-radius: 16px;\\r\\n        color: #fff;\\r\\n        content: \"i\";\\r\\n        font: bold 16px/24px serif;\\r\\n        height: 24px;\\r\\n        left: 0px;\\r\\n        text-align: center;\\r\\n        top: 4px;\\r\\n        width: 24px;\\r\\n      }\\r\\n\\r\\n      @media (min-width: 768px) {\\r\\n        body {\\r\\n          margin: 6em;\\r\\n        }\\r\\n      }\\r\\n    </style>\\r\\n  </head>\\r\\n  <body>\\r\\n    <div>\\r\\n      <h1>Application is not available</h1>\\r\\n      <p>The application is currently not serving requests at this endpoint. It may not have been started or is still starting.</p>\\r\\n\\r\\n      <div class=\"alert alert-info\">\\r\\n        <p class=\"info\">\\r\\n          Possible reasons you are seeing this page:\\r\\n        </p>\\r\\n        <ul>\\r\\n          <li>\\r\\n            <strong>The host doesn\\'t exist.</strong>\\r\\n            Make sure the hostname was typed correctly and that a route matching this hostname exists.\\r\\n          </li>\\r\\n          <li>\\r\\n            <strong>The host exists, but doesn\\'t have a matching path.</strong>\\r\\n            Check if the URL path was typed correctly and that the route was created using the desired path.\\r\\n          </li>\\r\\n          <li>\\r\\n            <strong>Route and path matches, but all pods are down.</strong>\\r\\n            Make sure that the resources exposed by this route (pods, services, deployment configs, etc) have at least one pod running.\\r\\n          </li>\\r\\n        </ul>\\r\\n      </div>\\r\\n    </div>\\r\\n  </body>\\r\\n</html>\\r\\n. Received Model Group=qwen3.6-27b\\nAvailable Model Group Fallbacks=None', 'type': None, 'param': None, 'code': '503'}}",
+            "n_tool_calls_by_tool": {},
+            "n_steps": 0
+          },
+          "acs70331-rise-time": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": false,
+              "found_correct": false,
+              "value_pass": false,
+              "confidence": 0.0,
+              "failure_reason": "InternalServerError: Error code: 503 - {'error': {'message': 'litellm.ServiceUnavailableError: ServiceUnavailableError: Hosted_vllmException - <html>\\r\\n  <head>\\r\\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\\r\\n\\r\\n    <style type=\"text/css\">\\r\\n      body {\\r\\n        font-family: \"Helvetica Neue\", Helvetica, Arial, sans-serif;\\r\\n        line-height: 1.66666667;\\r\\n        font-size: 16px;\\r\\n        color: #333;\\r\\n        background-color: #fff;\\r\\n        margin: 2em 1em;\\r\\n      }\\r\\n      h1 {\\r\\n        font-size: 28px;\\r\\n        font-weight: 400;\\r\\n      }\\r\\n      p {\\r\\n        margin: 0 0 10px;\\r\\n      }\\r\\n      .alert.alert-info {\\r\\n        background-color: #F0F0F0;\\r\\n        margin-top: 30px;\\r\\n        padding: 30px;\\r\\n      }\\r\\n      .alert p {\\r\\n        padding-left: 35px;\\r\\n      }\\r\\n      ul {\\r\\n        padding-left: 51px;\\r\\n        position: relative;\\r\\n      }\\r\\n      li {\\r\\n        font-size: 14px;\\r\\n        margin-bottom: 1em;\\r\\n      }\\r\\n      p.info {\\r\\n        position: relative;\\r\\n        font-size: 20px;\\r\\n      }\\r\\n      p.info:before, p.info:after {\\r\\n        content: \"\";\\r\\n        left: 0;\\r\\n        position: absolute;\\r\\n        top: 0;\\r\\n      }\\r\\n      p.info:before {\\r\\n        background: #0066CC;\\r\\n        border-radius: 16px;\\r\\n        color: #fff;\\r\\n        content: \"i\";\\r\\n        font: bold 16px/24px serif;\\r\\n        height: 24px;\\r\\n        left: 0px;\\r\\n        text-align: center;\\r\\n        top: 4px;\\r\\n        width: 24px;\\r\\n      }\\r\\n\\r\\n      @media (min-width: 768px) {\\r\\n        body {\\r\\n          margin: 6em;\\r\\n        }\\r\\n      }\\r\\n    </style>\\r\\n  </head>\\r\\n  <body>\\r\\n    <div>\\r\\n      <h1>Application is not available</h1>\\r\\n      <p>The application is currently not serving requests at this endpoint. It may not have been started or is still starting.</p>\\r\\n\\r\\n      <div class=\"alert alert-info\">\\r\\n        <p class=\"info\">\\r\\n          Possible reasons you are seeing this page:\\r\\n        </p>\\r\\n        <ul>\\r\\n          <li>\\r\\n            <strong>The host doesn\\'t exist.</strong>\\r\\n            Make sure the hostname was typed correctly and that a route matching this hostname exists.\\r\\n          </li>\\r\\n          <li>\\r\\n            <strong>The host exists, but doesn\\'t have a matching path.</strong>\\r\\n            Check if the URL path was typed correctly and that the route was created using the desired path.\\r\\n          </li>\\r\\n          <li>\\r\\n            <strong>Route and path matches, but all pods are down.</strong>\\r\\n            Make sure that the resources exposed by this route (pods, services, deployment configs, etc) have at least one pod running.\\r\\n          </li>\\r\\n        </ul>\\r\\n      </div>\\r\\n    </div>\\r\\n  </body>\\r\\n</html>\\r\\n. Received Model Group=qwen3.6-27b\\nAvailable Model Group Fallbacks=None', 'type': None, 'param': None, 'code': '503'}}",
+              "overall_pass": false,
+              "engine_error": true
+            },
+            "latency_s": 66.20485006898525,
+            "usage": {
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "InternalServerError: Error code: 503 - {'error': {'message': 'litellm.ServiceUnavailableError: ServiceUnavailableError: Hosted_vllmException - <html>\\r\\n  <head>\\r\\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\\r\\n\\r\\n    <style type=\"text/css\">\\r\\n      body {\\r\\n        font-family: \"Helvetica Neue\", Helvetica, Arial, sans-serif;\\r\\n        line-height: 1.66666667;\\r\\n        font-size: 16px;\\r\\n        color: #333;\\r\\n        background-color: #fff;\\r\\n        margin: 2em 1em;\\r\\n      }\\r\\n      h1 {\\r\\n        font-size: 28px;\\r\\n        font-weight: 400;\\r\\n      }\\r\\n      p {\\r\\n        margin: 0 0 10px;\\r\\n      }\\r\\n      .alert.alert-info {\\r\\n        background-color: #F0F0F0;\\r\\n        margin-top: 30px;\\r\\n        padding: 30px;\\r\\n      }\\r\\n      .alert p {\\r\\n        padding-left: 35px;\\r\\n      }\\r\\n      ul {\\r\\n        padding-left: 51px;\\r\\n        position: relative;\\r\\n      }\\r\\n      li {\\r\\n        font-size: 14px;\\r\\n        margin-bottom: 1em;\\r\\n      }\\r\\n      p.info {\\r\\n        position: relative;\\r\\n        font-size: 20px;\\r\\n      }\\r\\n      p.info:before, p.info:after {\\r\\n        content: \"\";\\r\\n        left: 0;\\r\\n        position: absolute;\\r\\n        top: 0;\\r\\n      }\\r\\n      p.info:before {\\r\\n        background: #0066CC;\\r\\n        border-radius: 16px;\\r\\n        color: #fff;\\r\\n        content: \"i\";\\r\\n        font: bold 16px/24px serif;\\r\\n        height: 24px;\\r\\n        left: 0px;\\r\\n        text-align: center;\\r\\n        top: 4px;\\r\\n        width: 24px;\\r\\n      }\\r\\n\\r\\n      @media (min-width: 768px) {\\r\\n        body {\\r\\n          margin: 6em;\\r\\n        }\\r\\n      }\\r\\n    </style>\\r\\n  </head>\\r\\n  <body>\\r\\n    <div>\\r\\n      <h1>Application is not available</h1>\\r\\n      <p>The application is currently not serving requests at this endpoint. It may not have been started or is still starting.</p>\\r\\n\\r\\n      <div class=\"alert alert-info\">\\r\\n        <p class=\"info\">\\r\\n          Possible reasons you are seeing this page:\\r\\n        </p>\\r\\n        <ul>\\r\\n          <li>\\r\\n            <strong>The host doesn\\'t exist.</strong>\\r\\n            Make sure the hostname was typed correctly and that a route matching this hostname exists.\\r\\n          </li>\\r\\n          <li>\\r\\n            <strong>The host exists, but doesn\\'t have a matching path.</strong>\\r\\n            Check if the URL path was typed correctly and that the route was created using the desired path.\\r\\n          </li>\\r\\n          <li>\\r\\n            <strong>Route and path matches, but all pods are down.</strong>\\r\\n            Make sure that the resources exposed by this route (pods, services, deployment configs, etc) have at least one pod running.\\r\\n          </li>\\r\\n        </ul>\\r\\n      </div>\\r\\n    </div>\\r\\n  </body>\\r\\n</html>\\r\\n. Received Model Group=qwen3.6-27b\\nAvailable Model Group Fallbacks=None', 'type': None, 'param': None, 'code': '503'}}",
+            "n_tool_calls_by_tool": {},
+            "n_steps": 0
+          },
+          "acs70331-primary-resistance-qfn": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": false,
+              "found_correct": false,
+              "value_pass": false,
+              "confidence": 0.0,
+              "failure_reason": "InternalServerError: Error code: 503 - {'error': {'message': 'litellm.ServiceUnavailableError: ServiceUnavailableError: Hosted_vllmException - <html>\\r\\n  <head>\\r\\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\\r\\n\\r\\n    <style type=\"text/css\">\\r\\n      body {\\r\\n        font-family: \"Helvetica Neue\", Helvetica, Arial, sans-serif;\\r\\n        line-height: 1.66666667;\\r\\n        font-size: 16px;\\r\\n        color: #333;\\r\\n        background-color: #fff;\\r\\n        margin: 2em 1em;\\r\\n      }\\r\\n      h1 {\\r\\n        font-size: 28px;\\r\\n        font-weight: 400;\\r\\n      }\\r\\n      p {\\r\\n        margin: 0 0 10px;\\r\\n      }\\r\\n      .alert.alert-info {\\r\\n        background-color: #F0F0F0;\\r\\n        margin-top: 30px;\\r\\n        padding: 30px;\\r\\n      }\\r\\n      .alert p {\\r\\n        padding-left: 35px;\\r\\n      }\\r\\n      ul {\\r\\n        padding-left: 51px;\\r\\n        position: relative;\\r\\n      }\\r\\n      li {\\r\\n        font-size: 14px;\\r\\n        margin-bottom: 1em;\\r\\n      }\\r\\n      p.info {\\r\\n        position: relative;\\r\\n        font-size: 20px;\\r\\n      }\\r\\n      p.info:before, p.info:after {\\r\\n        content: \"\";\\r\\n        left: 0;\\r\\n        position: absolute;\\r\\n        top: 0;\\r\\n      }\\r\\n      p.info:before {\\r\\n        background: #0066CC;\\r\\n        border-radius: 16px;\\r\\n        color: #fff;\\r\\n        content: \"i\";\\r\\n        font: bold 16px/24px serif;\\r\\n        height: 24px;\\r\\n        left: 0px;\\r\\n        text-align: center;\\r\\n        top: 4px;\\r\\n        width: 24px;\\r\\n      }\\r\\n\\r\\n      @media (min-width: 768px) {\\r\\n        body {\\r\\n          margin: 6em;\\r\\n        }\\r\\n      }\\r\\n    </style>\\r\\n  </head>\\r\\n  <body>\\r\\n    <div>\\r\\n      <h1>Application is not available</h1>\\r\\n      <p>The application is currently not serving requests at this endpoint. It may not have been started or is still starting.</p>\\r\\n\\r\\n      <div class=\"alert alert-info\">\\r\\n        <p class=\"info\">\\r\\n          Possible reasons you are seeing this page:\\r\\n        </p>\\r\\n        <ul>\\r\\n          <li>\\r\\n            <strong>The host doesn\\'t exist.</strong>\\r\\n            Make sure the hostname was typed correctly and that a route matching this hostname exists.\\r\\n          </li>\\r\\n          <li>\\r\\n            <strong>The host exists, but doesn\\'t have a matching path.</strong>\\r\\n            Check if the URL path was typed correctly and that the route was created using the desired path.\\r\\n          </li>\\r\\n          <li>\\r\\n            <strong>Route and path matches, but all pods are down.</strong>\\r\\n            Make sure that the resources exposed by this route (pods, services, deployment configs, etc) have at least one pod running.\\r\\n          </li>\\r\\n        </ul>\\r\\n      </div>\\r\\n    </div>\\r\\n  </body>\\r\\n</html>\\r\\n. Received Model Group=qwen3.6-27b\\nAvailable Model Group Fallbacks=None', 'type': None, 'param': None, 'code': '503'}}",
+              "overall_pass": false,
+              "engine_error": true
+            },
+            "latency_s": 65.7104924999876,
+            "usage": {
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "InternalServerError: Error code: 503 - {'error': {'message': 'litellm.ServiceUnavailableError: ServiceUnavailableError: Hosted_vllmException - <html>\\r\\n  <head>\\r\\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\\r\\n\\r\\n    <style type=\"text/css\">\\r\\n      body {\\r\\n        font-family: \"Helvetica Neue\", Helvetica, Arial, sans-serif;\\r\\n        line-height: 1.66666667;\\r\\n        font-size: 16px;\\r\\n        color: #333;\\r\\n        background-color: #fff;\\r\\n        margin: 2em 1em;\\r\\n      }\\r\\n      h1 {\\r\\n        font-size: 28px;\\r\\n        font-weight: 400;\\r\\n      }\\r\\n      p {\\r\\n        margin: 0 0 10px;\\r\\n      }\\r\\n      .alert.alert-info {\\r\\n        background-color: #F0F0F0;\\r\\n        margin-top: 30px;\\r\\n        padding: 30px;\\r\\n      }\\r\\n      .alert p {\\r\\n        padding-left: 35px;\\r\\n      }\\r\\n      ul {\\r\\n        padding-left: 51px;\\r\\n        position: relative;\\r\\n      }\\r\\n      li {\\r\\n        font-size: 14px;\\r\\n        margin-bottom: 1em;\\r\\n      }\\r\\n      p.info {\\r\\n        position: relative;\\r\\n        font-size: 20px;\\r\\n      }\\r\\n      p.info:before, p.info:after {\\r\\n        content: \"\";\\r\\n        left: 0;\\r\\n        position: absolute;\\r\\n        top: 0;\\r\\n      }\\r\\n      p.info:before {\\r\\n        background: #0066CC;\\r\\n        border-radius: 16px;\\r\\n        color: #fff;\\r\\n        content: \"i\";\\r\\n        font: bold 16px/24px serif;\\r\\n        height: 24px;\\r\\n        left: 0px;\\r\\n        text-align: center;\\r\\n        top: 4px;\\r\\n        width: 24px;\\r\\n      }\\r\\n\\r\\n      @media (min-width: 768px) {\\r\\n        body {\\r\\n          margin: 6em;\\r\\n        }\\r\\n      }\\r\\n    </style>\\r\\n  </head>\\r\\n  <body>\\r\\n    <div>\\r\\n      <h1>Application is not available</h1>\\r\\n      <p>The application is currently not serving requests at this endpoint. It may not have been started or is still starting.</p>\\r\\n\\r\\n      <div class=\"alert alert-info\">\\r\\n        <p class=\"info\">\\r\\n          Possible reasons you are seeing this page:\\r\\n        </p>\\r\\n        <ul>\\r\\n          <li>\\r\\n            <strong>The host doesn\\'t exist.</strong>\\r\\n            Make sure the hostname was typed correctly and that a route matching this hostname exists.\\r\\n          </li>\\r\\n          <li>\\r\\n            <strong>The host exists, but doesn\\'t have a matching path.</strong>\\r\\n            Check if the URL path was typed correctly and that the route was created using the desired path.\\r\\n          </li>\\r\\n          <li>\\r\\n            <strong>Route and path matches, but all pods are down.</strong>\\r\\n            Make sure that the resources exposed by this route (pods, services, deployment configs, etc) have at least one pod running.\\r\\n          </li>\\r\\n        </ul>\\r\\n      </div>\\r\\n    </div>\\r\\n  </body>\\r\\n</html>\\r\\n. Received Model Group=qwen3.6-27b\\nAvailable Model Group Fallbacks=None', 'type': None, 'param': None, 'code': '503'}}",
+            "n_tool_calls_by_tool": {},
+            "n_steps": 0
+          },
+          "acs70331-saturation-low": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": false,
+              "found_correct": false,
+              "value_pass": false,
+              "confidence": 0.0,
+              "failure_reason": "InternalServerError: Error code: 503 - {'error': {'message': 'litellm.ServiceUnavailableError: ServiceUnavailableError: Hosted_vllmException - <html>\\r\\n  <head>\\r\\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\\r\\n\\r\\n    <style type=\"text/css\">\\r\\n      body {\\r\\n        font-family: \"Helvetica Neue\", Helvetica, Arial, sans-serif;\\r\\n        line-height: 1.66666667;\\r\\n        font-size: 16px;\\r\\n        color: #333;\\r\\n        background-color: #fff;\\r\\n        margin: 2em 1em;\\r\\n      }\\r\\n      h1 {\\r\\n        font-size: 28px;\\r\\n        font-weight: 400;\\r\\n      }\\r\\n      p {\\r\\n        margin: 0 0 10px;\\r\\n      }\\r\\n      .alert.alert-info {\\r\\n        background-color: #F0F0F0;\\r\\n        margin-top: 30px;\\r\\n        padding: 30px;\\r\\n      }\\r\\n      .alert p {\\r\\n        padding-left: 35px;\\r\\n      }\\r\\n      ul {\\r\\n        padding-left: 51px;\\r\\n        position: relative;\\r\\n      }\\r\\n      li {\\r\\n        font-size: 14px;\\r\\n        margin-bottom: 1em;\\r\\n      }\\r\\n      p.info {\\r\\n        position: relative;\\r\\n        font-size: 20px;\\r\\n      }\\r\\n      p.info:before, p.info:after {\\r\\n        content: \"\";\\r\\n        left: 0;\\r\\n        position: absolute;\\r\\n        top: 0;\\r\\n      }\\r\\n      p.info:before {\\r\\n        background: #0066CC;\\r\\n        border-radius: 16px;\\r\\n        color: #fff;\\r\\n        content: \"i\";\\r\\n        font: bold 16px/24px serif;\\r\\n        height: 24px;\\r\\n        left: 0px;\\r\\n        text-align: center;\\r\\n        top: 4px;\\r\\n        width: 24px;\\r\\n      }\\r\\n\\r\\n      @media (min-width: 768px) {\\r\\n        body {\\r\\n          margin: 6em;\\r\\n        }\\r\\n      }\\r\\n    </style>\\r\\n  </head>\\r\\n  <body>\\r\\n    <div>\\r\\n      <h1>Application is not available</h1>\\r\\n      <p>The application is currently not serving requests at this endpoint. It may not have been started or is still starting.</p>\\r\\n\\r\\n      <div class=\"alert alert-info\">\\r\\n        <p class=\"info\">\\r\\n          Possible reasons you are seeing this page:\\r\\n        </p>\\r\\n        <ul>\\r\\n          <li>\\r\\n            <strong>The host doesn\\'t exist.</strong>\\r\\n            Make sure the hostname was typed correctly and that a route matching this hostname exists.\\r\\n          </li>\\r\\n          <li>\\r\\n            <strong>The host exists, but doesn\\'t have a matching path.</strong>\\r\\n            Check if the URL path was typed correctly and that the route was created using the desired path.\\r\\n          </li>\\r\\n          <li>\\r\\n            <strong>Route and path matches, but all pods are down.</strong>\\r\\n            Make sure that the resources exposed by this route (pods, services, deployment configs, etc) have at least one pod running.\\r\\n          </li>\\r\\n        </ul>\\r\\n      </div>\\r\\n    </div>\\r\\n  </body>\\r\\n</html>\\r\\n. Received Model Group=qwen3.6-27b\\nAvailable Model Group Fallbacks=None', 'type': None, 'param': None, 'code': '503'}}",
+              "overall_pass": false,
+              "engine_error": true
+            },
+            "latency_s": 64.88931326000602,
+            "usage": {
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "InternalServerError: Error code: 503 - {'error': {'message': 'litellm.ServiceUnavailableError: ServiceUnavailableError: Hosted_vllmException - <html>\\r\\n  <head>\\r\\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\\r\\n\\r\\n    <style type=\"text/css\">\\r\\n      body {\\r\\n        font-family: \"Helvetica Neue\", Helvetica, Arial, sans-serif;\\r\\n        line-height: 1.66666667;\\r\\n        font-size: 16px;\\r\\n        color: #333;\\r\\n        background-color: #fff;\\r\\n        margin: 2em 1em;\\r\\n      }\\r\\n      h1 {\\r\\n        font-size: 28px;\\r\\n        font-weight: 400;\\r\\n      }\\r\\n      p {\\r\\n        margin: 0 0 10px;\\r\\n      }\\r\\n      .alert.alert-info {\\r\\n        background-color: #F0F0F0;\\r\\n        margin-top: 30px;\\r\\n        padding: 30px;\\r\\n      }\\r\\n      .alert p {\\r\\n        padding-left: 35px;\\r\\n      }\\r\\n      ul {\\r\\n        padding-left: 51px;\\r\\n        position: relative;\\r\\n      }\\r\\n      li {\\r\\n        font-size: 14px;\\r\\n        margin-bottom: 1em;\\r\\n      }\\r\\n      p.info {\\r\\n        position: relative;\\r\\n        font-size: 20px;\\r\\n      }\\r\\n      p.info:before, p.info:after {\\r\\n        content: \"\";\\r\\n        left: 0;\\r\\n        position: absolute;\\r\\n        top: 0;\\r\\n      }\\r\\n      p.info:before {\\r\\n        background: #0066CC;\\r\\n        border-radius: 16px;\\r\\n        color: #fff;\\r\\n        content: \"i\";\\r\\n        font: bold 16px/24px serif;\\r\\n        height: 24px;\\r\\n        left: 0px;\\r\\n        text-align: center;\\r\\n        top: 4px;\\r\\n        width: 24px;\\r\\n      }\\r\\n\\r\\n      @media (min-width: 768px) {\\r\\n        body {\\r\\n          margin: 6em;\\r\\n        }\\r\\n      }\\r\\n    </style>\\r\\n  </head>\\r\\n  <body>\\r\\n    <div>\\r\\n      <h1>Application is not available</h1>\\r\\n      <p>The application is currently not serving requests at this endpoint. It may not have been started or is still starting.</p>\\r\\n\\r\\n      <div class=\"alert alert-info\">\\r\\n        <p class=\"info\">\\r\\n          Possible reasons you are seeing this page:\\r\\n        </p>\\r\\n        <ul>\\r\\n          <li>\\r\\n            <strong>The host doesn\\'t exist.</strong>\\r\\n            Make sure the hostname was typed correctly and that a route matching this hostname exists.\\r\\n          </li>\\r\\n          <li>\\r\\n            <strong>The host exists, but doesn\\'t have a matching path.</strong>\\r\\n            Check if the URL path was typed correctly and that the route was created using the desired path.\\r\\n          </li>\\r\\n          <li>\\r\\n            <strong>Route and path matches, but all pods are down.</strong>\\r\\n            Make sure that the resources exposed by this route (pods, services, deployment configs, etc) have at least one pod running.\\r\\n          </li>\\r\\n        </ul>\\r\\n      </div>\\r\\n    </div>\\r\\n  </body>\\r\\n</html>\\r\\n. Received Model Group=qwen3.6-27b\\nAvailable Model Group Fallbacks=None', 'type': None, 'param': None, 'code': '503'}}",
+            "n_tool_calls_by_tool": {},
+            "n_steps": 0
+          }
+        }
+      }
+    ]
+  },
+  "aggregate": {
+    "qwen3.6-27b": {
+      "fidelity": {
+        "per_run": [
+          23,
+          11
+        ],
+        "mean": 17,
+        "std": 8.48528137423857
+      },
+      "confidence": {
+        "per_run": [
+          0.9375,
+          0.9727272727272727
+        ],
+        "mean": 0.9551136363636363,
+        "std": 0.024909443428162426
+      },
+      "latency_s": {
+        "per_run": [
+          131.0792944599998,
+          111.22831879808854
+        ],
+        "mean": 121.15380662904417,
+        "std": 14.036759503706568
+      },
+      "engine_errors": {
+        "per_run": [
+          1,
+          14
+        ],
+        "total": 15
+      },
+      "claim_stability": {
+        "stable": 11,
+        "flipped": 14,
+        "flipped_claims": [
+          {
+            "id": "dps310-pressure-precision-high",
+            "pattern": [
+              true,
+              false
+            ]
+          },
+          {
+            "id": "dps310-pressure-temp-sensitivity",
+            "pattern": [
+              true,
+              false
+            ]
+          },
+          {
+            "id": "dps310-current-1hz-low-precision",
+            "pattern": [
+              true,
+              false
+            ]
+          },
+          {
+            "id": "dps310-meas-time-standard",
+            "pattern": [
+              false,
+              true
+            ]
+          },
+          {
+            "id": "dps310-pressure-data-resolution",
+            "pattern": [
+              true,
+              false
+            ]
+          },
+          {
+            "id": "si115x-operating-temperature",
+            "pattern": [
+              true,
+              false
+            ]
+          },
+          {
+            "id": "si115x-standby-current-1v8",
+            "pattern": [
+              true,
+              false
+            ]
+          },
+          {
+            "id": "si115x-processing-time",
+            "pattern": [
+              true,
+              false
+            ]
+          },
+          {
+            "id": "si115x-als-resolution-mlx",
+            "pattern": [
+              true,
+              false
+            ]
+          },
+          {
+            "id": "acs70331-bandwidth",
+            "pattern": [
+              true,
+              false
+            ]
+          },
+          {
+            "id": "acs70331-supply-current-max",
+            "pattern": [
+              true,
+              false
+            ]
+          },
+          {
+            "id": "acs70331-rise-time",
+            "pattern": [
+              true,
+              false
+            ]
+          },
+          {
+            "id": "acs70331-primary-resistance-qfn",
+            "pattern": [
+              true,
+              false
+            ]
+          },
+          {
+            "id": "acs70331-saturation-low",
+            "pattern": [
+              true,
+              false
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,35 @@
+cff-version: 1.2.0
+message: "If you use this benchmark, please cite the paper below."
+title: "chamberbench: chamber-grounded benchmark for datasheet-extraction agents"
+version: 1.0.0
+license: MIT
+repository-code: "https://github.com/Infineon/datasheetindex"
+authors:
+  - name: "Infineon Technologies AG"
+preferred-citation:
+  type: conference-paper
+  title: "Fidelity Is Not Enough: Dispatch-Level Instrumentation for Agentic Datasheet Extraction"
+  year: 2026
+  collection-title: "Proceedings of the 2026 Conference on Empirical Methods in Natural Language Processing: Industry Track"
+  authors:
+    - family-names: "Ye"
+      given-names: "Qing"
+    - family-names: "Lin"
+      given-names: "Meng-Hsuan"
+references:
+  - type: article
+    title: "Causal Chambers as a Real-World Physical Testbed for AI Methodology"
+    year: 2025
+    journal: "Nature Machine Intelligence"
+    volume: 7
+    issue: 1
+    start: 107
+    end: 118
+    doi: "10.1038/s42256-024-00964-x"
+    authors:
+      - family-names: "Gamella"
+        given-names: "Juan L."
+      - family-names: "Peters"
+        given-names: "Jonas"
+      - family-names: "Bühlmann"
+        given-names: "Peter"

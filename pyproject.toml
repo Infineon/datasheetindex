@@ -40,6 +40,16 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/datasheetindex"]
 
+# The sdist is NOT constrained by the wheel's `packages` -- hatchling sweeps the
+# whole working tree into it unless told otherwise, which is how `.superpowers/`
+# reached the 0.21.0 sdist. `benchmark/` is a second, much worse instance: it
+# carries 7.3 MiB of archived run outputs, and those embed short excerpts of
+# THIRD-PARTY manufacturer datasheets. Publishing them to PyPI under Infineon's
+# name is the one distribution channel that cannot be retracted, so the
+# benchmark ships via the git repository only.
+[tool.hatch.build.targets.sdist]
+exclude = ["benchmark/", ".superpowers/"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

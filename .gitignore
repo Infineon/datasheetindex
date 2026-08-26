@@ -52,3 +52,10 @@ output_*/
 # Subagent-driven-development scratch (ledger, briefs, review packages).
 # Also keeps hatchling from sweeping it into the sdist, as it did on 0.21.0.
 .superpowers/
+
+# The benchmark's generated figures and its own virtualenv. The figures are
+# outputs of `benchmark/scripts/render_paper_figures.py`, regenerable from
+# `benchmark/archive/`, so they are not committed. (The repo-wide `*.png` rule
+# above already covers them; this note records that it is intentional here.)
+benchmark/figures/
+benchmark/.venv/

@@ -1,0 +1,994 @@
+# Chamber-Grounded Benchmark — Claims
+#
+# Each claim is verified against (a) the source datasheet PDF (fidelity) and
+# (b) the chamber data (reproducibility). The chamber's barometer is the
+# Infineon DPS310. The datasheet is not shipped here; fetch it by part number
+# and verify the checksum in docs/reproducing.md. A copy is also mirrored at
+# hardware/datasheets/barometer.pdf in the causal-chamber repository.
+#
+# That mirror is NOT covered by the causal-chamber repository's CC BY 4.0
+# grant, which extends to the images and .csv files in its datasets. The
+# datasheets remain the copyright of their manufacturers and are mirrored
+# there for convenience only.
+#
+# Schema notes:
+#   - operating_conditions[].chamber_variable=""  -> condition is unmatchable
+#     by the chamber dataset; verdict.py will flag and (if load_bearing) force
+#     "inconclusive"
+#   - realizable_subset is a list of [lo, hi] windows in `expected_unit` that
+#     the chamber can actually exercise. Empty list = no narrowing applied.
+#   - chamber_protocol is the dotted module path for the reproducibility
+#     evaluator (must expose a `run(claim) -> ChamberMeasurement` function).
+
+version: "0.1"
+created: "2026-05-05"
+
+chamber:
+  name: "wt"
+  configuration: "standard"
+  default_dataset: "wt_validate_v1"
+
+datasheets:
+  dps310: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/barometer.pdf"
+  si115x: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/light_sensor.pdf"
+
+claims:
+  # --------------------------------------------------------------------------
+  # Claim 1: Relative pressure accuracy.
+  # The cleanest cross-sensor test the chamber can run: four DPS310s should
+  # agree on the same physical pressure to within +/- 0.06 hPa.
+  # --------------------------------------------------------------------------
+  - id: "dps310-relative-accuracy"
+    pdf_source: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/barometer.pdf"
+    parameter: "Relative pressure accuracy"
+    description: >
+      Stated relative accuracy of the DPS310 barometer. Tested against
+      cross-sensor agreement among the four chamber DPS310s in steady state.
+    expected_unit: "hPa"
+    claim_kind: "dc_accuracy"
+    claimed_min: -0.06
+    claimed_max: 0.06
+    tolerance_value: 0.06
+    tolerance_kind: "absolute"
+    operating_conditions:
+      - { name: "temperature_C", value: 25.0, unit: "C",
+          chamber_variable: "res_in", load_bearing: false }
+      - { name: "supply_voltage_VDD_V", value: 3.0, unit: "V",
+          chamber_variable: "", load_bearing: false }
+    chamber_dataset: "wt_validate_v1"
+    chamber_experiment_hint: "validate_load_out_pressure_intake"
+    chamber_protocol: "chamberbench.protocols.barometer_dc_accuracy"
+    primary_chamber_variable: "pressure_intake"
+    cross_check_variables: ["pressure_ambient", "pressure_downwind", "pressure_upwind"]
+    realizable_subset: [[940.0, 980.0]]
+    source_page: [1, 5]
+    source_text: "Relative accuracy: ± 0.06 hPa (or ±0.5 m)"
+    value_contains: ["0.06", "hPa"]
+    confidence_min: 0.7
+    verified_by: "manual"
+    verified_date: "2026-05-05"
+
+  # --------------------------------------------------------------------------
+  # Claim 2: Absolute pressure accuracy.
+  # Cannot be tested in the strict NIST-traceable sense because we lack an
+  # external reference; tested in the *necessary-but-not-sufficient* sense
+  # that each chamber unit must read within +/-1 hPa of the inter-unit mean.
+  # The protocol module reports this; verdict.py treats it as inconclusive
+  # if the absolute-reference condition is unmatched and load-bearing.
+  # --------------------------------------------------------------------------
+  - id: "dps310-absolute-accuracy"
+    pdf_source: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/barometer.pdf"
+    parameter: "Absolute pressure accuracy"
+    description: >
+      Stated absolute pressure accuracy of the DPS310 barometer. The chamber
+      cannot test the absolute-reference part of this claim; we report the
+      inter-unit offset as a within-spec sanity check and flag the missing
+      external reference as an unmatched condition.
+    expected_unit: "hPa"
+    claim_kind: "dc_accuracy"
+    claimed_min: -1.0
+    claimed_max: 1.0
+    tolerance_value: 1.0
+    tolerance_kind: "absolute"
+    operating_conditions:
+      - { name: "temperature_C", value: 25.0, unit: "C",
+          chamber_variable: "res_in", load_bearing: false }
+      - { name: "external_pressure_reference", unit: "hPa",
+          chamber_variable: "", load_bearing: true }
+    chamber_dataset: "wt_validate_v1"
+    chamber_experiment_hint: "validate_load_out_pressure_intake"
+    chamber_protocol: "chamberbench.protocols.barometer_dc_accuracy"
+    primary_chamber_variable: "pressure_intake"
+    cross_check_variables: ["pressure_ambient", "pressure_downwind", "pressure_upwind"]
+    realizable_subset: [[940.0, 980.0]]
+    source_page: [1, 5]
+    source_text: "Absolute accuracy: ± 1 hPa (or ±8 m)"
+    value_contains: ["1", "hPa"]
+    confidence_min: 0.7
+    verified_by: "manual"
+    verified_date: "2026-05-05"
+
+  # --------------------------------------------------------------------------
+  # Claim 3 (originally seed): Pressure precision in High Precision mode.
+  # Tabular claim from Table 7. The chamber's per-sensor std at fixed
+  # actuator state should fall close to the spec; we score with a
+  # generous 50% relative tolerance because the chamber's recorded
+  # configuration mode (high-precision vs standard) is not exposed to
+  # us, only sampled.
+  # --------------------------------------------------------------------------
+  - id: "dps310-pressure-precision-high"
+    pdf_source: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/barometer.pdf"
+    parameter: "Pressure precision (high precision mode)"
+    description: >
+      Pressure precision in High Precision mode (units: Pa RMS). Tested
+      against the chamber's per-sensor steady-state std on a steady
+      actuator experiment.
+    expected_unit: "Pa"
+    claim_kind: "typical"
+    claimed_typical: 0.2
+    tolerance_value: 0.5
+    tolerance_kind: "relative"
+    operating_conditions:
+      - { name: "precision_mode_high", value: 0.0, unit: "",
+          chamber_variable: "", load_bearing: true }
+      - { name: "supply_voltage_VDD_V", value: 1.8, unit: "V",
+          chamber_variable: "", load_bearing: false }
+    chamber_dataset: "wt_validate_v1"
+    chamber_experiment_hint: "validate_v_in"
+    chamber_protocol: "chamberbench.protocols.barometer_dc_accuracy"
+    primary_chamber_variable: "pressure_intake"
+    cross_check_variables: ["pressure_ambient", "pressure_downwind", "pressure_upwind"]
+    realizable_subset: [[940.0, 980.0]]
+    source_page: [1, 9]
+    source_text: "Pressure precision: Ap_prc 0.2 Pa RMS High Precision"
+    value_contains: ["0.2", "Pa"]
+    confidence_min: 0.7
+    verified_by: "manual"
+    verified_date: "2026-05-06"
+
+  # --------------------------------------------------------------------------
+  # Claim 4: Pressure temperature sensitivity.
+  # Tabular claim Ap_tmp = 0.5 Pa/K from Table 7. The chamber doesn't
+  # actively control temperature, but `res_in` records the sensor
+  # temperature, and the recorded data spans a non-trivial range. The
+  # protocol module today does not regress against res_in; the claim
+  # passes through reproducibility as inconclusive due to the missing
+  # chamber-side temperature control. Strong fidelity test.
+  # --------------------------------------------------------------------------
+  - id: "dps310-pressure-temp-sensitivity"
+    pdf_source: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/barometer.pdf"
+    parameter: "Pressure temperature sensitivity"
+    description: >
+      Pressure-vs-temperature sensitivity coefficient (Ap_tmp) of
+      calibrated measurements. Chamber temperature is uncontrolled
+      (load_bearing condition unmatched), so the verdict is forced
+      inconclusive; the claim still scores fidelity.
+    expected_unit: "Pa/K"
+    claim_kind: "typical"
+    claimed_typical: 0.5
+    tolerance_value: 0.5
+    tolerance_kind: "relative"
+    operating_conditions:
+      - { name: "controlled_temperature", value: 25.0, unit: "C",
+          chamber_variable: "", load_bearing: true }
+    chamber_dataset: "wt_validate_v1"
+    chamber_experiment_hint: "validate_v_in"
+    chamber_protocol: "chamberbench.protocols.barometer_dc_accuracy"
+    primary_chamber_variable: "pressure_intake"
+    cross_check_variables: ["pressure_ambient", "pressure_downwind", "pressure_upwind"]
+    source_page: [1, 9]
+    source_text: "Pressure temperature sensitivity Ap_tmp 0.5 Pa/K 1000hPa, 25...+65°C"
+    value_contains: ["0.5", "Pa/K"]
+    confidence_min: 0.7
+    verified_by: "manual"
+    verified_date: "2026-05-06"
+
+  # --------------------------------------------------------------------------
+  # Claim 5: Temperature accuracy (Table 6).
+  # Ap_temp = +/-0.5 °C. Chamber doesn't directly control DPS310 Tj;
+  # res_in is just the sensor's own temperature reading. Inconclusive
+  # by load-bearing condition.
+  # --------------------------------------------------------------------------
+  - id: "dps310-temperature-accuracy"
+    pdf_source: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/barometer.pdf"
+    parameter: "Temperature accuracy"
+    description: >
+      Datasheet-stated temperature-accuracy band across the operating
+      range. Chamber lacks an external Tj reference, so the load-bearing
+      condition is unmatched and the verdict is inconclusive.
+    expected_unit: "C"
+    claim_kind: "dc_accuracy"
+    claimed_min: -0.5
+    claimed_max: 0.5
+    tolerance_value: 0.5
+    tolerance_kind: "absolute"
+    operating_conditions:
+      - { name: "external_temperature_reference", unit: "C",
+          chamber_variable: "", load_bearing: true }
+    chamber_dataset: "wt_validate_v1"
+    chamber_experiment_hint: "validate_load_out_pressure_intake"
+    chamber_protocol: "chamberbench.protocols.barometer_dc_accuracy"
+    primary_chamber_variable: "pressure_intake"
+    cross_check_variables: ["pressure_ambient", "pressure_downwind", "pressure_upwind"]
+    source_page: [1, 8]
+    source_text: "Temperature accuracy +/-0.5 °C"
+    value_contains: ["0.5", "C"]
+    confidence_min: 0.7
+    verified_by: "manual"
+    verified_date: "2026-05-06"
+
+  # --------------------------------------------------------------------------
+  # Claim 6: Current consumption at 1 Hz, low precision (Table 5).
+  # I1Hz_low = 2.1 µA. Chamber doesn't measure DPS310 supply current
+  # (only fan currents). Inconclusive by load-bearing condition.
+  # --------------------------------------------------------------------------
+  - id: "dps310-current-1hz-low-precision"
+    pdf_source: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/barometer.pdf"
+    parameter: "Current consumption at 1 Hz (low precision)"
+    description: >
+      Typical supply current at the slowest sampling rate (1 Hz), Low
+      precision mode. Chamber records fan currents only, not the
+      barometer's supply current; load-bearing condition unmatched ->
+      inconclusive.
+    expected_unit: "uA"
+    claim_kind: "typical"
+    claimed_typical: 2.1
+    tolerance_value: 0.5
+    tolerance_kind: "relative"
+    operating_conditions:
+      - { name: "barometer_supply_current_measurement", unit: "uA",
+          chamber_variable: "", load_bearing: true }
+    chamber_dataset: "wt_validate_v1"
+    chamber_experiment_hint: "validate_load_out_pressure_intake"
+    chamber_protocol: "chamberbench.protocols.barometer_dc_accuracy"
+    primary_chamber_variable: "pressure_intake"
+    cross_check_variables: ["pressure_ambient", "pressure_downwind", "pressure_upwind"]
+    source_page: [1, 7]
+    source_text: "Current Consumption I1Hz 2.1 µA Low precision"
+    # The unicode µ (U+00B5) and the ASCII u differ; accept either and
+    # only require the numeric value plus the letter A so the fidelity
+    # scorer doesn't penalise the agent for using the unit symbol the
+    # datasheet itself prints.
+    value_contains: ["2.1", "A"]
+    confidence_min: 0.7
+    verified_by: "manual"
+    verified_date: "2026-05-06"
+
+  # --------------------------------------------------------------------------
+  # Claim 7: VDD supply voltage range.
+  # 1.7 - 3.6 V. Chamber operates at fixed (unknown to us) supply;
+  # this is a range claim with no chamber-realizable subset of the
+  # claimed envelope, so it routes through inconclusive.
+  # --------------------------------------------------------------------------
+  - id: "dps310-supply-voltage-vdd"
+    pdf_source: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/barometer.pdf"
+    parameter: "Supply voltage VDD"
+    description: >
+      Datasheet-stated VDD operating-voltage range. Chamber does not
+      vary VDD during recordings; load-bearing condition unmatched.
+    expected_unit: "V"
+    claim_kind: "range"
+    claimed_min: 1.7
+    claimed_max: 3.6
+    tolerance_value: 0.0
+    tolerance_kind: "absolute"
+    operating_conditions:
+      - { name: "controlled_VDD_sweep", unit: "V",
+          chamber_variable: "", load_bearing: true }
+    chamber_dataset: "wt_validate_v1"
+    chamber_experiment_hint: "validate_load_out_pressure_intake"
+    chamber_protocol: "chamberbench.protocols.barometer_dc_accuracy"
+    primary_chamber_variable: "pressure_intake"
+    cross_check_variables: ["pressure_ambient", "pressure_downwind", "pressure_upwind"]
+    source_page: [1]
+    source_text: "Supply voltage: VDDIO: 1.2 - 3.6 V, VDD: 1.7 - 3.6 V"
+    value_contains: ["1.7", "3.6", "V"]
+    confidence_min: 0.7
+    verified_by: "manual"
+    verified_date: "2026-05-06"
+
+  # --------------------------------------------------------------------------
+  # Claim 8: Pressure measurement time, Standard mode.
+  # 27.6 ms typical (Table 7 + Features). Chamber records sample rate,
+  # not single-conversion time. Inconclusive.
+  # --------------------------------------------------------------------------
+  - id: "dps310-meas-time-standard"
+    pdf_source: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/barometer.pdf"
+    parameter: "Pressure measurement time (standard mode)"
+    description: >
+      Typical single-conversion time in Standard precision mode.
+      Chamber doesn't expose per-conversion timing; inconclusive.
+    expected_unit: "ms"
+    claim_kind: "typical"
+    claimed_typical: 27.6
+    tolerance_value: 0.5
+    tolerance_kind: "relative"
+    operating_conditions:
+      - { name: "single_conversion_timing", unit: "ms",
+          chamber_variable: "", load_bearing: true }
+    chamber_dataset: "wt_validate_v1"
+    chamber_experiment_hint: "validate_load_out_pressure_intake"
+    chamber_protocol: "chamberbench.protocols.barometer_dc_accuracy"
+    primary_chamber_variable: "pressure_intake"
+    cross_check_variables: ["pressure_ambient", "pressure_downwind", "pressure_upwind"]
+    source_page: [1, 9]
+    source_text: "Pressure measurement time t 27.6 ms Standard"
+    value_contains: ["27.6", "ms"]
+    confidence_min: 0.7
+    verified_by: "manual"
+    verified_date: "2026-05-06"
+
+  # --------------------------------------------------------------------------
+  # Claim 9: Pressure measurement rate.
+  # 1-128 Hz. Chamber records pressure at the wt-data rate (separate
+  # from DPS310 internal config), so the claimed range is unverifiable
+  # at the part level. Inconclusive.
+  # --------------------------------------------------------------------------
+  - id: "dps310-pressure-rate-range"
+    pdf_source: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/barometer.pdf"
+    parameter: "Pressure measurement rate"
+    description: >
+      Datasheet-stated internal pressure-measurement rate range.
+      Chamber records time-stamped data; per-DPS310 internal sampling
+      rate is not directly observable.
+    expected_unit: "Hz"
+    claim_kind: "range"
+    claimed_min: 1.0
+    claimed_max: 128.0
+    tolerance_value: 0.0
+    tolerance_kind: "absolute"
+    operating_conditions:
+      - { name: "internal_sampling_rate_observable", unit: "Hz",
+          chamber_variable: "", load_bearing: true }
+    chamber_dataset: "wt_validate_v1"
+    chamber_experiment_hint: "validate_load_out_pressure_intake"
+    chamber_protocol: "chamberbench.protocols.barometer_dc_accuracy"
+    primary_chamber_variable: "pressure_intake"
+    cross_check_variables: ["pressure_ambient", "pressure_downwind", "pressure_upwind"]
+    source_page: [9]
+    source_text: "Pressure measurement rate f 1 - 128 Hz"
+    value_contains: ["1", "128", "Hz"]
+    confidence_min: 0.7
+    verified_by: "manual"
+    verified_date: "2026-05-06"
+
+  # --------------------------------------------------------------------------
+  # Claim 10: Pressure data resolution.
+  # Tabular claim Ap_res = 0.06 Pa RMS from Table 7. Compares directly
+  # against the chamber's per-sensor std under steady-state conditions
+  # at appropriate scale. Soft pass via spec_derived tolerance.
+  # --------------------------------------------------------------------------
+  - id: "dps310-pressure-data-resolution"
+    pdf_source: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/barometer.pdf"
+    parameter: "Pressure data resolution"
+    description: >
+      Pressure data-resolution coefficient (Ap_res, Pa RMS). Chamber
+      records the raw readout but not the configured precision mode,
+      so this maps to inconclusive: a real test needs the part
+      configured at the claimed mode.
+    expected_unit: "Pa"
+    claim_kind: "typical"
+    claimed_typical: 0.06
+    tolerance_value: 1.0
+    tolerance_kind: "relative"
+    operating_conditions:
+      - { name: "precision_mode_observable", unit: "",
+          chamber_variable: "", load_bearing: true }
+      - { name: "supply_voltage_VDD_V", value: 1.8, unit: "V",
+          chamber_variable: "", load_bearing: false }
+    chamber_dataset: "wt_validate_v1"
+    chamber_experiment_hint: "validate_v_in"
+    chamber_protocol: "chamberbench.protocols.barometer_dc_accuracy"
+    primary_chamber_variable: "pressure_intake"
+    cross_check_variables: ["pressure_ambient", "pressure_downwind", "pressure_upwind"]
+    realizable_subset: [[940.0, 980.0]]
+    source_page: [9]
+    source_text: "Pressure data resolution Ap_res 0.06 PaRMS"
+    value_contains: ["0.06", "Pa"]
+    confidence_min: 0.7
+    verified_by: "manual"
+    verified_date: "2026-05-06"
+
+  # --------------------------------------------------------------------------
+  # Claim "Operating pressure range" (was seed claim 3).
+  # Range claim: 300-1200 hPa. The chamber operates well inside that window
+  # (~940-980 hPa during normal operation). Reproducibility test: verify that
+  # the chamber's recorded pressures fall inside the spec range, i.e. the
+  # part is operating within its stated envelope. This passes trivially but
+  # tests fidelity: does the agent extract "300" and "1200" with the right
+  # unit?
+  # --------------------------------------------------------------------------
+  - id: "dps310-operating-range"
+    pdf_source: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/barometer.pdf"
+    parameter: "Operating pressure range"
+    description: >
+      Datasheet-stated operating pressure range (hPa). The chamber
+      operates comfortably inside that window. Reproducibility check
+      is whether the chamber's observed pressures lie inside the
+      claimed range; the realizable_subset narrows the verdict to the
+      chamber-exercisable subset of that window.
+    expected_unit: "hPa"
+    claim_kind: "range"
+    claimed_min: 300.0
+    claimed_max: 1200.0
+    tolerance_value: 0.0
+    tolerance_kind: "absolute"
+    operating_conditions:
+      - { name: "temperature_C", min_value: -40.0, max_value: 85.0, unit: "C",
+          chamber_variable: "res_in", load_bearing: false }
+    chamber_dataset: "wt_validate_v1"
+    chamber_experiment_hint: "validate_load_out_pressure_intake"
+    chamber_protocol: "chamberbench.protocols.barometer_dc_accuracy"
+    primary_chamber_variable: "pressure_intake"
+    cross_check_variables: ["pressure_ambient", "pressure_downwind", "pressure_upwind"]
+    realizable_subset: [[940.0, 980.0]]
+    source_page: [1, 5]
+    source_text: "Operation range: Pressure: 300 -1200 hPa. Temperature: -40 - 85 °C."
+    value_contains: ["300", "1200", "hPa"]
+    confidence_min: 0.7
+    verified_by: "manual"
+    verified_date: "2026-05-05"
+
+  # ==========================================================================
+  # Si115x light-sensor claims (Day 10).
+  #
+  # Source: hardware/datasheets/light_sensor.pdf (Silicon Labs Si115x Rev. 1.4).
+  # Chamber: light tunnel (lt_*); the chamber has 3 Si115x units at distinct
+  # positions (vis_1/vis_2/vis_3 + ir_1/2/3). They are NOT spatially redundant
+  # (recon: vis_1 ~10000, vis_2 ~1500, vis_3 ~480 at fixed RGB), so the
+  # cross-sensor sigma protocol from the DPS310 path does not apply. The
+  # light-sensor protocol module supports two reproducibility paths today:
+  #   - claim_kind="typical" -> per-channel std at fixed RGB (precision)
+  #   - claim_kind="range"   -> per-channel mean inside [min, max] (envelope)
+  # claim_kind="linearity" routes to inconclusive via reason-stub (deferred to
+  # Day 13+ pending dataset and framing decisions; verified end-to-end by the
+  # later fix).
+  #
+  # Honest mix: 1 reproducibility-PASS (claim 11, ADC envelope) + 9 inconclusive.
+  # The chamber lacks a NIST-traceable optical reference and does not expose
+  # supply current, supply voltage, per-conversion timing, or calibrated
+  # temperature in degrees C, so most Si115x claims must route to inconclusive
+  # via load-bearing condition gaps -- exactly the methodology's design intent.
+  # --------------------------------------------------------------------------
+
+  # --------------------------------------------------------------------------
+  # Claim 11: ADC bit-depth envelope.
+  # Si115x has dual 23-bit ADCs (overview, page 1). Chamber's vis_1 reads
+  # ~7000 on validate_diode_vis_1 -- well within [0, 8388607]. Trivially
+  # passes the reproducibility-envelope test. Fidelity test forces the
+  # agent to extract "23-bit" from page 1 features.
+  # --------------------------------------------------------------------------
+  - id: "si115x-adc-bit-depth"
+    pdf_source: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/light_sensor.pdf"
+    parameter: "ADC bit depth (visible channel envelope)"
+    description: >
+      Datasheet-stated ADC resolution (bit depth). Reproducibility test:
+      chamber's vis_1 readings fall inside the implied count envelope.
+      Trivially passes; tests the agent's extraction of structural
+      features from the overview text.
+    expected_unit: "counts"
+    claim_kind: "range"
+    claimed_min: 0.0
+    claimed_max: 8388607.0
+    tolerance_value: 0.0
+    tolerance_kind: "absolute"
+    operating_conditions: []
+    chamber_dataset: "lt_validate_v1"
+    chamber_experiment_hint: "validate_diode_vis_1"
+    chamber_protocol: "chamberbench.protocols.light_sensor"
+    primary_chamber_variable: "vis_1"
+    cross_check_variables: []
+    source_page: [1]
+    source_text: "dual 23-bit analog-to-digital converters"
+    value_contains: ["23", "bit"]
+    confidence_min: 0.7
+    verified_by: "manual"
+    verified_date: "2026-05-07"
+
+  # --------------------------------------------------------------------------
+  # Claim 12: Operating temperature range.
+  # Spec: -40 to +85 C (Table 8.1 + Absolute Maximum Ratings, Table 8.7).
+  # Chamber records sensor temperature as `t_vis_1` but in raw register
+  # units (e.g. constant value `3` in validate_osr_c), NOT calibrated C.
+  # We lack the t-register-to-degrees-C calibration, so the load-bearing
+  # condition `external_temperature_reference` is unmatched and the
+  # verdict is forced to inconclusive. Strong fidelity test.
+  # --------------------------------------------------------------------------
+  - id: "si115x-operating-temperature"
+    pdf_source: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/light_sensor.pdf"
+    parameter: "Operating temperature range"
+    description: >
+      Datasheet-stated operating ambient-temperature range (C). Chamber
+      records the Si115x's internal temperature register as a raw
+      integer, not calibrated C; load-bearing condition unmatched ->
+      inconclusive.
+    expected_unit: "C"
+    claim_kind: "range"
+    claimed_min: -40.0
+    claimed_max: 85.0
+    tolerance_value: 0.0
+    tolerance_kind: "absolute"
+    operating_conditions:
+      - { name: "external_temperature_reference", unit: "C",
+          chamber_variable: "", load_bearing: true }
+    chamber_dataset: "lt_validate_v1"
+    chamber_experiment_hint: "validate_diode_vis_1"
+    chamber_protocol: "chamberbench.protocols.light_sensor"
+    primary_chamber_variable: "t_vis_1"
+    cross_check_variables: []
+    source_page: [47, 52]
+    source_text: "Operating Temperature T -40 25 85 C"
+    value_contains: ["-40", "85", "C"]
+    confidence_min: 0.7
+    verified_by: "manual"
+    verified_date: "2026-05-07"
+
+  # --------------------------------------------------------------------------
+  # Claim 13: VDD supply voltage range.
+  # Spec: 1.62 - 3.6 V (Table 8.1). Chamber doesn't sweep VDD on the
+  # Si115x; load-bearing condition unmatched. Same shape as
+  # dps310-supply-voltage-vdd. Fidelity test exercises table extraction.
+  # --------------------------------------------------------------------------
+  - id: "si115x-supply-voltage-vdd"
+    pdf_source: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/light_sensor.pdf"
+    parameter: "VDD supply voltage range"
+    description: >
+      Datasheet-stated VDD operating-voltage range. Chamber does not
+      vary VDD during recordings; load-bearing condition unmatched.
+    expected_unit: "V"
+    claim_kind: "range"
+    claimed_min: 1.62
+    claimed_max: 3.6
+    tolerance_value: 0.0
+    tolerance_kind: "absolute"
+    operating_conditions:
+      - { name: "controlled_VDD_sweep", unit: "V",
+          chamber_variable: "", load_bearing: true }
+    chamber_dataset: "lt_validate_v1"
+    chamber_experiment_hint: "validate_diode_vis_1"
+    chamber_protocol: "chamberbench.protocols.light_sensor"
+    primary_chamber_variable: "vis_1"
+    cross_check_variables: []
+    source_page: [47]
+    source_text: "VDD Supply Voltage VDD 1.62 - 3.6 V"
+    value_contains: ["1.62", "3.6", "V"]
+    confidence_min: 0.7
+    verified_by: "manual"
+    verified_date: "2026-05-07"
+
+  # --------------------------------------------------------------------------
+  # Claim 14: Standby current at VDD=1.8 V.
+  # Spec: Isb 125 nA typical (Table 8.2, no ADC, no I2C, VDD=1.8 V).
+  # Chamber records the LED current draw (column `current`), NOT the
+  # Si115x's own supply current. Inconclusive by load-bearing condition.
+  # --------------------------------------------------------------------------
+  - id: "si115x-standby-current-1v8"
+    pdf_source: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/light_sensor.pdf"
+    parameter: "Standby supply current at VDD=1.8 V"
+    description: >
+      Typical sleep-mode supply current (no ADC, no I2C activity) at the
+      table's nominal low VDD. Chamber's `current` column is the LED
+      current draw, not the Si115x supply; load-bearing condition
+      unmatched -> inconclusive.
+    expected_unit: "nA"
+    claim_kind: "typical"
+    claimed_typical: 125.0
+    tolerance_value: 0.5
+    tolerance_kind: "relative"
+    operating_conditions:
+      - { name: "supply_current_measurement_at_VDD_1v8", unit: "nA",
+          chamber_variable: "", load_bearing: true }
+      - { name: "no_adc_no_i2c_activity", unit: "",
+          chamber_variable: "", load_bearing: true }
+    chamber_dataset: "lt_validate_v1"
+    chamber_experiment_hint: "validate_diode_vis_1"
+    chamber_protocol: "chamberbench.protocols.light_sensor"
+    primary_chamber_variable: "vis_1"
+    cross_check_variables: []
+    source_page: [47]
+    source_text: "IDD Standby Mode (sleep) Isb No ADC Conversions No I2C Activity VDD = 1.8 V 125 nA"
+    value_contains: ["125", "nA"]
+    confidence_min: 0.7
+    verified_by: "manual"
+    verified_date: "2026-05-07"
+
+  # --------------------------------------------------------------------------
+  # Claim 15: Active mode current at VDD=3.3 V.
+  # Spec: I_active 4.5 mA typical (Table 8.2, responding to commands and
+  # calculating, VDD=3.3 V). Same chamber-side gap as claim 14.
+  # --------------------------------------------------------------------------
+  - id: "si115x-active-current-3v3"
+    pdf_source: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/light_sensor.pdf"
+    parameter: "Active mode current at VDD=3.3 V"
+    description: >
+      Typical supply current while responding to commands and
+      calculating, at the table's nominal high VDD. Chamber does not
+      measure the Si115x supply current; inconclusive.
+    expected_unit: "mA"
+    claim_kind: "typical"
+    claimed_typical: 4.5
+    tolerance_value: 0.5
+    tolerance_kind: "relative"
+    operating_conditions:
+      - { name: "supply_current_measurement_at_VDD_3v3", unit: "mA",
+          chamber_variable: "", load_bearing: true }
+    chamber_dataset: "lt_validate_v1"
+    chamber_experiment_hint: "validate_diode_vis_1"
+    chamber_protocol: "chamberbench.protocols.light_sensor"
+    primary_chamber_variable: "vis_1"
+    cross_check_variables: []
+    source_page: [48]
+    source_text: "I active Responding to commands ... VDD = 3.3 V 4.5 mA"
+    value_contains: ["4.5", "mA"]
+    confidence_min: 0.7
+    verified_by: "manual"
+    verified_date: "2026-05-07"
+
+  # --------------------------------------------------------------------------
+  # Claim 16: Processing time per measurement.
+  # Spec: tprocess 155 us (Table 8.2, ALS or Proximity). Chamber records
+  # time-stamped data but not per-conversion timing; inconclusive.
+  # --------------------------------------------------------------------------
+  - id: "si115x-processing-time"
+    pdf_source: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/light_sensor.pdf"
+    parameter: "Processing time per measurement"
+    description: >
+      Typical per-measurement processing time (tprocess) for ALS or
+      Proximity. Chamber does not expose per-conversion timing;
+      load-bearing unmatched.
+    expected_unit: "us"
+    claim_kind: "typical"
+    claimed_typical: 155.0
+    tolerance_value: 0.5
+    tolerance_kind: "relative"
+    operating_conditions:
+      - { name: "per_conversion_timing_observable", unit: "us",
+          chamber_variable: "", load_bearing: true }
+    chamber_dataset: "lt_validate_v1"
+    chamber_experiment_hint: "validate_diode_vis_1"
+    chamber_protocol: "chamberbench.protocols.light_sensor"
+    primary_chamber_variable: "vis_1"
+    cross_check_variables: []
+    source_page: [48]
+    source_text: "Processing Time per Measurement ... tprocess ALS or Proximity 155 us"
+    # "155" alone matches register-table rows and other "155" mentions in
+    # the PDF; require the unit too. Letter "s" matches both ASCII "us"
+    # and Unicode "µs" because we don't fold µ -> u.
+    value_contains: ["155", "s"]
+    confidence_min: 0.7
+    verified_by: "manual"
+    verified_date: "2026-05-07"
+
+  # --------------------------------------------------------------------------
+  # Claim 17: Small visible-photodiode response at 525 nm.
+  # Spec: 160 ADC counts/(W/m^2) typical at 525 nm green (Table 8.3,
+  # Si115x-AB00, ADCMUX=0x11, DECIM=0, HW_GAIN=0, SW_GAIN=0, HSIG=0).
+  # Chamber's LED is not NIST-calibrated to W/m^2; inconclusive via
+  # external_optical_reference. Same shape as DPS310's absolute-accuracy
+  # claim. Strong fidelity test (Table 8.3 has many rows, agent must
+  # extract the right row).
+  # --------------------------------------------------------------------------
+  - id: "si115x-vis-response-525nm"
+    pdf_source: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/light_sensor.pdf"
+    parameter: "Small visible photodiode response at 525 nm"
+    description: >
+      Typical absolute responsivity (ADC counts per W/m^2) at 525 nm
+      green for the small visible photodiode (ADCMUX=0x11, default
+      config). Chamber's LED is not NIST-calibrated to absolute W/m^2;
+      the load-bearing external_optical_reference condition is
+      unmatched -> inconclusive.
+    expected_unit: "counts/(W/m^2)"
+    claim_kind: "typical"
+    claimed_typical: 160.0
+    tolerance_value: 0.5
+    tolerance_kind: "relative"
+    operating_conditions:
+      - { name: "external_optical_reference_W_per_m2", unit: "W/m^2",
+          chamber_variable: "", load_bearing: true }
+      - { name: "ADCMUX_setting", value: 17, unit: "",
+          chamber_variable: "", load_bearing: true }
+    chamber_dataset: "lt_validate_v1"
+    chamber_experiment_hint: "validate_diode_vis_1"
+    chamber_protocol: "chamberbench.protocols.light_sensor"
+    primary_chamber_variable: "vis_1"
+    cross_check_variables: []
+    source_page: [49]
+    source_text: "Small Visible Photodiode Response ADCMUX=0x11 ... 525 nm (green) 160 ADC Counts /(W/m2)"
+    value_contains: ["160"]
+    confidence_min: 0.7
+    verified_by: "manual"
+    verified_date: "2026-05-07"
+
+  # --------------------------------------------------------------------------
+  # Claim 18: ALS resolution (mlx).
+  # Spec: <100 mlx resolution possible (Feature List, page 4). The
+  # claim is about minimum-detectable-illuminance under integration-time
+  # adjustments. The chamber's measurement of vis_1 is in raw counts;
+  # we lack the count-to-mlx conversion (depends on integration time and
+  # spectral content), so the load-bearing conversion condition is
+  # unmatched and the verdict routes to inconclusive. Fidelity test
+  # exercises feature-list extraction.
+  # --------------------------------------------------------------------------
+  - id: "si115x-als-resolution-mlx"
+    pdf_source: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/light_sensor.pdf"
+    parameter: "ALS resolution (mlx)"
+    description: >
+      Datasheet-stated minimum-detectable ALS resolution (mlx). Chamber
+      records vis_1 in raw counts; the count-to-mlx conversion needs the
+      integration-time and spectral-content calibration, which is not
+      exposed. Load-bearing condition unmatched -> inconclusive.
+    expected_unit: "mlx"
+    claim_kind: "typical"
+    claimed_typical: 100.0
+    tolerance_value: 0.5
+    tolerance_kind: "relative"
+    operating_conditions:
+      - { name: "count_to_mlx_calibration", unit: "mlx/count",
+          chamber_variable: "", load_bearing: true }
+    chamber_dataset: "lt_validate_v1"
+    chamber_experiment_hint: "validate_osr_c"
+    chamber_protocol: "chamberbench.protocols.light_sensor"
+    primary_chamber_variable: "vis_1"
+    cross_check_variables: []
+    source_page: [1, 4]
+    source_text: "<100 mlx resolution possible, allowing operation under dark"
+    value_contains: ["100", "mlx"]
+    confidence_min: 0.7
+    verified_by: "manual"
+    verified_date: "2026-05-07"
+
+  # --------------------------------------------------------------------------
+  # Claim 19: VDD supply ripple voltage.
+  # Spec: max 50 mVpp ripple at VDD=3.3 V over 1 kHz - 10 MHz (Table 8.1).
+  # Chamber doesn't actively measure VDD ripple; inconclusive.
+  # --------------------------------------------------------------------------
+  - id: "si115x-supply-ripple"
+    pdf_source: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/light_sensor.pdf"
+    parameter: "VDD supply ripple voltage"
+    description: >
+      Maximum allowed VDD ripple (mVpp) over the spec frequency band
+      at the nominal high VDD. Chamber does not measure VDD ripple;
+      inconclusive.
+    expected_unit: "mVpp"
+    claim_kind: "max"
+    claimed_max: 50.0
+    tolerance_value: 0.5
+    tolerance_kind: "relative"
+    operating_conditions:
+      - { name: "VDD_ripple_measurement", unit: "mVpp",
+          chamber_variable: "", load_bearing: true }
+    chamber_dataset: "lt_validate_v1"
+    chamber_experiment_hint: "validate_diode_vis_1"
+    chamber_protocol: "chamberbench.protocols.light_sensor"
+    primary_chamber_variable: "vis_1"
+    cross_check_variables: []
+    source_page: [47]
+    source_text: "VDD Supply Ripple Voltage VDD = 3.3 V 1 kHz - 10 MHz 50 mVpp"
+    value_contains: ["50", "mV"]
+    confidence_min: 0.7
+    verified_by: "manual"
+    verified_date: "2026-05-07"
+
+  # NOTE on the dropped linearity claim (Day 11 finding):
+  # An earlier draft included a `si115x-linearity-vis-525nm` claim that
+  # asserted R^2 >= 0.99 inferred from the responsivity slope in Table
+  # 8.3 (160 ADC Counts/(W/m^2) at 525 nm). The agent correctly observed
+  # that the word "linearity" does not appear anywhere in the Si115x
+  # datasheet and that R^2 >= 0.99 is a *curator-inferred* threshold,
+  # not a stated spec -- so it returned found=False with confidence
+  # 0.93. The methodology's fidelity scorer correctly flagged this as
+  # high-confidence-not-found, which is the right answer: the claim
+  # was thin. The reason-stub path is exercised end-to-end by
+  # the unit tests in tests/test_protocol_common.py
+  # (TestStubVerdict, TestLightSensorLinearity, and
+  # TestMakeStubMeasurement); we don't need a real claim to validate it.
+  #
+  # The claim was dropped on Day 11. Adding a real linearity claim
+  # awaits a datasheet that actually states one (or a later slice
+  # that reframes the chamber benchmark to test inferred-monotonicity
+  # claims explicitly, with the expected output being inconclusive).
+
+  # ---------------------------------------------------------------------
+  # ACS70331 (Allegro current sensor) -- engagement-diagnostic claims
+  # ---------------------------------------------------------------------
+  # Purpose: factor the training-data-recall confound out of the cross-
+  # model engagement story (see docs/reproducing.md).
+  # The ACS70331 is a discontinued GMR-based current sensor IC; the
+  # part appears in the chamber's BOM but is less indexed in public
+  # corpora than DPS310 or Si115x. Claims here have NO chamber-side
+  # reproducibility verdict (chamber_protocol: engagement_diagnostic
+  # returns a stub measurement so verdict() emits inconclusive). The
+  # cells exist purely to measure per-model `n_tool_calls_by_tool` on
+  # a less-indexed document. Each claim is tagged with its difficulty
+  # tier so cross-model engagement-by-difficulty can be plotted.
+
+  - id: "acs70331-bandwidth"
+    pdf_source: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/current_sensor.pdf"
+    parameter: "Sensor -3 dB bandwidth"
+    description: >
+      Engagement-diagnostic claim (tier EASY). The sensor's typical
+      small-signal -3 dB bandwidth appears in the front-page features
+      list AND in the electrical-characteristics table. Almost any LLM
+      should be able to answer this from memory; this cell exists as
+      the easy-control for the engagement plot.
+    expected_unit: "MHz"
+    claim_kind: "typical"
+    claimed_typical: 1.0
+    tolerance_value: 0.10
+    tolerance_kind: "relative"
+    operating_conditions:
+      # output_swing_V was originally listed as a load-bearing test
+      # condition (the table heading applies to many adjacent rows
+      # that *do* depend on output swing). Dropped here because the
+      # -3 dB bandwidth is a small-signal spec that is not stated as
+      # a function of output swing in the source text, and listing
+      # the swing value (1.0 V) caused it to coincide numerically
+      # with the claimed bandwidth (1.0 MHz) -- the agent could
+      # answer by pattern-matching the condition value. See
+      # tests/test_chamber_prompts.py::test_claimed_values_do_not_
+      # coincide_with_condition_values.
+      - { name: "VCC_V", value: 3.3, unit: "V",
+          chamber_variable: "", load_bearing: true }
+    chamber_dataset: "wt_validate_v1"
+    chamber_experiment_hint: ""
+    chamber_protocol: "chamberbench.protocols.engagement_diagnostic"
+    primary_chamber_variable: ""
+    cross_check_variables: []
+    source_page: [1, 5]
+    source_text: "BW -3 dB bandwidth ... typ 1 MHz"
+    value_contains: ["1", "MHz"]
+    confidence_min: 0.7
+    verified_by: "manual"
+    verified_date: "2026-05-12"
+
+  - id: "acs70331-supply-current-max"
+    pdf_source: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/current_sensor.pdf"
+    parameter: "Supply current ICC max (steady state, fuses powered down)"
+    description: >
+      Engagement-diagnostic claim (tier MEDIUM). Maximum steady-state
+      supply current (ICC) under the test conditions "fuses powered
+      down, no load" from the electrical-characteristics table. An
+      adjacent row gives a DIFFERENT symbol (ICC_START_UP) with a
+      different test condition; the agent must distinguish the two
+      rows. Curator-error history: an earlier draft conflated
+      ICC_START_UP's max with ICC's max; the model under test caught
+      the mismatch and returned found=False with high confidence,
+      matching the si115x-linearity drop pattern across a
+      third component.
+    expected_unit: "mA"
+    claim_kind: "max"
+    claimed_max: 6.0
+    tolerance_value: 0.10
+    tolerance_kind: "relative"
+    operating_conditions:
+      - { name: "VCC_V", value: 3.3, unit: "V",
+          chamber_variable: "", load_bearing: true }
+      - { name: "fuses_powered_down", value: 1.0, unit: "",
+          chamber_variable: "", load_bearing: true }
+      - { name: "no_load", value: 1.0, unit: "",
+          chamber_variable: "", load_bearing: false }
+    chamber_dataset: "wt_validate_v1"
+    chamber_experiment_hint: ""
+    chamber_protocol: "chamberbench.protocols.engagement_diagnostic"
+    primary_chamber_variable: ""
+    cross_check_variables: []
+    source_page: [5]
+    source_text: "Supply Current ICC ... fuses powered down, no load ... max 6 mA"
+    value_contains: ["6", "mA"]
+    confidence_min: 0.7
+    verified_by: "manual"
+    verified_date: "2026-05-12"
+
+  - id: "acs70331-rise-time"
+    pdf_source: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/current_sensor.pdf"
+    parameter: "Rise time tr (10% to 90%) at 1 V output swing"
+    description: >
+      Engagement-diagnostic claim (tier HARD). Typical rise time tr
+      under the output-characteristics row whose test condition is
+      "1 V swing on VIOUT, 10% to 90%". The Response Time tRESPONSE
+      row (80% to 80% condition) and Propagation Delay tpd row (20%
+      to 20%) are adjacent in the table; the agent must read the
+      specific row and its test-condition column to answer correctly.
+      Curator-error history: an earlier draft asserted the wrong
+      value -- the curator misremembered the table layout. Both
+      Sonnet agentic and Sonnet baseline independently extracted the
+      correct row, catching the third curator error on this
+      five-claim component.
+    expected_unit: "ns"
+    claim_kind: "typical"
+    claimed_typical: 460.0
+    tolerance_value: 0.15
+    tolerance_kind: "relative"
+    operating_conditions:
+      - { name: "VCC_V", value: 3.3, unit: "V",
+          chamber_variable: "", load_bearing: true }
+      - { name: "output_swing_V", value: 1.0, unit: "V",
+          chamber_variable: "", load_bearing: true }
+      - { name: "rise_definition", value: 90.0, unit: "%",
+          chamber_variable: "", load_bearing: true }
+    chamber_dataset: "wt_validate_v1"
+    chamber_experiment_hint: ""
+    chamber_protocol: "chamberbench.protocols.engagement_diagnostic"
+    primary_chamber_variable: ""
+    cross_check_variables: []
+    source_page: [5]
+    source_text: "Rise Time tr ... 1 V swing on VIOUT, 10% to 90% ... typ 460 ns"
+    value_contains: ["460", "ns"]
+    confidence_min: 0.6
+    verified_by: "manual"
+    verified_date: "2026-05-12"
+
+  - id: "acs70331-primary-resistance-qfn"
+    pdf_source: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/current_sensor.pdf"
+    parameter: "Primary conductor resistance RIP, QFN-12 package"
+    description: >
+      Engagement-diagnostic claim (tier HARD). Typical primary-conductor
+      resistance (RIP) for the QFN-12 variant from the electrical-
+      characteristics table. The SOIC-8 variant has a DIFFERENT value
+      in an adjacent row; the agent must extract the package-specific
+      row to answer correctly. Disambiguates "agent read the table"
+      from "agent pattern-matched the surrounding number".
+    expected_unit: "mOhm"
+    claim_kind: "typical"
+    claimed_typical: 1.1
+    tolerance_value: 0.20
+    tolerance_kind: "relative"
+    operating_conditions:
+      - { name: "package", value: 12.0, unit: "pin_count_QFN",
+          chamber_variable: "", load_bearing: true }
+      - { name: "TA_C", value: 25.0, unit: "C",
+          chamber_variable: "", load_bearing: true }
+    chamber_dataset: "wt_validate_v1"
+    chamber_experiment_hint: ""
+    chamber_protocol: "chamberbench.protocols.engagement_diagnostic"
+    primary_chamber_variable: ""
+    cross_check_variables: []
+    source_page: [5]
+    source_text: "Primary Conductor Resistance RIP ... QFN-12 package, TA = 25 C ... typ 1.1 mOhm"
+    value_contains: ["1.1", "m"]
+    confidence_min: 0.6
+    verified_by: "manual"
+    verified_date: "2026-05-12"
+
+  - id: "acs70331-saturation-low"
+    pdf_source: "https://raw.githubusercontent.com/juangamella/causal-chamber/main/hardware/datasheets/current_sensor.pdf"
+    parameter: "Output saturation voltage VSAT_LOW (typical)"
+    description: >
+      Engagement-diagnostic claim (tier MEDIUM-HARD). Output saturation
+      voltage VSAT_LOW from the output-characteristics table. Output-
+      saturation specs are not headline; they are buried in the table
+      without a front-page mention. Distinct from VSAT_HIGH (a much
+      larger, near-VCC value in an adjacent row). Curator-error history:
+      an earlier draft conflated typ with max from the adjacent column;
+      the model under test extracted both columns correctly via
+      extract_table_markdown. The curator-error catch is the second
+      one on this component (after acs70331-supply-current-max).
+    expected_unit: "mV"
+    claim_kind: "typical"
+    claimed_typical: 20.0
+    claimed_max: 200.0
+    tolerance_value: 0.50
+    tolerance_kind: "relative"
+    operating_conditions:
+      - { name: "VCC_V", value: 3.3, unit: "V",
+          chamber_variable: "", load_bearing: true }
+      - { name: "RL_kohm", value: 22.0, unit: "kOhm",
+          chamber_variable: "", load_bearing: true }
+    chamber_dataset: "wt_validate_v1"
+    chamber_experiment_hint: ""
+    chamber_protocol: "chamberbench.protocols.engagement_diagnostic"
+    primary_chamber_variable: ""
+    cross_check_variables: []
+    source_page: [5]
+    source_text: "Saturation Voltage VSAT_LOW ... typ 20 mV ... max 200 mV"
+    # "VSAT_LOW" was unreachable: it occurs only in source_text, which
+    # serialize_numerical stopped appending to the haystack (the value gate
+    # must not be satisfiable by echoing the datasheet). The symbol was
+    # pinning the ROW, not the column -- and the unit does that just as well
+    # here, since the adjacent VSAT_HIGH row is denominated in V, not mV.
+    # Same needle count and same numeric-needle set as before, so the paper's
+    # grading-surface shape is unchanged; only reachability is restored.
+    value_contains: ["20", "mV"]
+    confidence_min: 0.6
+    verified_by: "manual"
+    verified_date: "2026-05-12"
