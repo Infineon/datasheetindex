@@ -35,6 +35,12 @@ Every command below reads only `archive/` and `data/`, except the two marked
 | Cost summary | `python scripts/chamber_cost_summary.py` |
 | Baseline vs agentic | `python scripts/baseline_vs_agentic.py` |
 
+The two **(net)** commands exit **1** if the Causal Chambers dataset cannot be
+fetched, and print which claims were skipped. That is deliberate: the claims
+needing chamber data are exactly the ones that can produce a non-inconclusive
+verdict, so an unreachable dataset must not be reported as "no failures found".
+An exit of 1 there means *incomplete*, not *failed*.
+
 `tests/test_reproduces_paper.py` pins the headline numbers directly, so a
 drift in the archive or the grading surface fails a test rather than quietly
 changing a table.
