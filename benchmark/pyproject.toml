@@ -1,0 +1,56 @@
+# The chamber-grounded benchmark.
+#
+# Deliberately a SEPARATE project from `datasheetindex`, not an extra on it.
+# The library's only runtime dependency is pymupdf; the benchmark needs numpy,
+# pandas, matplotlib, pydantic and causalchamber. Folding these into the
+# library -- even behind an extra -- puts them in its dependency graph and in
+# front of users who only want to index a PDF. Keeping a second pyproject here
+# means `uv sync` at the repository root installs none of it, and the published
+# wheel (hatch packages only `src/datasheetindex`) contains none of it either.
+
+[project]
+name = "chamberbench"
+version = "1.0.0"
+description = "Chamber-grounded benchmark for datasheet-extraction agents: the grading surface and its archive"
+readme = "README.md"
+requires-python = ">=3.13"
+license = "MIT"
+license-files = ["../LICENSE"]
+authors = [{ name = "Infineon Technologies AG" }]
+dependencies = [
+    "pydantic>=2.9",
+    "pyyaml>=6.0",
+    "numpy>=2.0",
+    "pandas>=2.2",
+    "matplotlib>=3.9",
+    # Supplies the physical measurements. `Dataset(..., download=True)` fetches
+    # the public Causal Chambers data, so reproducing the reproducibility axis
+    # needs no access to the hardware.
+    "causalchamber>=0.2.8",
+]
+
+[project.optional-dependencies]
+# Only `classifier`'s auto-labelling pass calls a model. Every number in the
+# paper can be re-derived from the archive without this extra.
+classify = ["anthropic>=0.69", "python-dotenv>=1.0", "httpx>=0.28"]
+
+[project.scripts]
+chamber-gates = "chamberbench.quality_gates:main"
+chamber-contamination-audit = "chamberbench.contamination_audit:main"
+chamber-classify = "chamberbench.classifier:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/chamberbench"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "scripts"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+src = ["src", "tests", "scripts"]

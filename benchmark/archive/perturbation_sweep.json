@@ -1,0 +1,167 @@
+{
+  "timestamp": "2026-06-03T20:32:08.372469+00:00",
+  "claim_id": "dps310-operating-range",
+  "measured_value": 945.2850808731155,
+  "measured_unit": "hPa",
+  "measured_sigma": 0.08014870759895294,
+  "sigma_basis": "cross_sensor",
+  "rows": [
+    {
+      "claimed_max": 945.4454,
+      "divergence": -0.16031912688447392,
+      "boundary_distance": 0.0,
+      "verdict": "pass",
+      "combined_uncertainty": 0.08014870759895294
+    },
+    {
+      "claimed_max": 945.4253,
+      "divergence": -0.1402191268845172,
+      "boundary_distance": 0.0,
+      "verdict": "pass",
+      "combined_uncertainty": 0.08014870759895294
+    },
+    {
+      "claimed_max": 945.4053,
+      "divergence": -0.1202191268845354,
+      "boundary_distance": 0.0,
+      "verdict": "pass",
+      "combined_uncertainty": 0.08014870759895294
+    },
+    {
+      "claimed_max": 945.3853,
+      "divergence": -0.10021912688455359,
+      "boundary_distance": 0.0,
+      "verdict": "pass",
+      "combined_uncertainty": 0.08014870759895294
+    },
+    {
+      "claimed_max": 945.3652,
+      "divergence": -0.0801191268844832,
+      "boundary_distance": 0.0,
+      "verdict": "pass",
+      "combined_uncertainty": 0.08014870759895294
+    },
+    {
+      "claimed_max": 945.3452,
+      "divergence": -0.060119126884501384,
+      "boundary_distance": 0.0,
+      "verdict": "pass",
+      "combined_uncertainty": 0.08014870759895294
+    },
+    {
+      "claimed_max": 945.3252,
+      "divergence": -0.040119126884519574,
+      "boundary_distance": 0.0,
+      "verdict": "pass",
+      "combined_uncertainty": 0.08014870759895294
+    },
+    {
+      "claimed_max": 945.3051,
+      "divergence": -0.020019126884562866,
+      "boundary_distance": 0.0,
+      "verdict": "pass",
+      "combined_uncertainty": 0.08014870759895294
+    },
+    {
+      "claimed_max": 945.2851,
+      "divergence": -1.9126884581055492e-05,
+      "boundary_distance": 0.0,
+      "verdict": "pass",
+      "combined_uncertainty": 0.08014870759895294
+    },
+    {
+      "claimed_max": 945.265,
+      "divergence": 0.02008087311548934,
+      "boundary_distance": 0.02008087311548934,
+      "verdict": "inconclusive",
+      "combined_uncertainty": 0.08014870759895294
+    },
+    {
+      "claimed_max": 945.245,
+      "divergence": 0.04008087311547115,
+      "boundary_distance": 0.04008087311547115,
+      "verdict": "inconclusive",
+      "combined_uncertainty": 0.08014870759895294
+    },
+    {
+      "claimed_max": 945.225,
+      "divergence": 0.06008087311545296,
+      "boundary_distance": 0.06008087311545296,
+      "verdict": "inconclusive",
+      "combined_uncertainty": 0.08014870759895294
+    },
+    {
+      "claimed_max": 945.2049,
+      "divergence": 0.08018087311552335,
+      "boundary_distance": 0.08018087311552335,
+      "verdict": "fail",
+      "combined_uncertainty": 0.08014870759895294
+    },
+    {
+      "claimed_max": 945.1849,
+      "divergence": 0.10018087311550516,
+      "boundary_distance": 0.10018087311550516,
+      "verdict": "fail",
+      "combined_uncertainty": 0.08014870759895294
+    },
+    {
+      "claimed_max": 945.1649,
+      "divergence": 0.12018087311548697,
+      "boundary_distance": 0.12018087311548697,
+      "verdict": "fail",
+      "combined_uncertainty": 0.08014870759895294
+    },
+    {
+      "claimed_max": 945.1448,
+      "divergence": 0.14028087311544368,
+      "boundary_distance": 0.14028087311544368,
+      "verdict": "fail",
+      "combined_uncertainty": 0.08014870759895294
+    },
+    {
+      "claimed_max": 945.1248,
+      "divergence": 0.1602808731154255,
+      "boundary_distance": 0.1602808731154255,
+      "verdict": "fail",
+      "combined_uncertainty": 0.08014870759895294
+    },
+    {
+      "claimed_max": 945.1047,
+      "divergence": 0.1803808731154959,
+      "boundary_distance": 0.1803808731154959,
+      "verdict": "fail",
+      "combined_uncertainty": 0.08014870759895294
+    },
+    {
+      "claimed_max": 945.0847,
+      "divergence": 0.2003808731154777,
+      "boundary_distance": 0.2003808731154777,
+      "verdict": "fail",
+      "combined_uncertainty": 0.08014870759895294
+    },
+    {
+      "claimed_max": 945.0647,
+      "divergence": 0.2203808731154595,
+      "boundary_distance": 0.2203808731154595,
+      "verdict": "fail",
+      "combined_uncertainty": 0.08014870759895294
+    },
+    {
+      "claimed_max": 945.0446,
+      "divergence": 0.2404808731155299,
+      "boundary_distance": 0.2404808731155299,
+      "verdict": "fail",
+      "combined_uncertainty": 0.08014870759895294
+    }
+  ],
+  "tier_b": {
+    "model": "claudesonnet4.6",
+    "fidelity_overall_pass": true,
+    "reproducibility_verdict": "fail",
+    "measured_value": 945.2850808731155,
+    "claimed_max": 945.0,
+    "delta": 0.2850808731154757,
+    "combined_uncertainty": 0.08014870759895294,
+    "n_tool_calls": 16
+  }
+}

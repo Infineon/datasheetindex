@@ -1,0 +1,770 @@
+{
+  "timestamp": "2026-06-04T14:23:18.833584+00:00",
+  "model": "gpt-5.1",
+  "arm_a": {
+    "F1": {
+      "label": "tool-bypass",
+      "expected_rule": "tool_bypass",
+      "planted": 25,
+      "engine_errors": 1,
+      "no_clean_reference": 0,
+      "silent_failures": 24,
+      "detector_caught": 24,
+      "recall": 1.0,
+      "cells": [
+        {
+          "claim_id": "dps310-relative-accuracy",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 111.70878966199234,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "dps310-absolute-accuracy",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 81.55708786798641,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "dps310-pressure-precision-high",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 56.952287606021855,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "dps310-pressure-temp-sensitivity",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 102.79858301201602,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "dps310-temperature-accuracy",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 80.83305935101816,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "dps310-current-1hz-low-precision",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 121.30679617496207,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "dps310-supply-voltage-vdd",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 2
+          },
+          "latency_s": 114.14123394299531,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "dps310-meas-time-standard",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 69.06311315001221,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "dps310-pressure-rate-range",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 151.84190759598278,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "dps310-pressure-data-resolution",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 92.56616938504158,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "dps310-operating-range",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 41.258338014013134,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "si115x-adc-bit-depth",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 30.755202813015785,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "si115x-operating-temperature",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 50.91802674299106,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "si115x-supply-voltage-vdd",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 20.19011214299826,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "si115x-standby-current-1v8",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 173.0270825229818,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "si115x-active-current-3v3",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 81.5087946569547,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "si115x-processing-time",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 50.59811397100566,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "si115x-vis-response-525nm",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 66.68843710899819,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "si115x-als-resolution-mlx",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 75.85214228602126,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "si115x-supply-ripple",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 65.71517829998629,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "acs70331-bandwidth",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 15.236753303965088,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "acs70331-supply-current-max",
+          "fault": "F1",
+          "engine_error": "timeout after 360s: ",
+          "n_tool_calls_by_tool": {},
+          "latency_s": 360.0142392460257,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "acs70331-rise-time",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 135.8880603700527,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "acs70331-primary-resistance-qfn",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 166.3696767759975,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        },
+        {
+          "claim_id": "acs70331-saturation-low",
+          "fault": "F1",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "submit_claim_result": 1
+          },
+          "latency_s": 57.77437502198154,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "tool_bypass"
+          ]
+        }
+      ]
+    },
+    "F5": {
+      "label": "verification-skipped",
+      "expected_rule": "verification_skipped",
+      "planted": 25,
+      "engine_errors": 17,
+      "no_clean_reference": 0,
+      "silent_failures": 8,
+      "detector_caught": 8,
+      "recall": 1.0,
+      "cells": [
+        {
+          "claim_id": "dps310-relative-accuracy",
+          "fault": "F5",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 2,
+            "list_experiments": 1,
+            "get_ground_truth_graph": 1,
+            "get_experiment_metadata": 1,
+            "query_dataset": 1,
+            "submit_claim_result": 1
+          },
+          "latency_s": 227.44430465600453,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "verification_skipped"
+          ]
+        },
+        {
+          "claim_id": "dps310-absolute-accuracy",
+          "fault": "F5",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 1,
+            "list_experiments": 1,
+            "get_ground_truth_graph": 1,
+            "submit_claim_result": 1
+          },
+          "latency_s": 164.89683613402303,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "verification_skipped"
+          ]
+        },
+        {
+          "claim_id": "dps310-pressure-precision-high",
+          "fault": "F5",
+          "engine_error": "timeout after 360s: ",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 3
+          },
+          "latency_s": 360.0188022439834,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "dps310-pressure-temp-sensitivity",
+          "fault": "F5",
+          "engine_error": "timeout after 360s: ",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 4,
+            "inspect_page": 1,
+            "list_experiments": 1,
+            "get_experiment_metadata": 1,
+            "query_dataset": 1
+          },
+          "latency_s": 360.0134933379595,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "dps310-temperature-accuracy",
+          "fault": "F5",
+          "engine_error": "timeout after 360s: ",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 2,
+            "list_experiments": 1,
+            "get_ground_truth_graph": 1,
+            "run_simulator": 1,
+            "get_experiment_metadata": 1
+          },
+          "latency_s": 360.01889350201236,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "dps310-current-1hz-low-precision",
+          "fault": "F5",
+          "engine_error": "timeout after 360s: ",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 2,
+            "inspect_page": 2,
+            "list_experiments": 1,
+            "get_experiment_metadata": 1,
+            "get_ground_truth_graph": 1
+          },
+          "latency_s": 360.01969161001034,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "dps310-supply-voltage-vdd",
+          "fault": "F5",
+          "engine_error": "timeout after 360s: ",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 3,
+            "list_experiments": 1
+          },
+          "latency_s": 360.0364848789759,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "dps310-meas-time-standard",
+          "fault": "F5",
+          "engine_error": "timeout after 360s: ",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 5,
+            "list_experiments": 1,
+            "get_ground_truth_graph": 1
+          },
+          "latency_s": 360.0041762890178,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "dps310-pressure-rate-range",
+          "fault": "F5",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 3,
+            "list_experiments": 1,
+            "get_experiment_metadata": 1,
+            "submit_claim_result": 1
+          },
+          "latency_s": 318.76301967701875,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "verification_skipped"
+          ]
+        },
+        {
+          "claim_id": "dps310-pressure-data-resolution",
+          "fault": "F5",
+          "engine_error": "timeout after 360s: ",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "inspect_page": 2,
+            "get_section_text": 3,
+            "list_experiments": 1,
+            "get_ground_truth_graph": 1
+          },
+          "latency_s": 360.0026047420106,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "dps310-operating-range",
+          "fault": "F5",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 1,
+            "list_experiments": 1,
+            "get_ground_truth_graph": 1,
+            "get_experiment_metadata": 1,
+            "submit_claim_result": 1
+          },
+          "latency_s": 208.94278373097768,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "verification_skipped"
+          ]
+        },
+        {
+          "claim_id": "si115x-adc-bit-depth",
+          "fault": "F5",
+          "engine_error": "timeout after 360s: ",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 4
+          },
+          "latency_s": 360.0277820029878,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "si115x-operating-temperature",
+          "fault": "F5",
+          "engine_error": "timeout after 360s: ",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 3,
+            "list_experiments": 1
+          },
+          "latency_s": 360.01066541601904,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "si115x-supply-voltage-vdd",
+          "fault": "F5",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 2,
+            "list_experiments": 1,
+            "get_experiment_metadata": 1,
+            "submit_claim_result": 1
+          },
+          "latency_s": 322.54419626801973,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "verification_skipped"
+          ]
+        },
+        {
+          "claim_id": "si115x-standby-current-1v8",
+          "fault": "F5",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 4,
+            "list_experiments": 1,
+            "get_ground_truth_graph": 1,
+            "submit_claim_result": 1
+          },
+          "latency_s": 273.9909516199841,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "verification_skipped"
+          ]
+        },
+        {
+          "claim_id": "si115x-active-current-3v3",
+          "fault": "F5",
+          "engine_error": "timeout after 360s: ",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 3,
+            "inspect_page": 1
+          },
+          "latency_s": 360.04105200397316,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "si115x-processing-time",
+          "fault": "F5",
+          "engine_error": "timeout after 360s: ",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 4,
+            "inspect_page": 1
+          },
+          "latency_s": 360.00985918199876,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "si115x-vis-response-525nm",
+          "fault": "F5",
+          "engine_error": "RateLimitError: Error code: 429 - {'error': {'message': 'litellm.RateLimitError: AzureException RateLimitError - {\\n  \"error\": {\\n    \"message\": \"Too Many Requests\",\\n    \"type\": \"too_many_requests\",\\n    \"param\": null,\\n    \"code\": \"too_many_requests\"\\n  }\\n}. Received Model Group=gpt-5.1\\nAvailable Model Group Fallbacks=None', 'type': 'throttling_error', 'param': None, 'code': '429'}}",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 3
+          },
+          "latency_s": 277.96186192095047,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "si115x-als-resolution-mlx",
+          "fault": "F5",
+          "engine_error": "timeout after 360s: ",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 5
+          },
+          "latency_s": 360.00377968495013,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "si115x-supply-ripple",
+          "fault": "F5",
+          "engine_error": "timeout after 360s: ",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 2,
+            "inspect_page": 1
+          },
+          "latency_s": 360.03279632498743,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "acs70331-bandwidth",
+          "fault": "F5",
+          "engine_error": "timeout after 360s: ",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 4,
+            "list_experiments": 1,
+            "get_ground_truth_graph": 1,
+            "get_experiment_metadata": 1
+          },
+          "latency_s": 360.0211561960168,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "acs70331-supply-current-max",
+          "fault": "F5",
+          "engine_error": "timeout after 360s: ",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "inspect_page": 6,
+            "get_section_text": 1
+          },
+          "latency_s": 360.0073954659747,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "acs70331-rise-time",
+          "fault": "F5",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "get_section_text": 5,
+            "list_experiments": 1,
+            "submit_claim_result": 1
+          },
+          "latency_s": 294.3821061249473,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "verification_skipped"
+          ]
+        },
+        {
+          "claim_id": "acs70331-primary-resistance-qfn",
+          "fault": "F5",
+          "engine_error": "timeout after 360s: ",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "inspect_page": 6,
+            "get_section_text": 2,
+            "list_experiments": 1
+          },
+          "latency_s": 360.01269266800955,
+          "fidelity_pass": true,
+          "detector_flagged": false,
+          "detector_rules": []
+        },
+        {
+          "claim_id": "acs70331-saturation-low",
+          "fault": "F5",
+          "engine_error": "",
+          "n_tool_calls_by_tool": {
+            "build_datasheet": 1,
+            "list_experiments": 1,
+            "get_section_text": 3,
+            "submit_claim_result": 1
+          },
+          "latency_s": 261.1892643579631,
+          "fidelity_pass": true,
+          "detector_flagged": true,
+          "detector_rules": [
+            "verification_skipped"
+          ]
+        }
+      ]
+    }
+  }
+}

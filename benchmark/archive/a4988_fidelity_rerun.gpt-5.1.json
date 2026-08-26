@@ -1,0 +1,527 @@
+{
+  "timestamp": "2026-08-21T14:11:05.805675+00:00",
+  "model": "gpt-5.1",
+  "component": "A4988",
+  "scope": "fidelity-only",
+  "summary": {
+    "claims": 12,
+    "engine_errors": 1,
+    "fidelity_pass": 11,
+    "strict_pass": 11,
+    "flagged": 0,
+    "mean_all_tool_calls_per_claim": 10.727272727272727,
+    "mean_nav_calls_per_claim": 8.727272727272727
+  },
+  "cells": [
+    {
+      "claim_id": "a4988-logic-supply-voltage-range",
+      "engine_error": "",
+      "latency_s": 106.14016665300005,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 3,
+        "extract_table_markdown": 2,
+        "get_section_text": 1,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "n_nav_calls": 7,
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "extracted": {
+        "parameter": "Logic supply voltage range",
+        "found": true,
+        "confidence": 0.95,
+        "reason": "Directly taken from the ELECTRICAL CHARACTERISTICS table row \"Logic Supply Voltage Range | VDD | Operating | 3.0 | – | 5.5 | V\" which defines the operating logic supply voltage range for VDD.",
+        "page_numbers": [
+          1,
+          2,
+          4
+        ],
+        "original_terminology": "Logic Supply Voltage Range",
+        "values": [
+          {
+            "conditions": "Operating; ELECTRICAL CHARACTERISTICS at TA = 25°C, VBB = 35 V (unless otherwise noted)",
+            "min_value": 3.0,
+            "max_value": 5.5,
+            "unit": "V",
+            "source_text": "Load Supply Voltage Range | VBB | Operating | 8 | – | 35 | V\nLogic Supply Voltage Range | VDD | Operating | 3.0 | – | 5.5 | V"
+          }
+        ],
+        "list_value": [],
+        "text_value": "Operating logic supply voltage range VDD: 3.0 V to 5.5 V.",
+        "source_text": "ELECTRICAL CHARACTERISTICS at TA = 25°C, VBB = 35 V (unless otherwise noted)\nLogic Supply Voltage Range | VDD | Operating | 3.0 | – | 5.5 | V",
+        "source_location": null
+      }
+    },
+    {
+      "claim_id": "a4988-load-supply-voltage-range",
+      "engine_error": "",
+      "latency_s": 138.70180311500008,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 6,
+        "extract_table_markdown": 2,
+        "get_section_text": 1,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "n_nav_calls": 10,
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "extracted": {
+        "parameter": "Load supply voltage range",
+        "found": true,
+        "confidence": 0.97,
+        "reason": "From the ELECTRICAL CHARACTERISTICS table at TA = 25°C, the row \"Load Supply Voltage Range\" (symbol VBB, condition Operating) specifies a minimum of 8 V and a maximum of 35 V. No typical value is given. This is corroborated by the Absolute Maximum Ratings and the Features section, both of which support the 35 V limit.",
+        "page_numbers": [
+          4,
+          2,
+          1
+        ],
+        "original_terminology": "Load Supply Voltage Range VBB Operating 8 – 35 V",
+        "values": [
+          {
+            "conditions": "Operating; ELECTRICAL CHARACTERISTICS at TA = 25°C, VBB = 35 V (unless otherwise noted)",
+            "min_value": 8.0,
+            "max_value": 35.0,
+            "unit": "V",
+            "source_text": "Load Supply Voltage Range | VBB | Operating | 8 | – | 35 | V"
+          }
+        ],
+        "list_value": [],
+        "text_value": "Operating load supply voltage range 8–35 V",
+        "source_text": "ELECTRICAL CHARACTERISTICS1 at TA = 25°C, VBB = 35 V (unless otherwise noted) … Load Supply Voltage Range VBB Operating 8 – 35 V",
+        "source_location": null
+      }
+    },
+    {
+      "claim_id": "a4988-output-on-resistance",
+      "engine_error": "",
+      "latency_s": 68.73713338200469,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 4,
+        "extract_table_markdown": 1,
+        "get_section_text": 2,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "n_nav_calls": 8,
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "extracted": {
+        "parameter": "Output on resistance",
+        "found": true,
+        "confidence": 0.93,
+        "reason": "Extracted directly from the ELECTRICAL CHARACTERISTICS table (TA = 25°C, VBB = 35 V). The characteristic is labeled \"Output On Resistance\" with symbol RDSON for both source and sink drivers at IOUT = ±1.5 A, giving typical = 320 mΩ and maximum = 430 mΩ. No minimum is specified.",
+        "page_numbers": [
+          4
+        ],
+        "original_terminology": "Output On Resistance RDSON",
+        "values": [
+          {
+            "conditions": "TA = 25°C, VBB = 35 V; Source Driver, IOUT = –1.5 A",
+            "typical_value": 320.0,
+            "max_value": 430.0,
+            "unit": "mΩ",
+            "source_text": "Output On Resistance | RDSON | Source Driver, IOUT = –1.5 A | – | 320 | 430 | mΩ"
+          },
+          {
+            "conditions": "TA = 25°C, VBB = 35 V; Sink Driver, IOUT = 1.5 A",
+            "typical_value": 320.0,
+            "max_value": 430.0,
+            "unit": "mΩ",
+            "source_text": "Output On Resistance | RDSON | Sink Driver, IOUT = 1.5 A | – | 320 | 430 | mΩ"
+          }
+        ],
+        "list_value": [],
+        "text_value": "",
+        "source_text": "ELECTRICAL CHARACTERISTICS at TA = 25°C, VBB = 35 V: Output On Resistance RDSON, Source Driver IOUT = –1.5 A and Sink Driver IOUT = 1.5 A, Typ = 320 mΩ, Max = 430 mΩ.",
+        "source_location": null
+      }
+    },
+    {
+      "claim_id": "a4988-body-diode-forward-voltage",
+      "engine_error": "",
+      "latency_s": 251.09625505700387,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 3,
+        "extract_table_markdown": 1,
+        "get_section_text": 2,
+        "inspect_page": 1,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "n_nav_calls": 8,
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "extracted": {
+        "parameter": "Body diode forward voltage",
+        "found": true,
+        "confidence": 0.93,
+        "reason": "The ELECTRICAL CHARACTERISTICS table (TA = 25°C, VBB = 35 V) includes a row titled 'Body Diode Forward Voltage' with symbol VF and test conditions 'Source Diode, IF = –1.5 A; Sink Diode, IF = 1.5 A', and lists a maximum value of 1.2 V. This matches the requested parameter and diode current of 1.5 A.",
+        "page_numbers": [
+          4
+        ],
+        "original_terminology": "Body Diode Forward Voltage",
+        "values": [
+          {
+            "conditions": "TA = 25°C, VBB = 35 V; Sink Diode, IF = 1.5 A (body diode conduction in sink path).",
+            "max_value": 1.2,
+            "unit": "V",
+            "source_text": "Body Diode Forward Voltage  VF  Source Diode, IF = –1.5 A; Sink Diode, IF = 1.5 A  –  –  1.2  V"
+          }
+        ],
+        "list_value": [],
+        "text_value": "",
+        "source_text": "Body Diode Forward Voltage VF row in the ELECTRICAL CHARACTERISTICS table: Source Diode, IF = –1.5 A; Sink Diode, IF = 1.5 A; Max = 1.2 V at TA = 25°C, VBB = 35 V.",
+        "source_location": null
+      }
+    },
+    {
+      "claim_id": "a4988-logic-supply-current-max",
+      "engine_error": "timeout after 360s: ",
+      "latency_s": 360.01551598299557,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 4,
+        "extract_table_markdown": 1,
+        "get_section_text": 4,
+        "inspect_page": 1
+      },
+      "n_nav_calls": 11,
+      "fidelity_pass": false,
+      "strict_pass": false,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "extracted": {}
+    },
+    {
+      "claim_id": "a4988-logic-input-hysteresis",
+      "engine_error": "",
+      "latency_s": 253.76011856900004,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 4,
+        "extract_table_markdown": 1,
+        "get_section_text": 4,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "n_nav_calls": 10,
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "extracted": {
+        "parameter": "Logic input hysteresis",
+        "found": true,
+        "confidence": 0.94,
+        "reason": "Directly taken from the Electrical Characteristics table: the row labeled \"Logic Input Hysteresis\" with symbol VHYS(IN) lists the hysteresis as a percentage of VDD, with explicit min/typ/max values. The table heading and adjacent rows define the relevant operating conditions (TA, VBB, and logic supply voltage range).",
+        "page_numbers": [
+          2,
+          4
+        ],
+        "original_terminology": "Logic Input Hysteresis",
+        "values": [
+          {
+            "conditions": "ELECTRICAL CHARACTERISTICS at TA = 25°C, VBB = 35 V (unless otherwise noted); Logic Input Hysteresis VHYS(IN) specified \"As a % of VDD\".",
+            "typical_value": 11.0,
+            "min_value": 5.0,
+            "max_value": 19.0,
+            "unit": "%",
+            "source_text": "Logic Input Hysteresis  VHYS(IN)  As a % of VDD  5  11  19  %"
+          }
+        ],
+        "list_value": [],
+        "text_value": "Logic input hysteresis is specified as 5% (min), 11% (typ), 19% (max) of VDD under Electrical Characteristics conditions (TA = 25°C, VBB = 35 V), with the parameter named \"Logic Input Hysteresis\" (VHYS(IN)) and expressed as a percentage of the logic supply voltage VDD.",
+        "source_text": "ELECTRICAL CHARACTERISTICS1 at TA = 25°C, VBB = 35 V (unless otherwise noted)\n...\nLogic Input Hysteresis\nVHYS(IN)\nAs a % of VDD\n5\n11\n19\n%\n...\nAbsolute Maximum Ratings\n...\nLogic Input Voltage  VIN  –0.3 to 5.5 V\nLogic Supply Voltage  VDD  –0.3 to 5.5 V",
+        "source_location": null
+      }
+    },
+    {
+      "claim_id": "a4988-blank-time",
+      "engine_error": "",
+      "latency_s": 183.33871792900027,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 3,
+        "extract_table_markdown": 1,
+        "get_section_text": 2,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "n_nav_calls": 7,
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "extracted": {
+        "parameter": "Blank time",
+        "found": true,
+        "confidence": 0.97,
+        "reason": "The ELECTRICAL CHARACTERISTICS table (TA = 25°C, VBB = 35 V) lists \"Blank Time\" (tBLANK) with min/typ/max values 0.7/1/1.3 μs. The Functional Description further describes the blank time tBLANK as approximately 1 μs, confirming the typical value.",
+        "page_numbers": [
+          4,
+          9
+        ],
+        "original_terminology": "Blank Time",
+        "values": [
+          {
+            "conditions": "ELECTRICAL CHARACTERISTICS at TA = 25°C, VBB = 35 V (unless otherwise noted).",
+            "typical_value": 1.0,
+            "min_value": 0.7,
+            "max_value": 1.3,
+            "unit": "us",
+            "source_text": "Blank Time tBLANK 0.7 1 1.3 μs"
+          }
+        ],
+        "list_value": [],
+        "text_value": "\"Blanking. ... The blank time, tBLANK (µs), is approximately tBLANK ≈ 1 µs\" and \"After the blanking time (≈1 µs) expires...\"",
+        "source_text": "ELECTRICAL CHARACTERISTICS1 at TA = 25°C, VBB = 35 V (unless otherwise noted) ... Blank Time tBLANK 0.7 1 1.3 μs. Functional Description: \"The blank time, tBLANK (µs), is approximately tBLANK ≈ 1 µs\" and \"After the blanking time (≈1 µs) expires\".",
+        "source_location": null
+      }
+    },
+    {
+      "claim_id": "a4988-fixed-off-time",
+      "engine_error": "",
+      "latency_s": 292.862778884999,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 4,
+        "extract_table_markdown": 1,
+        "get_section_text": 1,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "n_nav_calls": 7,
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "extracted": {
+        "parameter": "Fixed off-time",
+        "found": true,
+        "confidence": 0.93,
+        "reason": "Electrical Characteristics table explicitly lists \"Fixed Off-Time\" under Control Logic with test condition \"OSC = VDD or GND\" and min/typ/max 20/30/40 µs. Functional Description (Low Current Microstepping) states that shorting the ROSC pin to ground sets the off-time internally to 30 µs, confirming the typical value under the condition osc_pin_state = 0.0 (ground). The Fixed Off-Time section also ties the off-time tOFF to ROSC configurations, including a 30 µs setting, providing a consistent picture that typical fixed off-time is 30 µs for the oscillator pin tied to ground.",
+        "page_numbers": [
+          4,
+          7,
+          9
+        ],
+        "original_terminology": "Fixed Off-Time; off-time, tOFF",
+        "values": [
+          {
+            "conditions": "OSC/ROSC pin tied directly to ground (shorted to GND); Electrical Characteristics row: \"OSC = VDD or GND\" covering GND state",
+            "typical_value": 30.0,
+            "min_value": 20.0,
+            "max_value": 40.0,
+            "unit": "µs",
+            "source_text": "From ELECTRICAL CHARACTERISTICS table (Control Logic section, page 4):\n\"Blank Time tBLANK 0.7 1 1.3 μs\nFixed Off-Time  OSC = VDD or GND 20 30 40 μs\nFixed Off-Time tOFF  ROSC = 25 kΩ 23 30 37 μs\"\n\nFrom Functional Description – Low Current Microstepping (page 7):\n\"This feature is implemented by shorting the ROSC pin to ground. In this state, the off-time is internally set to 30 µs.\""
+          },
+          {
+            "conditions": "ROSC through resistor to ground, ROSC = 25 kΩ (alternate configuration of oscillator pin)",
+            "typical_value": 30.0,
+            "min_value": 23.0,
+            "max_value": 37.0,
+            "unit": "µs",
+            "source_text": "From ELECTRICAL CHARACTERISTICS table (Control Logic section, page 4):\n\"Fixed Off-Time tOFF  ROSC = 25 kΩ 23 30 37 μs\"\n\nFrom Fixed Off-Time section (page 9):\n\"Fixed Off-Time. The internal PWM current control circuitry uses a one-shot circuit to control the duration of time that the DMOS FETs remain off. The off-time, tOFF, is determined by the ROSC terminal. The ROSC terminal has three settings:\n▪ ROSC tied to VDD — off-time internally set to 30 µs, decay mode is automatic Mixed decay except when in full step where decay mode is set to Slow decay\n▪ ROSC tied directly to ground — off-time internally set to ...\n▪ ROSC through a resistor to ground — off-time is determined by the following formula ... tOFF ≈ ROSC / 825 (Where tOFF is in µs).\""
+          }
+        ],
+        "list_value": [],
+        "text_value": "",
+        "source_text": "Key locations:\n- Electrical Characteristics table (page 4), Control Logic section: rows labeled \"Fixed Off-Time\" with conditions \"OSC = VDD or GND\" and \"ROSC = 25 kΩ\" giving min/typ/max values of 20/30/40 µs and 23/30/37 µs respectively.\n- Functional Description – Low Current Microstepping (page 7): \"This feature is implemented by shorting the ROSC pin to ground. In this state, the off-time is internally set to 30 µs.\"\n- Fixed Off-Time section (page 9): describes that tOFF is determined by the ROSC terminal settings, including configurations where off-time is internally set to 30 µs and where tOFF is determined by tOFF ≈ ROSC / 825.",
+        "source_location": null
+      }
+    },
+    {
+      "claim_id": "a4988-thermal-shutdown-temperature",
+      "engine_error": "",
+      "latency_s": 252.82755080700008,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 3,
+        "get_section_text": 3,
+        "extract_table_markdown": 2,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "n_nav_calls": 9,
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "extracted": {
+        "parameter": "Thermal shutdown temperature",
+        "found": true,
+        "confidence": 0.94,
+        "reason": "Located in the ELECTRICAL CHARACTERISTICS table under the Protection subsection as \"Thermal Shutdown Temperature\" (symbol TTSD) with a typical value of 165 °C. Table header specifies TA = 25°C and VBB = 35 V (unless otherwise noted). Textual sections on Features and Description mention thermal shutdown but do not provide any numeric temperature, and the THERMAL CHARACTERISTICS section only gives package thermal resistance, not a shutdown threshold.",
+        "page_numbers": [
+          1,
+          2,
+          4
+        ],
+        "original_terminology": "Thermal Shutdown Temperature (TTSD)",
+        "values": [
+          {
+            "conditions": "ELECTRICAL CHARACTERISTICS at TA = 25°C, VBB = 35 V (unless otherwise noted); Protection subsection.",
+            "typical_value": 165.0,
+            "unit": "°C",
+            "source_text": "ELECTRICAL CHARACTERISTICS1 at TA = 25°C, VBB = 35 V (unless otherwise noted)\n...\nProtection\nOvercurrent Protection Threshold4 IOCPST 2.1 – – A\nThermal Shutdown Temperature TTSD – 165 – °C\nThermal Shutdown Hysteresis TTSDHYS – 15 – °C"
+          }
+        ],
+        "list_value": [],
+        "text_value": "",
+        "source_text": "Thermal Shutdown Temperature TTSD – 165 – °C in the ELECTRICAL CHARACTERISTICS table at TA = 25°C, VBB = 35 V (unless otherwise noted).",
+        "source_location": null
+      }
+    },
+    {
+      "claim_id": "a4988-operating-ambient-temperature",
+      "engine_error": "",
+      "latency_s": 336.6901568359972,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 9,
+        "get_section_text": 3,
+        "extract_table_markdown": 2,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "n_nav_calls": 15,
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "extracted": {
+        "parameter": "Operating ambient temperature",
+        "found": true,
+        "confidence": 0.97,
+        "reason": "Directly taken from the Absolute Maximum Ratings table row labeled \"Operating Ambient Temperature\" with symbol TA, note \"Range S\", and rating –20 to 85 ºC. This aligns with standard Allegro \"S\" ambient operating range parts and is consistent with other temperature-dependent data in the datasheet.",
+        "page_numbers": [
+          2
+        ],
+        "original_terminology": "Operating Ambient Temperature",
+        "values": [
+          {
+            "conditions": "Absolute Maximum Ratings; note: Range S (ambient operating temperature range for this device variant)",
+            "min_value": -20.0,
+            "max_value": 85.0,
+            "unit": "C",
+            "source_text": "Operating Ambient Temperature TA Range S –20 to 85 ºC"
+          }
+        ],
+        "list_value": [],
+        "text_value": "Operating ambient temperature range TA (Range S): –20 °C to 85 °C.",
+        "source_text": "From the Absolute Maximum Ratings table: \"Operating Ambient Temperature TA Range S –20 to 85 ºC\".",
+        "source_location": null
+      }
+    },
+    {
+      "claim_id": "a4988-storage-temperature",
+      "engine_error": "",
+      "latency_s": 199.5776750820005,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 3,
+        "get_section_text": 2,
+        "extract_table_markdown": 1,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "n_nav_calls": 7,
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "extracted": {
+        "parameter": "Storage temperature",
+        "found": true,
+        "confidence": 0.95,
+        "reason": "Explicitly given in the Absolute Maximum Ratings table as Storage Temperature (Tstg) with a range from -55 to 150 ºC.",
+        "page_numbers": [
+          2
+        ],
+        "original_terminology": "Storage Temperature Tstg",
+        "values": [
+          {
+            "conditions": "Absolute Maximum Ratings, Storage Temperature (Tstg)",
+            "min_value": -55.0,
+            "max_value": 150.0,
+            "unit": "ºC",
+            "source_text": "Storage Temperature Tstg –55 to 150 ºC"
+          }
+        ],
+        "list_value": [],
+        "text_value": "",
+        "source_text": "Absolute Maximum Ratings table entry: Storage Temperature Tstg –55 to 150 ºC",
+        "source_location": null
+      }
+    },
+    {
+      "claim_id": "a4988-reference-input-voltage-range",
+      "engine_error": "",
+      "latency_s": 233.94229656399693,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 3,
+        "extract_table_markdown": 2,
+        "get_section_text": 1,
+        "inspect_page": 1,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "n_nav_calls": 8,
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "extracted": {
+        "parameter": "Reference Input Voltage Range",
+        "found": true,
+        "confidence": 0.96,
+        "reason": "Directly read from the Electrical Characteristics table row 'Reference Input Voltage Range' (symbol VREF) with Min = 0, Max = 4, units V, under conditions TA = 25°C and VBB = 35 V (from the table header). Cross-checked against the Absolute Maximum Ratings where VREF has an absolute maximum of 5.5 V, ensuring that the 0–4 V range is the specified operating/reference input range.",
+        "page_numbers": [
+          4,
+          2
+        ],
+        "original_terminology": "Reference Input Voltage Range",
+        "values": [
+          {
+            "conditions": "Electrical Characteristics table header: TA = 25°C, VBB = 35 V (unless otherwise noted). Test Conditions cell for this row is blank, so only header conditions apply.",
+            "min_value": 0.0,
+            "max_value": 4.0,
+            "unit": "V",
+            "source_text": "Reference Input Voltage Range  VREF   0   –   4   V"
+          }
+        ],
+        "list_value": [],
+        "text_value": "",
+        "source_text": "ELECTRICAL CHARACTERISTICS at TA = 25°C, VBB = 35 V (unless otherwise noted) ... Reference Input Voltage Range  VREF   0   –   4   V",
+        "source_location": null
+      }
+    }
+  ]
+}

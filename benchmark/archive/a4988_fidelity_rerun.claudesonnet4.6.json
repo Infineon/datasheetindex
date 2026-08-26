@@ -1,0 +1,534 @@
+{
+  "timestamp": "2026-08-21T13:58:03.354758+00:00",
+  "model": "claudesonnet4.6",
+  "component": "A4988",
+  "scope": "fidelity-only",
+  "summary": {
+    "claims": 12,
+    "engine_errors": 0,
+    "fidelity_pass": 12,
+    "strict_pass": 12,
+    "flagged": 0,
+    "mean_all_tool_calls_per_claim": 7.416666666666667,
+    "mean_nav_calls_per_claim": 5.416666666666667
+  },
+  "cells": [
+    {
+      "claim_id": "a4988-logic-supply-voltage-range",
+      "engine_error": "",
+      "latency_s": 52.54447329699906,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 2,
+        "get_section_text": 2,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "n_nav_calls": 5,
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "extracted": {
+        "parameter": "Logic supply voltage range",
+        "found": true,
+        "confidence": 0.99,
+        "reason": "Explicitly listed in the Electrical Characteristics table on page 4 as 'Logic Supply Voltage Range VDD Operating 3.0 – 5.5 V'.",
+        "page_numbers": [
+          4
+        ],
+        "original_terminology": "Logic Supply Voltage Range",
+        "values": [
+          {
+            "conditions": "Operating",
+            "min_value": 3.0,
+            "max_value": 5.5,
+            "unit": "V",
+            "source_text": "Logic Supply Voltage Range VDD Operating 3.0 – 5.5 V"
+          }
+        ],
+        "list_value": [],
+        "text_value": "",
+        "source_text": "Logic Supply Voltage Range VDD Operating 3.0 – 5.5 V",
+        "source_location": null
+      }
+    },
+    {
+      "claim_id": "a4988-load-supply-voltage-range",
+      "engine_error": "",
+      "latency_s": 69.02615132200299,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 3,
+        "extract_table_markdown": 1,
+        "get_section_text": 1,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "n_nav_calls": 6,
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "extracted": {
+        "parameter": "Load supply voltage range",
+        "found": true,
+        "confidence": 0.99,
+        "reason": "Explicitly stated in the Electrical Characteristics table under Output Drivers section.",
+        "page_numbers": [
+          4
+        ],
+        "original_terminology": "Load Supply Voltage Range VBB",
+        "values": [
+          {
+            "conditions": "Operating",
+            "min_value": 8.0,
+            "max_value": 35.0,
+            "unit": "V",
+            "source_text": "Load Supply Voltage Range VBB Operating 8 – 35 V"
+          }
+        ],
+        "list_value": [],
+        "text_value": "",
+        "source_text": "Load Supply Voltage Range|VBB|Operating|8|–|35|V",
+        "source_location": null
+      }
+    },
+    {
+      "claim_id": "a4988-output-on-resistance",
+      "engine_error": "",
+      "latency_s": 72.85665910899843,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 4,
+        "extract_table_markdown": 1,
+        "get_section_text": 1,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "n_nav_calls": 7,
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "extracted": {
+        "parameter": "Output on resistance",
+        "found": true,
+        "confidence": 0.97,
+        "reason": "Found in Electrical Characteristics table, page 4. Both Source and Sink driver entries at IOUT = ±1.5 A yield Typ = 320 mΩ, Max = 430 mΩ at TA = 25°C.",
+        "page_numbers": [
+          4
+        ],
+        "original_terminology": "Output On Resistance RDSON",
+        "values": [
+          {
+            "conditions": "Source Driver, IOUT = -1.5 A, TA = 25°C, VBB = 35 V",
+            "typical_value": 320.0,
+            "max_value": 430.0,
+            "unit": "mΩ",
+            "source_text": "Source Driver, IOUT = –1.5 A – 320 430 mΩ"
+          },
+          {
+            "conditions": "Sink Driver, IOUT = 1.5 A, TA = 25°C, VBB = 35 V",
+            "typical_value": 320.0,
+            "max_value": 430.0,
+            "unit": "mΩ",
+            "source_text": "Sink Driver, IOUT = 1.5 A – 320 430 mΩ"
+          }
+        ],
+        "list_value": [],
+        "text_value": "",
+        "source_text": "Output On Resistance RDSON: Source Driver, IOUT = –1.5 A: Typ 320, Max 430 mΩ; Sink Driver, IOUT = 1.5 A: Typ 320, Max 430 mΩ",
+        "source_location": null
+      }
+    },
+    {
+      "claim_id": "a4988-body-diode-forward-voltage",
+      "engine_error": "",
+      "latency_s": 64.65419949699572,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 2,
+        "extract_table_markdown": 1,
+        "get_section_text": 1,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "n_nav_calls": 5,
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "extracted": {
+        "parameter": "Body diode forward voltage",
+        "found": true,
+        "confidence": 0.98,
+        "reason": "Clearly specified in the ELECTRICAL CHARACTERISTICS table on page 4 as Body Diode Forward Voltage VF, Sink Diode, IF = 1.5 A, Max = 1.2 V.",
+        "page_numbers": [
+          4
+        ],
+        "original_terminology": "Body Diode Forward Voltage VF, Sink Diode, IF = 1.5 A",
+        "values": [
+          {
+            "conditions": "TA = 25°C, VBB = 35 V, Sink Diode, IF = 1.5 A",
+            "max_value": 1.2,
+            "unit": "V",
+            "source_text": "Body Diode Forward Voltage VF Sink Diode, IF = 1.5 A – – 1.2 V"
+          }
+        ],
+        "list_value": [],
+        "text_value": "",
+        "source_text": "Body Diode Forward Voltage VF Sink Diode, IF = 1.5 A – – 1.2 V",
+        "source_location": null
+      }
+    },
+    {
+      "claim_id": "a4988-logic-supply-current-max",
+      "engine_error": "",
+      "latency_s": 52.1271307279967,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 2,
+        "get_section_text": 1,
+        "extract_table_markdown": 1,
+        "inspect_page": 1,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "n_nav_calls": 6,
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "extracted": {
+        "parameter": "Logic Supply Current",
+        "found": true,
+        "confidence": 0.98,
+        "reason": "Electrical Characteristics table on page 4 shows IDD with fPWM < 50 kHz has Max = 8 mA",
+        "page_numbers": [
+          4
+        ],
+        "original_terminology": "Logic Supply Current IDD",
+        "values": [
+          {
+            "conditions": "fPWM < 50 kHz, TA = 25°C, VBB = 35 V",
+            "max_value": 8.0,
+            "unit": "mA",
+            "source_text": "Logic Supply Current IDD fPWM < 50 kHz – – 8 mA"
+          },
+          {
+            "conditions": "Outputs off, TA = 25°C, VBB = 35 V",
+            "max_value": 5.0,
+            "unit": "mA",
+            "source_text": "Logic Supply Current IDD Outputs off – – 5 mA"
+          }
+        ],
+        "list_value": [],
+        "text_value": "",
+        "source_text": "Logic Supply Current IDD fPWM < 50 kHz – – 8 mA",
+        "source_location": null
+      }
+    },
+    {
+      "claim_id": "a4988-logic-input-hysteresis",
+      "engine_error": "",
+      "latency_s": 33.501095341998735,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 1,
+        "extract_table_markdown": 1,
+        "get_section_text": 1,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "n_nav_calls": 4,
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "extracted": {
+        "parameter": "Logic input hysteresis",
+        "found": true,
+        "confidence": 0.97,
+        "reason": "Explicitly listed in electrical characteristics table on page 4 as VHYS(IN) with values 5/11/19 % as a % of VDD",
+        "page_numbers": [
+          4
+        ],
+        "original_terminology": "Logic Input Hysteresis VHYS(IN)",
+        "values": [
+          {
+            "conditions": "As a % of VDD; TA = 25°C, VBB = 35 V",
+            "typical_value": 11.0,
+            "min_value": 5.0,
+            "max_value": 19.0,
+            "unit": "%",
+            "source_text": "Logic Input Hysteresis VHYS(IN) As a % of VDD 5 11 19 %"
+          }
+        ],
+        "list_value": [],
+        "text_value": "",
+        "source_text": "Logic Input Hysteresis VHYS(IN) As a % of VDD 5 11 19 %",
+        "source_location": null
+      }
+    },
+    {
+      "claim_id": "a4988-blank-time",
+      "engine_error": "",
+      "latency_s": 30.43665996499476,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 1,
+        "extract_table_markdown": 1,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "n_nav_calls": 3,
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "extracted": {
+        "parameter": "Blank time",
+        "found": true,
+        "confidence": 0.99,
+        "reason": "Explicitly listed in ELECTRICAL CHARACTERISTICS table at TA=25°C. Typical value is 1 μs, confirmed in functional description.",
+        "page_numbers": [
+          4,
+          9
+        ],
+        "original_terminology": "Blank Time tBLANK",
+        "values": [
+          {
+            "conditions": "TA = 25°C",
+            "typical_value": 1.0,
+            "min_value": 0.7,
+            "max_value": 1.3,
+            "unit": "us",
+            "source_text": "Blank Time tBLANK 0.7 1 1.3 μs"
+          }
+        ],
+        "list_value": [],
+        "text_value": "",
+        "source_text": "Blank Time tBLANK 0.7 1 1.3 μs",
+        "source_location": null
+      }
+    },
+    {
+      "claim_id": "a4988-fixed-off-time",
+      "engine_error": "",
+      "latency_s": 37.94469022699923,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 2,
+        "extract_table_markdown": 1,
+        "get_section_text": 1,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "n_nav_calls": 5,
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "extracted": {
+        "parameter": "Fixed off-time",
+        "found": true,
+        "confidence": 0.98,
+        "reason": "Typical fixed off-time when OSC = GND is 30 µs, confirmed in both the Electrical Characteristics table and the Functional Description.",
+        "page_numbers": [
+          4,
+          9
+        ],
+        "original_terminology": "Fixed Off-Time tOFF",
+        "values": [
+          {
+            "conditions": "OSC pin tied to GND (osc_pin_state = 0)",
+            "typical_value": 30.0,
+            "min_value": 20.0,
+            "max_value": 40.0,
+            "unit": "µs",
+            "source_text": "Fid OffTi tOFF OSC = VDD or GND 20 30 40 μs"
+          }
+        ],
+        "list_value": [],
+        "text_value": "",
+        "source_text": "Fixed Off-Time tOFF OSC = VDD or GND Min: 20 µs, Typ: 30 µs, Max: 40 µs; ROSC tied directly to ground — off-time internally set to 30 µs",
+        "source_location": null
+      }
+    },
+    {
+      "claim_id": "a4988-thermal-shutdown-temperature",
+      "engine_error": "",
+      "latency_s": 37.87712541700603,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 2,
+        "extract_table_markdown": 1,
+        "get_section_text": 1,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "n_nav_calls": 5,
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "extracted": {
+        "parameter": "Thermal shutdown temperature",
+        "found": true,
+        "confidence": 0.92,
+        "reason": "Electrical characteristics table on page 4 lists TTSD = 165°C (typical only; no min or max specified).",
+        "page_numbers": [
+          4
+        ],
+        "original_terminology": "Thermal Shutdown Temperature",
+        "values": [
+          {
+            "conditions": "TA = 25°C, VBB = 35V (electrical characteristics test conditions)",
+            "typical_value": 165.0,
+            "unit": "°C",
+            "source_text": "Thermal Shutdown Temperature TTSD – 165 – °C"
+          }
+        ],
+        "list_value": [],
+        "text_value": "",
+        "source_text": "Thermal Shutdown Temperature TTSD – 165 – °C",
+        "source_location": null
+      }
+    },
+    {
+      "claim_id": "a4988-operating-ambient-temperature",
+      "engine_error": "",
+      "latency_s": 32.03181631099869,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 6,
+        "get_section_text": 2,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "n_nav_calls": 9,
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "extracted": {
+        "parameter": "Operating ambient temperature",
+        "found": true,
+        "confidence": 0.98,
+        "reason": "Explicitly listed in Absolute Maximum Ratings table as –20 to 85 °C, Range S.",
+        "page_numbers": [
+          2
+        ],
+        "original_terminology": "Operating Ambient Temperature TA Range S –20 to 85 ºC",
+        "values": [
+          {
+            "conditions": "Range S",
+            "min_value": -20.0,
+            "max_value": 85.0,
+            "unit": "C",
+            "source_text": "Operating Ambient Temperature TA Range S –20 to 85 ºC"
+          }
+        ],
+        "list_value": [],
+        "text_value": "-20 to 85",
+        "source_text": "Operating Ambient Temperature TA Range S –20 to 85 ºC",
+        "source_location": null
+      }
+    },
+    {
+      "claim_id": "a4988-storage-temperature",
+      "engine_error": "",
+      "latency_s": 26.499607947000186,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 2,
+        "get_section_text": 1,
+        "extract_table_markdown": 1,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "n_nav_calls": 5,
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "extracted": {
+        "parameter": "Storage temperature",
+        "found": true,
+        "confidence": 0.99,
+        "reason": "Explicitly stated in Absolute Maximum Ratings table as Tstg = –55 to 150 ºC.",
+        "page_numbers": [
+          2
+        ],
+        "original_terminology": "Storage Temperature Tstg",
+        "values": [
+          {
+            "conditions": "Storage (no bias)",
+            "min_value": -55.0,
+            "max_value": 150.0,
+            "unit": "°C",
+            "source_text": "Storage Temperature Tstg –55 to 150 ºC"
+          }
+        ],
+        "list_value": [],
+        "text_value": "–55 to 150 ºC",
+        "source_text": "Storage Temperature Tstg –55 to 150 ºC",
+        "source_location": null
+      }
+    },
+    {
+      "claim_id": "a4988-reference-input-voltage-range",
+      "engine_error": "",
+      "latency_s": 32.17748538200249,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 2,
+        "extract_table_markdown": 1,
+        "get_section_text": 1,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "n_nav_calls": 5,
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "extracted": {
+        "parameter": "Reference input voltage range",
+        "found": true,
+        "confidence": 0.99,
+        "reason": "Explicitly stated in the Electrical Characteristics table as VREF = 0 to 4 V.",
+        "page_numbers": [
+          4
+        ],
+        "original_terminology": "Reference Input Voltage Range VREF",
+        "values": [
+          {
+            "conditions": "TA = 25°C, VBB = 35V",
+            "min_value": 0.0,
+            "max_value": 4.0,
+            "unit": "V",
+            "source_text": "Reference Input Voltage Range VREF 0 – 4 V"
+          }
+        ],
+        "list_value": [],
+        "text_value": "0 to 4 V",
+        "source_text": "Reference Input Voltage Range VREF 0 – 4 V",
+        "source_location": null
+      }
+    }
+  ]
+}

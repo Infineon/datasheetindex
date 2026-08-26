@@ -1,0 +1,2307 @@
+{
+  "schema_version": 1,
+  "timestamp": "2026-05-22T14:09:22.951492+00:00",
+  "n_repeats": 3,
+  "engine": "agentic",
+  "models": [
+    "gpt-5.1"
+  ],
+  "claim_ids": [
+    "dps310-relative-accuracy",
+    "dps310-absolute-accuracy",
+    "dps310-pressure-precision-high",
+    "dps310-pressure-temp-sensitivity",
+    "dps310-temperature-accuracy",
+    "dps310-current-1hz-low-precision",
+    "dps310-supply-voltage-vdd",
+    "dps310-meas-time-standard",
+    "dps310-pressure-rate-range",
+    "dps310-pressure-data-resolution",
+    "dps310-operating-range",
+    "si115x-adc-bit-depth",
+    "si115x-operating-temperature",
+    "si115x-supply-voltage-vdd",
+    "si115x-standby-current-1v8",
+    "si115x-active-current-3v3",
+    "si115x-processing-time",
+    "si115x-vis-response-525nm",
+    "si115x-als-resolution-mlx",
+    "si115x-supply-ripple",
+    "acs70331-bandwidth",
+    "acs70331-supply-current-max",
+    "acs70331-rise-time",
+    "acs70331-primary-resistance-qfn",
+    "acs70331-saturation-low"
+  ],
+  "runs": {
+    "gpt-5.1": [
+      {
+        "repeat": 1,
+        "source": "imported:baseline_chamber.json",
+        "started": "2026-05-21T18:59:42.582930+00:00",
+        "cells": {
+          "dps310-relative-accuracy": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.96,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 75.71143650299928,
+            "usage": {
+              "input_tokens": 83428,
+              "output_tokens": 6817,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "get_section_text": 3,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 13
+          },
+          "dps310-absolute-accuracy": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 144.02361364300305,
+            "usage": {
+              "input_tokens": 68221,
+              "output_tokens": 9874,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 2,
+              "extract_table_markdown": 1,
+              "get_section_text": 3,
+              "list_experiments": 1,
+              "get_ground_truth_graph": 1,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 12
+          },
+          "dps310-pressure-precision-high": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.96,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 73.3830497579911,
+            "usage": {
+              "input_tokens": 59399,
+              "output_tokens": 8213,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 1,
+              "get_section_text": 1,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 9
+          },
+          "dps310-pressure-temp-sensitivity": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 96.86878201400395,
+            "usage": {
+              "input_tokens": 44593,
+              "output_tokens": 7153,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "get_section_text": 2,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 12
+          },
+          "dps310-temperature-accuracy": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.92,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 146.7034872899967,
+            "usage": {
+              "input_tokens": 58600,
+              "output_tokens": 9708,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "list_experiments": 1,
+              "get_section_text": 2,
+              "extract_table_markdown": 1,
+              "get_experiment_metadata": 1,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 12
+          },
+          "dps310-current-1hz-low-precision": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 98.50062181100657,
+            "usage": {
+              "input_tokens": 59426,
+              "output_tokens": 6994,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "extract_table_markdown": 2,
+              "get_section_text": 2,
+              "list_experiments": 1,
+              "get_ground_truth_graph": 1,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 13
+          },
+          "dps310-supply-voltage-vdd": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.98,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 104.08099365000089,
+            "usage": {
+              "input_tokens": 74912,
+              "output_tokens": 7129,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 2,
+              "list_experiments": 1,
+              "get_section_text": 3,
+              "extract_table_markdown": 2,
+              "get_experiment_metadata": 3,
+              "cross_sensor_check": 1,
+              "query_dataset": 2,
+              "submit_claim_result": 1
+            },
+            "n_steps": 17
+          },
+          "dps310-meas-time-standard": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 100.50114555600157,
+            "usage": {
+              "input_tokens": 53517,
+              "output_tokens": 7914,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 4,
+              "list_experiments": 1,
+              "get_section_text": 4,
+              "extract_table_markdown": 2,
+              "get_experiment_metadata": 1,
+              "get_ground_truth_graph": 1,
+              "query_dataset": 1,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 18
+          },
+          "dps310-pressure-rate-range": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 154.06991564598866,
+            "usage": {
+              "input_tokens": 100588,
+              "output_tokens": 9388,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 5,
+              "extract_table_markdown": 3,
+              "get_section_text": 2,
+              "list_experiments": 1,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 15
+          },
+          "dps310-pressure-data-resolution": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 149.9018178039987,
+            "usage": {
+              "input_tokens": 85838,
+              "output_tokens": 8133,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "extract_table_markdown": 4,
+              "get_section_text": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 2,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 15
+          },
+          "dps310-operating-range": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.98,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 92.26656139999977,
+            "usage": {
+              "input_tokens": 94151,
+              "output_tokens": 6512,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "get_section_text": 2,
+              "list_experiments": 1,
+              "get_experiment_metadata": 3,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 13
+          },
+          "si115x-adc-bit-depth": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.8,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 161.6436868210003,
+            "usage": {
+              "input_tokens": 99392,
+              "output_tokens": 7277,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 4,
+              "get_section_text": 4,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 13
+          },
+          "si115x-operating-temperature": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.98,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 100.15006529100356,
+            "usage": {
+              "input_tokens": 56908,
+              "output_tokens": 4800,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 2,
+              "extract_table_markdown": 4,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "query_dataset": 2,
+              "submit_claim_result": 1
+            },
+            "n_steps": 13
+          },
+          "si115x-supply-voltage-vdd": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.99,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 106.96268690400757,
+            "usage": {
+              "input_tokens": 27982,
+              "output_tokens": 6542,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "get_section_text": 2,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 10
+          },
+          "si115x-standby-current-1v8": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 122.11621720199764,
+            "usage": {
+              "input_tokens": 49074,
+              "output_tokens": 9447,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 4,
+              "get_section_text": 3,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 13
+          },
+          "si115x-active-current-3v3": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.96,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 108.57204501600063,
+            "usage": {
+              "input_tokens": 52550,
+              "output_tokens": 7757,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 5,
+              "list_experiments": 1,
+              "extract_table_markdown": 2,
+              "get_section_text": 1,
+              "get_experiment_metadata": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 13
+          },
+          "si115x-processing-time": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.94,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 129.83817237200856,
+            "usage": {
+              "input_tokens": 67077,
+              "output_tokens": 8599,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 4,
+              "extract_table_markdown": 1,
+              "get_section_text": 2,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 12
+          },
+          "si115x-vis-response-525nm": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.93,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 138.70272898100666,
+            "usage": {
+              "input_tokens": 67509,
+              "output_tokens": 8651,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 2,
+              "extract_table_markdown": 2,
+              "get_section_text": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "query_dataset": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 11
+          },
+          "si115x-als-resolution-mlx": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.8,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 114.07363426199299,
+            "usage": {
+              "input_tokens": 95148,
+              "output_tokens": 11612,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 7,
+              "list_experiments": 1,
+              "get_section_text": 2,
+              "extract_table_markdown": 6,
+              "get_experiment_metadata": 1,
+              "query_dataset": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 21
+          },
+          "si115x-supply-ripple": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.92,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 84.031250532993,
+            "usage": {
+              "input_tokens": 68473,
+              "output_tokens": 6364,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 4,
+              "extract_table_markdown": 1,
+              "get_section_text": 1,
+              "inspect_page": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 12
+          },
+          "acs70331-bandwidth": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 99.41203861299437,
+            "usage": {
+              "input_tokens": 69376,
+              "output_tokens": 6083,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "extract_table_markdown": 1,
+              "get_section_text": 3,
+              "list_experiments": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 11
+          },
+          "acs70331-supply-current-max": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 97.25931372499326,
+            "usage": {
+              "input_tokens": 83537,
+              "output_tokens": 7694,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 8,
+              "extract_table_markdown": 1,
+              "get_section_text": 3,
+              "inspect_page": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 18
+          },
+          "acs70331-rise-time": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 104.4955843409989,
+            "usage": {
+              "input_tokens": 86567,
+              "output_tokens": 7288,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 5,
+              "get_section_text": 6,
+              "list_experiments": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 15
+          },
+          "acs70331-primary-resistance-qfn": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 72.20525010100391,
+            "usage": {
+              "input_tokens": 46841,
+              "output_tokens": 4848,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 5,
+              "get_section_text": 3,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 13
+          },
+          "acs70331-saturation-low": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 118.6050679829932,
+            "usage": {
+              "input_tokens": 92568,
+              "output_tokens": 5636,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 5,
+              "extract_table_markdown": 1,
+              "inspect_page": 1,
+              "get_section_text": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "query_dataset": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 14
+          }
+        }
+      },
+      {
+        "repeat": 2,
+        "source": "live",
+        "started": "2026-05-22T13:37:11.222886+00:00",
+        "cells": {
+          "dps310-relative-accuracy": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.96,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 179.75930051199975,
+            "usage": {
+              "input_tokens": 108751,
+              "output_tokens": 7150,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 8,
+              "get_section_text": 3,
+              "list_experiments": 1,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 16
+          },
+          "dps310-absolute-accuracy": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.96,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 178.43001201399602,
+            "usage": {
+              "input_tokens": 61008,
+              "output_tokens": 10653,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 1,
+              "get_section_text": 2,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 2,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 11
+          },
+          "dps310-pressure-precision-high": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 162.17076599100255,
+            "usage": {
+              "input_tokens": 62190,
+              "output_tokens": 9300,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 1,
+              "get_section_text": 2,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 2,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 11
+          },
+          "dps310-pressure-temp-sensitivity": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.96,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 152.05635115600307,
+            "usage": {
+              "input_tokens": 34904,
+              "output_tokens": 7175,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 2,
+              "get_section_text": 2,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 10
+          },
+          "dps310-temperature-accuracy": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.96,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 118.38028007899993,
+            "usage": {
+              "input_tokens": 55287,
+              "output_tokens": 7868,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "get_section_text": 2,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "query_dataset": 1,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 13
+          },
+          "dps310-current-1hz-low-precision": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 116.61694811598863,
+            "usage": {
+              "input_tokens": 76643,
+              "output_tokens": 7916,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "get_section_text": 2,
+              "extract_table_markdown": 2,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 13
+          },
+          "dps310-supply-voltage-vdd": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.98,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 103.30667832799372,
+            "usage": {
+              "input_tokens": 70626,
+              "output_tokens": 6827,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 4,
+              "list_experiments": 1,
+              "get_section_text": 1,
+              "extract_table_markdown": 1,
+              "get_experiment_metadata": 6,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 17
+          },
+          "dps310-meas-time-standard": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.99,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 141.88526002000435,
+            "usage": {
+              "input_tokens": 56277,
+              "output_tokens": 9498,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 4,
+              "get_section_text": 3,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 14
+          },
+          "dps310-pressure-rate-range": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 179.22606380999787,
+            "usage": {
+              "input_tokens": 146539,
+              "output_tokens": 8360,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 4,
+              "extract_table_markdown": 4,
+              "get_section_text": 2,
+              "list_experiments": 1,
+              "get_experiment_metadata": 2,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 17
+          },
+          "dps310-pressure-data-resolution": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.93,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 187.71195630400325,
+            "usage": {
+              "input_tokens": 127201,
+              "output_tokens": 9802,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 5,
+              "get_section_text": 4,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "cross_sensor_check": 1,
+              "extract_table_markdown": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 16
+          },
+          "dps310-operating-range": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.99,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 95.39682543301024,
+            "usage": {
+              "input_tokens": 46698,
+              "output_tokens": 5115,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 4,
+              "extract_table_markdown": 1,
+              "get_section_text": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 11
+          },
+          "si115x-adc-bit-depth": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.8,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 190.1028258370061,
+            "usage": {
+              "input_tokens": 118149,
+              "output_tokens": 9975,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 6,
+              "get_section_text": 5,
+              "list_experiments": 1,
+              "get_experiment_metadata": 3,
+              "submit_claim_result": 1
+            },
+            "n_steps": 18
+          },
+          "si115x-operating-temperature": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 82.33534646299086,
+            "usage": {
+              "input_tokens": 34188,
+              "output_tokens": 4152,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "get_section_text": 1,
+              "extract_table_markdown": 2,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 11
+          },
+          "si115x-supply-voltage-vdd": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.99,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 98.68731864501024,
+            "usage": {
+              "input_tokens": 44083,
+              "output_tokens": 6150,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 2,
+              "extract_table_markdown": 1,
+              "get_section_text": 1,
+              "list_experiments": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 8
+          },
+          "si115x-standby-current-1v8": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 127.78701807998004,
+            "usage": {
+              "input_tokens": 54441,
+              "output_tokens": 7759,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 2,
+              "extract_table_markdown": 2,
+              "get_section_text": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "get_ground_truth_graph": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 11
+          },
+          "si115x-active-current-3v3": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 156.62775048200274,
+            "usage": {
+              "input_tokens": 90524,
+              "output_tokens": 7812,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 6,
+              "extract_table_markdown": 1,
+              "get_section_text": 2,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "query_dataset": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 15
+          },
+          "si115x-processing-time": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 170.90046444098698,
+            "usage": {
+              "input_tokens": 91991,
+              "output_tokens": 8434,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 9,
+              "list_experiments": 1,
+              "extract_table_markdown": 1,
+              "get_section_text": 3,
+              "get_ground_truth_graph": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 18
+          },
+          "si115x-vis-response-525nm": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 144.07495314997504,
+            "usage": {
+              "input_tokens": 48982,
+              "output_tokens": 11372,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 4,
+              "extract_table_markdown": 2,
+              "get_section_text": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 12
+          },
+          "si115x-als-resolution-mlx": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.78,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 178.76997916400433,
+            "usage": {
+              "input_tokens": 142637,
+              "output_tokens": 9583,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 19,
+              "list_experiments": 1,
+              "get_section_text": 4,
+              "get_experiment_metadata": 4,
+              "submit_claim_result": 1
+            },
+            "n_steps": 31
+          },
+          "si115x-supply-ripple": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 89.66908368299482,
+            "usage": {
+              "input_tokens": 21883,
+              "output_tokens": 8255,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 4,
+              "extract_table_markdown": 1,
+              "get_section_text": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 9
+          },
+          "acs70331-bandwidth": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.96,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 125.0946825670253,
+            "usage": {
+              "input_tokens": 41987,
+              "output_tokens": 6441,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "get_section_text": 3,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 11
+          },
+          "acs70331-supply-current-max": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 167.53150302902213,
+            "usage": {
+              "input_tokens": 73968,
+              "output_tokens": 5934,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 4,
+              "extract_table_markdown": 2,
+              "get_section_text": 2,
+              "inspect_page": 1,
+              "list_experiments": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 13
+          },
+          "acs70331-rise-time": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 149.68347715801792,
+            "usage": {
+              "input_tokens": 94549,
+              "output_tokens": 6410,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 4,
+              "get_section_text": 3,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 12
+          },
+          "acs70331-primary-resistance-qfn": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.98,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 99.91982468799688,
+            "usage": {
+              "input_tokens": 30523,
+              "output_tokens": 5466,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "extract_table_markdown": 1,
+              "get_section_text": 2,
+              "list_experiments": 1,
+              "query_dataset": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 11
+          },
+          "acs70331-saturation-low": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.96,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 172.8296786469873,
+            "usage": {
+              "input_tokens": 76091,
+              "output_tokens": 6109,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "extract_table_markdown": 1,
+              "get_section_text": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "query_dataset": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 11
+          }
+        }
+      },
+      {
+        "repeat": 3,
+        "source": "live",
+        "started": "2026-05-22T13:53:31.805976+00:00",
+        "cells": {
+          "dps310-relative-accuracy": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 103.74848189300974,
+            "usage": {
+              "input_tokens": 44459,
+              "output_tokens": 6565,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "get_section_text": 2,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 12
+          },
+          "dps310-absolute-accuracy": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 178.28263773300569,
+            "usage": {
+              "input_tokens": 86912,
+              "output_tokens": 7577,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 2,
+              "inspect_page": 1,
+              "get_section_text": 3,
+              "list_experiments": 1,
+              "get_experiment_metadata": 2,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 13
+          },
+          "dps310-pressure-precision-high": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.96,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 163.55668494099518,
+            "usage": {
+              "input_tokens": 114671,
+              "output_tokens": 7376,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 1,
+              "get_section_text": 3,
+              "extract_table_markdown": 2,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 12
+          },
+          "dps310-pressure-temp-sensitivity": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 115.5623644249863,
+            "usage": {
+              "input_tokens": 41513,
+              "output_tokens": 6060,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 1,
+              "get_section_text": 1,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 9
+          },
+          "dps310-temperature-accuracy": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.96,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 130.54318276100093,
+            "usage": {
+              "input_tokens": 51229,
+              "output_tokens": 5861,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 1,
+              "get_section_text": 1,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 2,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 10
+          },
+          "dps310-current-1hz-low-precision": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.93,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 147.1419911980047,
+            "usage": {
+              "input_tokens": 69234,
+              "output_tokens": 7963,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "extract_table_markdown": 2,
+              "get_section_text": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 2,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 13
+          },
+          "dps310-supply-voltage-vdd": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.99,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 99.84749792702496,
+            "usage": {
+              "input_tokens": 57748,
+              "output_tokens": 5410,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "list_experiments": 1,
+              "get_section_text": 3,
+              "extract_table_markdown": 1,
+              "get_experiment_metadata": 1,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 13
+          },
+          "dps310-meas-time-standard": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.99,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 118.38705638400279,
+            "usage": {
+              "input_tokens": 61170,
+              "output_tokens": 5963,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 5,
+              "get_section_text": 3,
+              "extract_table_markdown": 3,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 16
+          },
+          "dps310-pressure-rate-range": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 106.20401389300241,
+            "usage": {
+              "input_tokens": 49193,
+              "output_tokens": 5447,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 5,
+              "list_experiments": 1,
+              "get_section_text": 2,
+              "extract_table_markdown": 3,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 15
+          },
+          "dps310-pressure-data-resolution": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 155.4307169560052,
+            "usage": {
+              "input_tokens": 131403,
+              "output_tokens": 7369,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 7,
+              "extract_table_markdown": 3,
+              "get_section_text": 3,
+              "list_experiments": 1,
+              "get_experiment_metadata": 2,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 20
+          },
+          "dps310-operating-range": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.99,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 98.6142093789822,
+            "usage": {
+              "input_tokens": 58433,
+              "output_tokens": 5379,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 5,
+              "get_section_text": 2,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 13
+          },
+          "si115x-adc-bit-depth": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.88,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 184.96223736199317,
+            "usage": {
+              "input_tokens": 171459,
+              "output_tokens": 9546,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 8,
+              "get_section_text": 4,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "extract_table_markdown": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 18
+          },
+          "si115x-operating-temperature": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 94.75723850898794,
+            "usage": {
+              "input_tokens": 31772,
+              "output_tokens": 4842,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "extract_table_markdown": 2,
+              "get_section_text": 3,
+              "list_experiments": 1,
+              "query_dataset": 3,
+              "submit_claim_result": 1
+            },
+            "n_steps": 15
+          },
+          "si115x-supply-voltage-vdd": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 161.28512303999742,
+            "usage": {
+              "input_tokens": 72113,
+              "output_tokens": 8522,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "get_section_text": 2,
+              "extract_table_markdown": 2,
+              "list_experiments": 1,
+              "get_experiment_metadata": 2,
+              "submit_claim_result": 1
+            },
+            "n_steps": 13
+          },
+          "si115x-standby-current-1v8": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.96,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 114.01605242100777,
+            "usage": {
+              "input_tokens": 47906,
+              "output_tokens": 6542,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 1,
+              "extract_table_markdown": 1,
+              "get_section_text": 2,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 9
+          },
+          "si115x-active-current-3v3": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.93,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 148.19757260099868,
+            "usage": {
+              "input_tokens": 114025,
+              "output_tokens": 8632,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 6,
+              "get_section_text": 3,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "query_dataset": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 16
+          },
+          "si115x-processing-time": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 122.3053648659843,
+            "usage": {
+              "input_tokens": 49308,
+              "output_tokens": 6216,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 5,
+              "get_section_text": 1,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 12
+          },
+          "si115x-vis-response-525nm": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.95,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 245.48363511500065,
+            "usage": {
+              "input_tokens": 64918,
+              "output_tokens": 11293,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 2,
+              "extract_table_markdown": 3,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "inspect_page": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 11
+          },
+          "si115x-als-resolution-mlx": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.8,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 277.56686766899657,
+            "usage": {
+              "input_tokens": 264849,
+              "output_tokens": 11172,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 15,
+              "get_section_text": 4,
+              "extract_table_markdown": 2,
+              "list_experiments": 1,
+              "get_experiment_metadata": 2,
+              "cross_sensor_check": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 28
+          },
+          "si115x-supply-ripple": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 180.0264189139998,
+            "usage": {
+              "input_tokens": 51420,
+              "output_tokens": 8403,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 2,
+              "extract_table_markdown": 1,
+              "inspect_page": 1,
+              "list_experiments": 1,
+              "get_ground_truth_graph": 1,
+              "get_experiment_metadata": 1,
+              "query_dataset": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 11
+          },
+          "acs70331-bandwidth": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 113.1932781249925,
+            "usage": {
+              "input_tokens": 28116,
+              "output_tokens": 5971,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "get_section_text": 2,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 10
+          },
+          "acs70331-supply-current-max": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 171.97683910201886,
+            "usage": {
+              "input_tokens": 80307,
+              "output_tokens": 7580,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 6,
+              "extract_table_markdown": 1,
+              "get_section_text": 3,
+              "inspect_page": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 4,
+              "submit_claim_result": 1
+            },
+            "n_steps": 19
+          },
+          "acs70331-rise-time": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 124.48049160800292,
+            "usage": {
+              "input_tokens": 32593,
+              "output_tokens": 5466,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 4,
+              "get_section_text": 2,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 11
+          },
+          "acs70331-primary-resistance-qfn": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.97,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 101.08006594399922,
+            "usage": {
+              "input_tokens": 27959,
+              "output_tokens": 5743,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 2,
+              "get_section_text": 2,
+              "extract_table_markdown": 1,
+              "list_experiments": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 9
+          },
+          "acs70331-saturation-low": {
+            "fidelity": {
+              "found_expected": true,
+              "found_actual": true,
+              "found_correct": true,
+              "value_pass": true,
+              "confidence": 0.9,
+              "failure_reason": null,
+              "overall_pass": true
+            },
+            "latency_s": 141.297741538001,
+            "usage": {
+              "input_tokens": 47633,
+              "output_tokens": 5656,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            "engine_error": "",
+            "n_tool_calls_by_tool": {
+              "build_datasheet": 1,
+              "search_text": 3,
+              "extract_table_markdown": 1,
+              "get_section_text": 2,
+              "inspect_page": 1,
+              "list_experiments": 1,
+              "get_experiment_metadata": 1,
+              "submit_claim_result": 1
+            },
+            "n_steps": 12
+          }
+        }
+      }
+    ]
+  },
+  "aggregate": {
+    "gpt-5.1": {
+      "fidelity": {
+        "per_run": [
+          25,
+          25,
+          25
+        ],
+        "mean": 25,
+        "std": 0.0
+      },
+      "confidence": {
+        "per_run": [
+          0.9488,
+          0.9531999999999999,
+          0.9524
+        ],
+        "mean": 0.9514666666666667,
+        "std": 0.0023437861108329206
+      },
+      "latency_s": {
+        "per_run": [
+          111.76316668879939,
+          142.75817391188,
+          143.91791057216003
+        ],
+        "mean": 132.8130837242798,
+        "std": 18.238983049522137
+      },
+      "engine_errors": {
+        "per_run": [
+          0,
+          0,
+          0
+        ],
+        "total": 0
+      },
+      "claim_stability": {
+        "stable": 25,
+        "flipped": 0,
+        "flipped_claims": []
+      }
+    }
+  }
+}

@@ -3,11 +3,20 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
+      # `benchmark/archive/` holds archived model outputs that published
+      # results are computed from. It is evidence, and a hook that rewrites it
+      # -- even to append a newline -- makes the released bytes differ from the
+      # ones that produced the numbers. Excluded from both fixers for that
+      # reason, not for convenience.
       - id: trailing-whitespace
+        exclude: ^benchmark/archive/
       - id: end-of-file-fixer
+        exclude: ^benchmark/archive/
       - id: check-yaml
       - id: check-added-large-files
-        args: ['--maxkb=1000', '--enforce-all']
+        # The archive carries several multi-MB result files; they are the point
+        # of the release, so raise the ceiling rather than exclude the check.
+        args: ['--maxkb=3000', '--enforce-all']
 
   # uv hooks - keep uv.lock in sync with pyproject.toml
   - repo: https://github.com/astral-sh/uv-pre-commit

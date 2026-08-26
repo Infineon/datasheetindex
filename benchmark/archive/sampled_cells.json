@@ -1,0 +1,156 @@
+{
+  "seed": 0,
+  "n": 30,
+  "sample": [
+    {
+      "claim_id": "acs70331-rise-time",
+      "engine": "agentic",
+      "model": "claudesonnet4.6"
+    },
+    {
+      "claim_id": "acs70331-primary-resistance-qfn",
+      "engine": "agentic",
+      "model": "claudesonnet4.6"
+    },
+    {
+      "claim_id": "dps310-temperature-accuracy",
+      "engine": "agentic",
+      "model": "claudesonnet4.6"
+    },
+    {
+      "claim_id": "dps310-absolute-accuracy",
+      "engine": "agentic",
+      "model": "claudesonnet4.6"
+    },
+    {
+      "claim_id": "dps310-pressure-precision-high",
+      "engine": "agentic",
+      "model": "claudesonnet4.6"
+    },
+    {
+      "claim_id": "dps310-current-1hz-low-precision",
+      "engine": "agentic",
+      "model": "claudesonnet4.6"
+    },
+    {
+      "claim_id": "si115x-adc-bit-depth",
+      "engine": "agentic",
+      "model": "claudesonnet4.6"
+    },
+    {
+      "claim_id": "si115x-standby-current-1v8",
+      "engine": "agentic",
+      "model": "claudesonnet4.6"
+    },
+    {
+      "claim_id": "si115x-operating-temperature",
+      "engine": "agentic",
+      "model": "claudesonnet4.6"
+    },
+    {
+      "claim_id": "si115x-supply-voltage-vdd",
+      "engine": "agentic",
+      "model": "claudesonnet4.6"
+    },
+    {
+      "claim_id": "acs70331-primary-resistance-qfn",
+      "engine": "agentic",
+      "model": "gpt-5.1"
+    },
+    {
+      "claim_id": "acs70331-saturation-low",
+      "engine": "agentic",
+      "model": "gpt-5.1"
+    },
+    {
+      "claim_id": "dps310-absolute-accuracy",
+      "engine": "agentic",
+      "model": "gpt-5.1"
+    },
+    {
+      "claim_id": "dps310-supply-voltage-vdd",
+      "engine": "agentic",
+      "model": "gpt-5.1"
+    },
+    {
+      "claim_id": "dps310-pressure-data-resolution",
+      "engine": "agentic",
+      "model": "gpt-5.1"
+    },
+    {
+      "claim_id": "dps310-relative-accuracy",
+      "engine": "agentic",
+      "model": "gpt-5.1"
+    },
+    {
+      "claim_id": "si115x-operating-temperature",
+      "engine": "agentic",
+      "model": "gpt-5.1"
+    },
+    {
+      "claim_id": "si115x-adc-bit-depth",
+      "engine": "agentic",
+      "model": "gpt-5.1"
+    },
+    {
+      "claim_id": "si115x-als-resolution-mlx",
+      "engine": "agentic",
+      "model": "gpt-5.1"
+    },
+    {
+      "claim_id": "si115x-standby-current-1v8",
+      "engine": "agentic",
+      "model": "gpt-5.1"
+    },
+    {
+      "claim_id": "acs70331-rise-time",
+      "engine": "agentic",
+      "model": "qwen3.6-27b"
+    },
+    {
+      "claim_id": "acs70331-supply-current-max",
+      "engine": "agentic",
+      "model": "qwen3.6-27b"
+    },
+    {
+      "claim_id": "dps310-temperature-accuracy",
+      "engine": "agentic",
+      "model": "qwen3.6-27b"
+    },
+    {
+      "claim_id": "dps310-meas-time-standard",
+      "engine": "agentic",
+      "model": "qwen3.6-27b"
+    },
+    {
+      "claim_id": "dps310-absolute-accuracy",
+      "engine": "agentic",
+      "model": "qwen3.6-27b"
+    },
+    {
+      "claim_id": "dps310-pressure-temp-sensitivity",
+      "engine": "agentic",
+      "model": "qwen3.6-27b"
+    },
+    {
+      "claim_id": "si115x-adc-bit-depth",
+      "engine": "agentic",
+      "model": "qwen3.6-27b"
+    },
+    {
+      "claim_id": "si115x-supply-ripple",
+      "engine": "agentic",
+      "model": "qwen3.6-27b"
+    },
+    {
+      "claim_id": "si115x-operating-temperature",
+      "engine": "agentic",
+      "model": "qwen3.6-27b"
+    },
+    {
+      "claim_id": "si115x-vis-response-525nm",
+      "engine": "agentic",
+      "model": "qwen3.6-27b"
+    }
+  ]
+}

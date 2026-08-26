@@ -1,0 +1,240 @@
+{
+  "timestamp": "2026-07-26T10:37:32.260074+00:00",
+  "model": "claudesonnet4.6",
+  "component": "A4988",
+  "scope": "fidelity-only",
+  "summary": {
+    "claims": 12,
+    "engine_errors": 0,
+    "fidelity_pass": 12,
+    "strict_pass": 12,
+    "flagged": 0,
+    "mean_all_tool_calls_per_claim": 7.25,
+    "mean_nav_calls_per_claim": 5.25
+  },
+  "cells": [
+    {
+      "claim_id": "a4988-logic-supply-voltage-range",
+      "engine_error": "",
+      "latency_s": 52.565690773000824,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 3,
+        "get_section_text": 1,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "n_nav_calls": 5
+    },
+    {
+      "claim_id": "a4988-load-supply-voltage-range",
+      "engine_error": "",
+      "latency_s": 61.374909430000116,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 3,
+        "get_section_text": 1,
+        "extract_table_markdown": 1,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "n_nav_calls": 6
+    },
+    {
+      "claim_id": "a4988-output-on-resistance",
+      "engine_error": "",
+      "latency_s": 56.92407893500058,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 3,
+        "get_section_text": 2,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "n_nav_calls": 6
+    },
+    {
+      "claim_id": "a4988-body-diode-forward-voltage",
+      "engine_error": "",
+      "latency_s": 64.04570683900238,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 1,
+        "get_section_text": 1,
+        "inspect_page": 1,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "n_nav_calls": 4
+    },
+    {
+      "claim_id": "a4988-logic-supply-current-max",
+      "engine_error": "",
+      "latency_s": 53.40821660999791,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 1,
+        "get_section_text": 1,
+        "extract_table_markdown": 1,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "n_nav_calls": 4
+    },
+    {
+      "claim_id": "a4988-logic-input-hysteresis",
+      "engine_error": "",
+      "latency_s": 51.497455591998005,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 4,
+        "extract_table_markdown": 1,
+        "get_section_text": 1,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "n_nav_calls": 7
+    },
+    {
+      "claim_id": "a4988-blank-time",
+      "engine_error": "",
+      "latency_s": 36.211169474998314,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 2,
+        "get_section_text": 2,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "n_nav_calls": 5
+    },
+    {
+      "claim_id": "a4988-fixed-off-time",
+      "engine_error": "",
+      "latency_s": 50.41490740599693,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 2,
+        "extract_table_markdown": 1,
+        "get_section_text": 2,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "n_nav_calls": 6
+    },
+    {
+      "claim_id": "a4988-thermal-shutdown-temperature",
+      "engine_error": "",
+      "latency_s": 40.637032067999826,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 2,
+        "extract_table_markdown": 1,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "n_nav_calls": 4
+    },
+    {
+      "claim_id": "a4988-operating-ambient-temperature",
+      "engine_error": "",
+      "latency_s": 34.46027052000136,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 4,
+        "get_section_text": 2,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "n_nav_calls": 7
+    },
+    {
+      "claim_id": "a4988-storage-temperature",
+      "engine_error": "",
+      "latency_s": 34.98974225100392,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 1,
+        "get_section_text": 1,
+        "extract_table_markdown": 1,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "n_nav_calls": 4
+    },
+    {
+      "claim_id": "a4988-reference-input-voltage-range",
+      "engine_error": "",
+      "latency_s": 35.86562734600011,
+      "n_tool_calls_by_tool": {
+        "build_datasheet": 1,
+        "search_text": 2,
+        "get_section_text": 2,
+        "submit_extraction": 1,
+        "submit_chamber_outcome": 1
+      },
+      "fidelity_pass": true,
+      "strict_pass": true,
+      "fidelity_failure_reason": null,
+      "detector_flagged": false,
+      "detector_rules": [],
+      "n_nav_calls": 5
+    }
+  ],
+  "provenance_note": "This run predates the extracted-payload persistence added to scripts/fourth_component_fidelity.py; per-cell `extracted` is absent, so the 12/12 fidelity and strict figures here cannot be re-scored offline by a third party -- only re-run. The n_nav_calls field and both summary means were backfilled from the stored per-tool counts (no model calls)."
+}
