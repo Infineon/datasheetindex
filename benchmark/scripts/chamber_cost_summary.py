@@ -14,10 +14,11 @@ patch). Where the results file lacks agentic usage, we fall back to the
 trace files and aggregate `final_output` + one-per-turn `tool_call`.
 
 Pricing is documented inline. Sonnet uses Anthropic's public list; gpt-5.1
-uses OpenAI's public list (the Azure passthrough on the internal gateway
-may differ); qwen3.6-27b uses a hosted-vLLM representative because the
-internal gateway's per-token cost is project-internal. All figures are
-labelled with their pricing source.
+uses OpenAI's public list (a gateway that fronts a different provider for the
+same alias may bill differently); qwen3.6-27b uses a hosted-vLLM representative
+rate, since a self-hosted model's real per-token cost depends on whoever runs
+it. All figures are labelled with their pricing source, and a reproduction
+should substitute its own gateway's rates.
 
 Usage:
     uv run python scripts/chamber_cost_summary.py

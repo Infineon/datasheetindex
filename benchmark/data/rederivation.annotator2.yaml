@@ -17,7 +17,7 @@
 # empty and say so in notes. An honest abstention is a result; a guess is
 # not, and abstentions are reported separately.
 metadata:
-  annotator: 'Anna Polizzotto'  # FILL IN: your name
+  annotator: 'annotator-2'
   n_claims: 25
   withheld_fields:
     - value_contains

@@ -319,6 +319,37 @@ _VALID_LLM_LABELS: frozenset[str] = frozenset(
 )
 
 
+def _create_llm_assist_client(anthropic_cls: Any) -> Any:
+    """Build the Anthropic client for LLM-assist classification.
+
+    Factored out of `_classify_llm` so construction can be exercised (and
+    tested -- see tests/test_classifier.py) without also triggering a real
+    `messages.create` network call. `anthropic_cls` is passed in rather than
+    imported here so callers that have already handled the "SDK not
+    importable" case (`_classify_llm`) do the import once.
+    """
+    from chamberbench.credentials import setup_credentials, tls_verify_disabled
+
+    setup_credentials()
+
+    import os
+
+    kwargs: dict[str, Any] = {"api_key": os.environ["ANTHROPIC_API_KEY"]}
+    base_url = os.environ.get("ANTHROPIC_BASE_URL")
+    if base_url:
+        kwargs["base_url"] = base_url
+    if tls_verify_disabled():
+        # anthropic==1.0.0 requires an httpx2 client -- a plain httpx.Client
+        # raises TypeError at construction ("Expected an instance of
+        # `httpx2.Client`"). See datasheet_tools._create_client for the same
+        # fix and the fuller reasoning; kept consistent across both sites.
+        import httpx2
+
+        kwargs["http_client"] = httpx2.Client(verify=False)
+
+    return anthropic_cls(**kwargs)
+
+
 def _classify_llm(
     rows: list[dict[str, Any]],
     summary: dict[str, Any],
@@ -355,23 +386,7 @@ def _classify_llm(
         logger.info("LLM-assist: no unclassified steps; skipping")
         return rows
 
-    # Set up the SDK env (TLS / base_url) the same way the engines do.
-    from chamberbench.credentials import setup_credentials, tls_verify_disabled
-
-    setup_credentials()
-
-    import os
-
-    kwargs: dict[str, Any] = {"api_key": os.environ["ANTHROPIC_API_KEY"]}
-    base_url = os.environ.get("ANTHROPIC_BASE_URL")
-    if base_url:
-        kwargs["base_url"] = base_url
-    if tls_verify_disabled():
-        import httpx
-
-        kwargs["http_client"] = httpx.Client(verify=False)
-
-    client = Anthropic(**kwargs)
+    client = _create_llm_assist_client(Anthropic)
     n_classified = 0
 
     try:
@@ -580,8 +595,8 @@ def main() -> int:
     )
 
     # Load .env and set the same TLS-disable flag the chamber_collector
-    # fixture uses, so `chamber-classify --llm-assist` works against the
-    # internal LiteLLM gateway without external configuration.
+    # fixture uses, so `chamber-classify --llm-assist` works against a
+    # LiteLLM gateway without external configuration.
     if args.llm_assist:
         try:
             from dotenv import load_dotenv
@@ -595,9 +610,6 @@ def main() -> int:
                     break
         except Exception:
             logger.debug("dotenv load failed; relying on existing env", exc_info=True)
-        import os as _os
-
-        _os.environ.setdefault("DISABLE_TLS_VERIFY", "true")
 
     out = classify_run(
         traces_path=args.traces,

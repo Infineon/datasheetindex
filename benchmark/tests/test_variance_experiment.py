@@ -1,8 +1,9 @@
 """Unit tests for the variance-experiment pure functions.
 
 Fast and non-LLM: exercises aggregate_variance and import_repeat_one
-(scripts/variance_experiment.py) on synthetic inputs. The live agentic
-path is integration-only, gated behind the 1-cell smoke in the script.
+(`chamberbench.variance`, driven live by `scripts/variance.py`) on synthetic
+inputs. The live agentic path is integration-only, gated behind the 1-cell
+smoke in the script.
 """
 
 from __future__ import annotations

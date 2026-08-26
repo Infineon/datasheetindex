@@ -492,8 +492,20 @@ DEFAULT_MAX_RETRIES = 2
 
 
 def _parse_tls_verify_env(value: str | None) -> bool:
+    """Resolve ``LITELLM_TLS_VERIFY`` into an ``httpx`` ``verify`` argument.
+
+    Unset means **verify**. It used to mean the opposite, which made every
+    default install send ``LITELLM_MASTER_KEY`` to ``LITELLM_BASE_URL`` over a
+    channel an interposer could read -- and silently, since an unverified
+    connection succeeds exactly like a verified one. Nobody opted into that;
+    it was simply what an absent variable happened to select.
+
+    Disabling verification is now an explicit act: ``LITELLM_TLS_VERIFY`` set
+    to ``0``/``false``/``no``/``off`` (case-insensitive). Any other value,
+    including the empty string, verifies.
+    """
     if value is None:
-        return False
+        return True
     return value.strip().lower() not in {"0", "false", "no", "off"}
 
 
@@ -646,8 +658,11 @@ def create_llm_client(model: str | None = None) -> LlmCallable:
 
     Reads ``LITELLM_BASE_URL`` and ``LITELLM_MASTER_KEY`` from the
     environment (loading ``.env`` via python-dotenv if available).
-    TLS verification is disabled by default for compatibility with internal
-    endpoints and can be enabled with ``LITELLM_TLS_VERIFY=true``.
+    TLS verification is **on** unless ``LITELLM_TLS_VERIFY`` explicitly turns
+    it off (``0``/``false``/``no``/``off``). A gateway presenting a certificate
+    the local trust store does not accept -- a self-signed cert on a proxy you
+    run yourself is the usual case -- is the reason that opt-out exists; prefer
+    adding its CA to the trust store, because the key travels on this channel.
     Request timeout and retry policy can be tuned with
     ``LITELLM_TIMEOUT_SECONDS`` and ``LITELLM_MAX_RETRIES``.
 

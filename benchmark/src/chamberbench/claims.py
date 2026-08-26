@@ -1,8 +1,8 @@
 """Pydantic models for the chamber-grounded benchmark.
 
 These wrap (rather than replace) the production extraction models in models.py.
-A ClaimResult.extracted is a ParameterResult, so existing fidelity helpers
-(tests/eval/helpers.py) work unchanged on chamber results.
+A ClaimResult.extracted is a ParameterResult, so the fidelity helpers in
+`chamberbench.grading` work unchanged on chamber results.
 
 NOT_SPECIFIED sentinel pattern reused from models.py because the same SDK
 schema-validation constraint applies (no anyOf/null in structured output).
@@ -113,7 +113,7 @@ AGENT_VISIBLE_SPEC_FIELDS: frozenset[str] = frozenset(
         # expected_chamber_outcome and pick the right experiment.
         #
         # `chamber_experiment_hint` is intentionally NOT here: it is read
-        # server-side by chamber_eval/protocols/* (e.g. light_sensor.py
+        # server-side by chamberbench/protocols/* (e.g. light_sensor.py
         # references claim.chamber_experiment_hint directly) and is a
         # future-leak surface if a curator names a hint after the answer
         # ("validate_460ns_rise"). The agent must discover the right
@@ -175,7 +175,7 @@ class ClaimSpec(BaseModel):
     def agent_visible_dump(self) -> dict[str, Any]:
         """Projection of this spec safe to embed in the extraction prompt.
 
-        Called from `extract_chamber._render_claim_spec_for_prompt`, which
+        Called from `harness.anthropic_path._render_claim_spec_for_prompt`, which
         is the only chokepoint that serialises a `ClaimSpec` into prompt
         text. Do NOT call `model_dump_json` directly on a `ClaimSpec` for
         any agent-facing surface.

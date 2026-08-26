@@ -26,9 +26,9 @@ The two rules partition the failure space: R1 is "zero navigation"; R2 is
 "some navigation but no verification". A clean cell trips neither.
 
 Consumers:
-  * scripts/fault_injection_experiment.py -- recall on planted failures and
-    the false-positive rate on the real post-audit run.
-  * chamber_eval/quality_gates.py soft gate S9 -- a regression guard.
+  * scripts/fault_injection.py -- recall on planted failures and the
+    false-positive rate on the real post-audit run.
+  * chamberbench/quality_gates.py soft gate S9 -- a regression guard.
 """
 
 from __future__ import annotations

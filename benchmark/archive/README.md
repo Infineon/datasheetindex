@@ -36,7 +36,7 @@ files use underscores inside the model alias (`gpt-5_1`, `qwen3_6-27b`) where
 every other family uses dots (`gpt-5.1`, `qwen3.6-27b`). Historical; the
 contents are unaffected.
 
-Model aliases are the internal gateway's names, not provider snapshot IDs —
+Model aliases are the gateway's own names, not provider snapshot IDs —
 see [`../docs/reproducing.md`](../docs/reproducing.md).
 
 ## What each file is for
@@ -77,10 +77,24 @@ recomputes it from the shipped rules and fails if the two disagree.
 | `a4988_fidelity*.json` | The off-corpus fourth component. `_rerun` is the later re-run on a changed tool surface. |
 | `perturbation_sweep.json` | The controlled-perturbation sweep behind the reproducibility figure. |
 | `variance_chamber.mainrun.bak.json`, `variance_gpt_rerun.json`, `variance_qwen_r3.json` | Superseded inputs to the May consolidation. Kept for provenance; **not** the published run. |
-| `variance_qwen_no_think.json` | Qwen with reasoning disabled — the 25/24/24 result that shows the instability is a serving-stack artifact. |
+| `variance_qwen_no_think.json` | Qwen with reasoning disabled: fidelity `[23, 25, 24, 24]` of 25 over four repeats, mean 24 — the result that shows the instability is a serving-stack artifact. Read `aggregate.qwen3.6-27b`, not a summary of it; the low repeat is the one that matters. |
 
 ## Regenerating
 
-Only `classifier_agreement.md` and `figures/` are outputs. Everything else is
+This directory ships **37 artifacts** — 33 `.json`, 3 `.jsonl`, 1 `.md` — plus
+this README. `../docs/regenerating.md` carries one row per artifact: which
+producer wrote it, the exact invocation, and every caveat where a recorded
+command cannot be replayed as written.
+
+Of those 37, only `classifier_agreement.md` is an output. Everything else is
 primary evidence: if a script offers to write it, it is offering to replace the
 record, and will ask for `--force` first.
+
+**There is no `figures/` here, and its absence is deliberate.** Six rendered
+PNGs used to be described as part of the archive; they are not shipped.
+Matplotlib does not render bit-for-bit reproducibly across versions, so a
+committed PNG would drift against a reader's regenerated copy and invite a
+false "this does not match". They are fully derivable from the `.json` files in
+this directory — see the Figures section of `../docs/regenerating.md` for which
+producer owns which figure and in what order to run them. The producers create
+the directory.

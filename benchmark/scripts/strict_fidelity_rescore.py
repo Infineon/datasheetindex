@@ -1,7 +1,7 @@
 """Re-score fidelity under exact-value matching instead of substring matching.
 
 `value_contains` is checked with a case-insensitive substring test
-(`tests/eval/helpers.check_value_contains`). 20 of the 25 chamber claims carry at
+(`chamberbench.grading.check_value_contains`). 20 of the 25 chamber claims carry at
 least one needle of two characters or fewer, and 8 of the 30 *numeric* needles
 are that short -- two different quantities, both true, and worth keeping apart.
 So `['1', 'hPa']` passes on "+/-0.1 hPa", "11 hPa" or "1200 hPa", and
@@ -380,7 +380,7 @@ def _structured_haystack(extracted: dict[str, Any]) -> str:
 def report_prose_only_passes(claims: dict[str, Any]) -> None:
     """Passes whose numeric needle is satisfied ONLY in model-authored prose.
 
-    This is the sharpest form of R-Pmkd's original concern about `value_contains`,
+    This is the sharpest form of a reviewer's original concern about `value_contains`,
     and it is the number the response cites. A fidelity pass that no structured
     field supports rests entirely on `source_text` / `conditions` /
     `original_terminology` -- the channel the closed-book arm shows can be

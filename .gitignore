@@ -49,6 +49,11 @@ output_*/
 # Datasheets used as local demo/test input
 *.pdf
 
+# Benchmark corpus: third-party vendor datasheets, fetched not committed.
+# The rule above covers the PDFs themselves but not the .pdf.part temp file
+# the fetcher writes, so ignore the whole directory.
+benchmark/corpus/
+
 # Subagent-driven-development scratch (ledger, briefs, review packages).
 # Also keeps hatchling from sweeping it into the sdist, as it did on 0.21.0.
 .superpowers/

@@ -63,7 +63,7 @@ from typing import Any
 # Chamber-side tool names that, if invoked before ``submit_claim_result``,
 # create the opportunity for the agent's datasheet-side ``extracted``
 # value to be biased by chamber observations. Mirrors the tool surface
-# exposed by ``datasheet_agent.chamber_tools._make_chamber_tools``.
+# exposed by ``chamberbench.harness.chamber_tools._make_chamber_tools``.
 CHAMBER_TOOL_NAMES: frozenset[str] = frozenset(
     {
         "list_experiments",

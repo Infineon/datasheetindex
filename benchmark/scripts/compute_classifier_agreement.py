@@ -402,11 +402,13 @@ def _score_one(gold_path: Path, out_md: Path | None = None, force: bool = False)
     md_lines.append("# Chamber classifier-vs-gold agreement")
     md_lines.append("")
     md_lines.append(f"Generated: {datetime.now(UTC).isoformat()}")
-    # The annotator's identity is provenance we keep, but this report is committed
-    # and would ship with any code/data release, while the submitted paper redacts
-    # the name for review. Writing it here would quietly undo that redaction, so
-    # record the *relationship* (which is the fact that bears on independence) and
-    # leave the name in the gold file's metadata, which is not part of a release.
+    # No annotator name is written here, and none is held anywhere else either.
+    # The premise this originally rested on -- "leave the name in the gold file's
+    # metadata, which is not part of a release" -- was wrong: `data/*.yaml` ships
+    # with the benchmark, which is how two real names reached a public release.
+    # Gold files now carry a non-identifying label (`annotator-1`, `annotator-2`),
+    # enforced by `tests/test_annotator_privacy.py`. What matters for independence
+    # is the *relationship* between annotator and surface, not the name.
     md_lines.append(
         "Annotator: [redacted for review; identity recorded in the gold file metadata]"
     )

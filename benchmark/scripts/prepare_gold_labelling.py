@@ -20,7 +20,7 @@ Allocation strategy: 30 cells stratified across model × component.
 All three models have 25 agentic cells with traces on disk, so the
 sample is balanced 10/10/10. claudesonnet4.6 and gpt-5.1 are from the
 2026-05-20 Responses-API-fork re-run; qwen3.6-27b is from the
-2026-05-21 re-run on the prod gateway (qwen3.5-27b is retired).
+2026-05-21 re-run (qwen3.5-27b is retired).
 Documented in the YAML metadata block.
 
 Run:
@@ -458,7 +458,9 @@ def build_gold_skeleton(
     if annotator:
         lines.append(f"  annotator: '{annotator}'")
     else:
-        lines.append("  annotator: ''  # FILL IN: your name when you start labelling")
+        lines.append(
+            "  annotator: ''  # FILL IN: a non-identifying label, e.g. 'annotator-1'"
+        )
     lines.append("  rubric_version: 1")
     lines.append("  strata:")
     for k in sorted(strata):
@@ -476,7 +478,8 @@ def build_gold_skeleton(
     lines.append(
         "    - 'extended thinking at effort=medium; reasoning is thinking-block'"
     )
-    lines.append("    - 'text. qwen3.6-27b cells are from the prod LiteLLM gateway'")
+    lines.append("    - 'text. qwen3.6-27b cells are served through a LiteLLM'")
+    lines.append("    - 'gateway to a self-hosted vLLM instance'")
     lines.append("    - '(qwen3.5-27b is retired; the qwen baseline renders datasheet'")
     lines.append("    - 'pages to images). qwen runs through the Anthropic-shape'")
     lines.append("    - 'passthrough to vLLM with reasoning enabled via the'")
@@ -600,7 +603,10 @@ def main() -> int:
     ap.add_argument(
         "--annotator",
         default="",
-        help="Pre-fill the annotator name in the metadata block",
+        help=(
+            "Pre-fill the annotator label in the metadata block. Use a "
+            "non-identifying label such as annotator-1, not a person's name"
+        ),
     )
     ap.add_argument(
         "--rebuild-auto-labels",

@@ -430,7 +430,7 @@ claims:
     verified_date: "2026-05-05"
 
   # ==========================================================================
-  # Si115x light-sensor claims (Day 10).
+  # Si115x light-sensor claims.
   #
   # Source: hardware/datasheets/light_sensor.pdf (Silicon Labs Si115x Rev. 1.4).
   # Chamber: light tunnel (lt_*); the chamber has 3 Si115x units at distinct
@@ -440,8 +440,8 @@ claims:
   # light-sensor protocol module supports two reproducibility paths today:
   #   - claim_kind="typical" -> per-channel std at fixed RGB (precision)
   #   - claim_kind="range"   -> per-channel mean inside [min, max] (envelope)
-  # claim_kind="linearity" routes to inconclusive via reason-stub (deferred to
-  # Day 13+ pending dataset and framing decisions; verified end-to-end by the
+  # claim_kind="linearity" routes to inconclusive via reason-stub (deferred
+  # pending dataset and framing decisions; verified end-to-end by a
   # later fix).
   #
   # Honest mix: 1 reproducibility-PASS (claim 11, ADC envelope) + 9 inconclusive.
@@ -769,7 +769,7 @@ claims:
     verified_by: "manual"
     verified_date: "2026-05-07"
 
-  # NOTE on the dropped linearity claim (Day 11 finding):
+  # NOTE on the dropped linearity claim:
   # An earlier draft included a `si115x-linearity-vis-525nm` claim that
   # asserted R^2 >= 0.99 inferred from the responsivity slope in Table
   # 8.3 (160 ADC Counts/(W/m^2) at 525 nm). The agent correctly observed
@@ -783,7 +783,7 @@ claims:
   # (TestStubVerdict, TestLightSensorLinearity, and
   # TestMakeStubMeasurement); we don't need a real claim to validate it.
   #
-  # The claim was dropped on Day 11. Adding a real linearity claim
+  # The claim was dropped during claim-set review. Adding a real linearity claim
   # awaits a datasheet that actually states one (or a later slice
   # that reframes the chamber benchmark to test inferred-monotonicity
   # claims explicitly, with the expected output being inconclusive).

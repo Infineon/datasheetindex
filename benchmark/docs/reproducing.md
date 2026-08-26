@@ -26,7 +26,7 @@ Every command below reads only `archive/` and `data/`, except the one marked
 | Table 1, cross-model results | `python scripts/render_paper_tables.py` |
 | Figures (dispatch, fidelity, cost/latency, perturbation) | `python scripts/render_paper_figures.py` |
 | Classifier agreement, Cohen's κ | `python scripts/compute_classifier_agreement.py` |
-| Blind re-derivation scoring | `python scripts/score_rederivation.py --derivation data/rederivation.anna.yaml` |
+| Blind re-derivation scoring | `python scripts/score_rederivation.py --derivation data/rederivation.annotator2.yaml` |
 | Strict-fidelity re-score | `python scripts/strict_fidelity_rescore.py` |
 | Reproducibility decomposition | `python scripts/repro_inconclusive_taxonomy.py` |
 | Detector false-positive scan | `python scripts/silent_failure_fp_scan.py` |
@@ -168,29 +168,83 @@ Three reasons, in decreasing order of how much they should worry you.
 **The tool surface moved.** See the version section above. This is the big one,
 and it is entirely our doing.
 
-**Model identity.** The runs were made through an internal LiteLLM gateway, so
+**Model identity.** The runs were made through a LiteLLM gateway, so
 the archive records gateway aliases (`claudesonnet4.6`, `gpt-5.1`,
-`qwen3.6-27b`) rather than provider snapshot IDs. Re-running against the public
-APIs requires choosing snapshots, and snapshot retirement will eventually make
-the originals unavailable. A full re-run of the two frontier legs — 25 claims,
-both engines, one repeat — cost about **$23** at list prices, so this is cheap
-to attempt.
+`qwen3.6-27b`) rather than provider snapshot IDs. Re-running requires choosing
+snapshots, and snapshot retirement will eventually make the originals
+unavailable. A full re-run of the two frontier legs — 25 claims, both engines,
+one repeat — cost about **$23** at list prices, so this is cheap to attempt.
+
+**Only one of those two legs runs against a provider's own API unaided.** The
+Claude leg does: `ANTHROPIC_API_KEY` with no base URL leaves the Anthropic SDK
+on its default endpoint. The GPT-5.1 leg does not —
+`openai_path._create_openai_client` raises `No gateway base URL. Set
+LITELLM_BASE_URL or ANTHROPIC_BASE_URL.` when neither is set, and
+`OPENAI_API_KEY` is read by nothing in `src/` or `scripts/` (it appears only in
+`gateway/litellm_config.yaml`, where LiteLLM reads it). To reach OpenAI without
+standing up a proxy, point the gateway variables at it directly:
+
+```bash
+export LITELLM_BASE_URL=https://api.openai.com   # /v1 is appended for you
+export LITELLM_MASTER_KEY=<your OpenAI API key>
+```
+
+The Qwen leg needs a real gateway in every case: `extra_body` →
+`chat_template_kwargs` is the only channel that reaches vLLM's
+`enable_thinking`, and it has no public-API equivalent. See
+[`gateway/README.md`](../gateway/README.md).
 
 **Qwen is a serving-stack result, and that is the point.** The Qwen3.6-27B
 instability the paper reports is a documented vLLM/reasoning-mode interaction
 ([QwenLM/Qwen3#1817](https://github.com/QwenLM/Qwen3/issues/1817)), not a
-property of the weights: with reasoning disabled the same model passes 25/24/24.
+property of the weights: with reasoning disabled the same model passes 23, 25,
+24 and 24 of 25 across four repeats (`archive/variance_qwen_no_think.json`,
+`aggregate.qwen3.6-27b.fidelity.per_run`), mean 24, with two engine errors
+across the four. The first of those repeats is imported from
+`baseline_chamber.json` rather than run fresh; `docs/regenerating.md` records
+what is and is not known about that file's provenance.
 Qwen3.6-27B is open-weights and widely hosted, so the leg can be re-run — but
 **on a different serving stack the instability may well not appear, and that
 outcome supports the paper's claim rather than contradicting it.** The paper
 argues the failure belongs to the deployment, and a deployment that does not
 reproduce it is evidence for exactly that.
 
+## Running the harness
+
+The agent harness that produced the archive **is** in this release, under
+`src/chamberbench/harness/`. It is not needed to check any number reported in
+the paper — everything in "What regenerates what" above runs against `archive/`
+alone — but it is what you need to run the agent yourself.
+
+It is a separate install tier, because Tier 1 deliberately pulls in no model
+client at all:
+
+```bash
+uv pip install -e '.[harness]'       # adds anthropic, openai, requests, datasheetindex
+uv run chamber-run --model claudesonnet4.6 --engine agentic --out results/
+```
+
+Two documents cover what follows from there:
+
+- **[`regenerating.md`](regenerating.md)** — the per-artifact manifest: which
+  producer wrote each file in `archive/`, the exact invocation, and every
+  caveat where a recorded command cannot be replayed as written.
+- **[`../gateway/README.md`](../gateway/README.md)** — the harness never calls
+  a provider directly. This is the reference LiteLLM config, the three
+  surfaces a gateway must expose, the TLS posture, and the one
+  fidelity-critical check (that `extra_body` really reaches the Qwen backend).
+
+You will also need the corpus — see [The corpus](#the-corpus) — and API
+credentials. Neither is required for anything in "What regenerates what".
+
 ## What is not here
 
-The agent harness that produced the archive. It is not needed to check any
-number reported in the paper, and releasing it is tracked separately. Both
-dispatch-level detector rules are predicates over the `datasheetindex` tool
-surface rather than over anything private, so the signals the paper recommends
-can be implemented from the library alone — they are a few dozen lines on top
-of it, and `chamberbench/silent_failure.py` is that implementation.
+The datasheet corpus. Four manufacturer datasheets, publicly downloadable but
+not ours to redistribute; see [The corpus](#the-corpus) for parts, revisions
+and checksums.
+
+Note also that both dispatch-level detector rules are predicates over the
+`datasheetindex` tool surface rather than over anything private, so the signals
+the paper recommends can be implemented from the library alone, without the
+harness — they are a few dozen lines on top of it, and
+`chamberbench/silent_failure.py` is that implementation.

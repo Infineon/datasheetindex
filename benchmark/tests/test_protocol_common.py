@@ -1,4 +1,4 @@
-"""Unit tests for `chamber_eval.protocols._common` -- pure logic, no chamber.
+"""Unit tests for `chamberbench.protocols._common` -- pure logic, no chamber.
 
 These verify the tightened condition-matching introduced in the
 chamber-paper plan. The behavioural change vs. the original

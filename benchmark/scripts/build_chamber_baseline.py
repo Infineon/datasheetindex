@@ -315,7 +315,7 @@ def main() -> int:
         "--qwen-pending-reason",
         default=(
             "vLLM upstream under maintenance on 2026-05-13 "
-            "(the internal LiteLLM gateway returned 503 with an HTML "
+            "(the LiteLLM gateway returned 503 with an HTML "
             "maintenance page on three consecutive probes). "
             "Re-execute when the gateway's vLLM health endpoint "
             "is green; data sourced from the prior agentic snapshot "

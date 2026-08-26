@@ -1,7 +1,7 @@
 """Silent-failure detector false-positive scan across models and repeats.
 
 Extends the false-positive control of the fault-injection experiment
-(``scripts/fault_injection_experiment.py``, Arm B) from the single
+(``scripts/fault_injection.py``, Arm B) from the single
 post-audit baseline to the full three-repeat variance suite, so the
 detector's zero-false-positive property is measured across all three model
 families and all repeated runs rather than one run.
@@ -147,8 +147,8 @@ def main() -> int:
     print()
     print(
         f"  NOT {base_eval} + {var_eval} = {base_eval + var_eval}. The variance suite's repeat 1 IS\n"
-        "  the post-audit baseline -- chamber_eval.import_repeat_one copies those\n"
-        "  cells in, and every repeat-1 record carries source ==\n"
+        "  the post-audit baseline -- chamberbench.variance.import_repeat_one\n"
+        "  copies those cells in, and every repeat-1 record carries source ==\n"
         '  "imported:baseline_chamber.json". Verified cell by cell: fidelity\n'
         "  verdict, n_tool_calls_by_tool and latency_s are identical for all 25\n"
         "  cells in all three models. Pooling the two files counts that run twice,\n"

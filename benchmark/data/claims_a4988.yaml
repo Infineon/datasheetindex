@@ -1,7 +1,7 @@
 # Fourth component: fidelity-only extension of the chamber benchmark.
 #
-# R-LsrC's reasons-to-reject 1 and 7 ask whether the dispatch-instrumentation
-# result generalises past the three-component corpus. The chamber's bill of
+# A reviewer asked whether the dispatch-instrumentation result generalises past
+# the three-component corpus. The chamber's bill of
 # materials already includes this Allegro A4988 motor driver, which the paper's
 # Appendix D excluded "because it adds no agentic-navigation stress" -- a
 # rationale about difficulty, not about measurability, and one that stops

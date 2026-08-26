@@ -22,26 +22,28 @@ this repository ships the dispatch-level detector rules alongside the scorer.
 
 ## What is here, and what is not
 
-This is the **scoring** half of the benchmark. It contains everything needed
-to re-derive a published number from archived model output:
+Everything needed to re-derive a published number from archived model output,
+and the harness that produced that output:
 
 | | |
 |---|---|
 | `src/chamberbench/` | the grading surface — fidelity, reproducibility, the detector rules, the quality gates |
+| `src/chamberbench/harness/` | the agent under test: the two engines, the tool surface, the runner |
 | `data/` | the 25-claim set, the 12-claim off-corpus set, and the human annotation files |
 | `archive/` | the archived model outputs every published number is computed from |
-| `scripts/` | the analyses that turn the archive into the paper's tables and figures |
+| `scripts/` | the analyses that turn the archive into the paper's tables and figures, plus the live experiment producers |
+| `gateway/` | a reference LiteLLM config for the proxy the harness calls through |
 
-It does **not** contain the agent harness that produced the archive, or the
-datasheet corpus. Neither is a licensing problem so much as a scoping one, and
-both are addressed in [`docs/reproducing.md`](docs/reproducing.md):
+The **agent harness** that produced the archive ships too, under
+`src/chamberbench/harness/` — see [Running the harness](#running-the-harness)
+below. It is a separate install tier: none of the offline reproduction needs
+it, so Tier 1 pulls in no model client at all.
 
-- **The corpus** is four manufacturer datasheets, publicly downloadable but not
-  ours to redistribute. Three of the four are third-party (Silicon
-  Laboratories, Allegro MicroSystems); the fourth is Infineon's own DPS310.
-  They are identified by part number and revision, with checksums.
-- **The harness** is the agent under test. Releasing it is tracked separately;
-  it is not needed to check any number reported in the paper.
+What is **not** here is the **datasheet corpus** — four manufacturer
+datasheets, publicly downloadable but not ours to redistribute. Three of the
+four are third-party (Silicon Laboratories, Allegro MicroSystems); the fourth
+is Infineon's own DPS310. They are identified by part number and revision, with
+checksums, in [`docs/reproducing.md`](docs/reproducing.md).
 
 ## Reproduce the published numbers, offline
 
@@ -55,8 +57,29 @@ cd benchmark
 uv venv && uv pip install -e '.[test]'
 uv run python scripts/render_paper_tables.py    # the paper's model-comparison tables
 uv run python scripts/render_paper_figures.py   # its figures
-uv run pytest -q                                # 145 tests, incl. the paper's numbers
+uv run pytest -q                                # 222 tests, incl. the paper's numbers
 ```
+
+That install is Tier 1: the grading surface, the archive, and nothing that can
+call a model. It reports **222 passed, 37 skipped**, and the 37 are not one
+group but two:
+
+- **29** cover the harness and skip because the `harness` extra is not
+  installed. They run once it is — see below.
+- **8** are `test_every_corrupt_success_is_caught`, parametrised over the ten
+  archived injection arms. They skip in **both** tiers, on the data rather
+  than the install: eight of the ten arms hold no *corrupt success* at all —
+  no cell that passed fidelity without an engine error — so there is nothing
+  for the detector to have been given a chance to miss. That is a real limit
+  on the recall evidence rather than a gap in the suite: the recall claim
+  rests on the two arms that do hold such cells,
+  `closed_book.claudesonnet4.6` (7) and `closed_book.gpt-5.1` (1), eight
+  cells in all.
+
+With the `harness` extra the suite reports **261 passed, 8 skipped, 1
+deselected**; the deselected one is the network-marked test, which
+`pyproject.toml` deselects by default and which is invisible on Tier 1
+because its module is import-skipped.
 
 `uv.lock` pins the numeric stack (numpy, pandas, matplotlib) so that a future
 release cannot silently move a table — a changed percentile or summation
@@ -89,6 +112,36 @@ And the env var reaches the *re-scoring* scripts — `regrade_archive.py`,
 `score_rederivation.py`, `strict_fidelity_rescore.py` — not the renderers,
 which print verdicts the archive already holds.
 
+## Running the harness
+
+Re-running the agent, rather than re-deriving a number from the archive, is a
+second install tier. Tier 1 above deliberately pulls in no model client at all,
+so the harness's dependencies live behind an extra:
+
+```bash
+uv pip install -e '.[harness]'   # anthropic, openai, requests, tenacity, datasheetindex
+uv run chamber-run --model claudesonnet4.6 --engine agentic --out results/
+```
+
+Without it, every Tier 2 command fails with a bare
+`ModuleNotFoundError: No module named 'anthropic'`.
+
+You will also need the corpus (see
+[`docs/reproducing.md`](docs/reproducing.md#the-corpus) for parts, revisions
+and checksums) and credentials for a gateway. Two documents cover the rest:
+
+- **[`docs/regenerating.md`](docs/regenerating.md)** — the per-artifact
+  manifest. Which producer wrote each file in `archive/`, the exact invocation,
+  and every caveat where a recorded command cannot be replayed as written.
+- **[`gateway/README.md`](gateway/README.md)** — the harness never calls a
+  provider directly. The reference LiteLLM config, the three surfaces a gateway
+  must expose, the TLS posture, and the one fidelity-critical check: that
+  `extra_body` really reaches the Qwen backend.
+
+Nothing in this section is needed to check a published number. That is the
+point of the split, and [`docs/reproducing.md`](docs/reproducing.md) keeps the
+two questions apart deliberately.
+
 ## The two axes, and why they are kept apart
 
 **Fidelity** (`chamberbench.grading`) asks whether the agent reported what the
@@ -111,11 +164,16 @@ can be stood up from the library itself.
 
 ## Version pinning
 
-**This benchmark does not import `datasheetindex`, and that is worth being
-precise about.** The scoring code here is pure Python over archived outputs, so
-nothing in it depends on the library version. What *did* depend on it was the
-agent run that produced the archive — and the tool surface has moved a long way
-since. The published runs used 0.13.0 and 0.14.0; this repository's `main` is
+**The scoring half of this benchmark does not import `datasheetindex`, and
+that is worth being precise about.** The code that re-derives a published
+number is pure Python over archived outputs, so nothing in it depends on the
+library version. (The harness does import the library — that is what it drives.
+So does exactly one script, `grounding_wrong_document.py`, which re-runs
+`locate_text` over the corpus PDFs; it is a side analysis that regenerates no
+shipped artifact and backs no published number, and it prints an install note
+rather than failing when the library or the corpus is absent.) What *did*
+depend on the library version was the agent run that produced the archive — and
+the tool surface has moved a long way since. The published runs used 0.13.0 and 0.14.0; this repository's `main` is
 0.34.0. Between 0.31 and 0.34 alone: `build_datasheet` now nudges
 `search_text` on LLM-reconstructed tables of contents, and running-headers are
 stripped from page-matched text. **Tool-call counts are not comparable across

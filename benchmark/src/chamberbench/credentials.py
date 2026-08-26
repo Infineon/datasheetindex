@@ -4,8 +4,8 @@ Nothing in the offline scoring path imports this. It exists for the
 classifier's auto-labelling pass, which is the only Tier-1 component that
 talks to a provider.
 
-This replaces ``datasheet_agent.agent.setup_sdk_environment``, which the
-benchmark previously borrowed from the internal service. That function also
+This replaces the private repository's ``agent.setup_sdk_environment``,
+which the benchmark previously borrowed from the internal service. That function also
 configured the Claude Agent SDK (stream timeouts, beta-header suppression,
 retry counts); none of that applies here, and depending on it dragged the
 whole service package -- and ``claude-agent-sdk`` -- into an otherwise
@@ -13,8 +13,8 @@ provider-agnostic benchmark.
 
 Credential resolution deliberately accepts three shapes, in order:
 
-1. ``ANTHROPIC_API_KEY`` / ``ANTHROPIC_BASE_URL`` -- the public API when the
-   base URL is unset, which is the path an external reproduction takes.
+1. ``ANTHROPIC_API_KEY`` / ``ANTHROPIC_BASE_URL`` -- the public Anthropic API
+   when the base URL is unset.
 2. ``LITELLM_MASTER_KEY`` / ``LITELLM_BASE_URL`` -- a gateway. The published
    runs were produced this way; see docs/reproducing.md for why that matters
    when comparing numbers.
@@ -22,7 +22,21 @@ Credential resolution deliberately accepts three shapes, in order:
 
 ``ANTHROPIC_BASE_URL`` is only exported when a base URL was actually found,
 so an unset gateway leaves the Anthropic SDK pointed at its own default.
-That is what makes the public-API path work with no code change.
+
+**That base-URL-optional behaviour is the Claude leg only, and the asymmetry
+is worth stating because an earlier version of this docstring did not.**
+``datasheet_tools._create_client`` omits ``base_url`` when none was resolved,
+so the Claude leg runs against the public API with a key alone.
+``openai_path._create_openai_client`` does the opposite: it raises
+``ValueError("No gateway base URL...")`` when neither ``LITELLM_BASE_URL``
+nor ``ANTHROPIC_BASE_URL`` is set, and it never reads ``OPENAI_API_KEY`` --
+that name appears only inside ``gateway/litellm_config.yaml``, i.e. it is
+read by LiteLLM, not by us. So the GPT-5.1 leg always needs a base URL, and
+reaching the public OpenAI API means pointing the gateway variables at it
+(``LITELLM_BASE_URL=https://api.openai.com`` with the OpenAI key in
+``LITELLM_MASTER_KEY``; the ``/v1`` suffix is appended for you). The Qwen leg
+needs a real gateway either way -- ``extra_body`` -> ``chat_template_kwargs``
+has no public-API equivalent. See gateway/README.md.
 """
 
 from __future__ import annotations
@@ -84,7 +98,7 @@ def setup_credentials() -> None:
 
 
 def tls_verify_disabled() -> bool:
-    """Whether to skip TLS verification (self-signed internal gateway).
+    """Whether to skip TLS verification (a gateway with a self-signed cert).
 
     Reads ``DISABLE_TLS_VERIFY``. The replaced internal helper translated that
     into ``NODE_TLS_REJECT_UNAUTHORIZED=0`` -- a *Node.js* variable, inherited

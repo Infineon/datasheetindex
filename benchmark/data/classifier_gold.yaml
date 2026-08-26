@@ -24,7 +24,7 @@ metadata:
   n_cells: 30
   target_n: 30
   labelling_mode: cell-level
-  annotator: 'meng-hsuan lin'  # FILL IN: your name when you start labelling
+  annotator: 'annotator-1'
   rubric_version: 1
   strata:
     'claudesonnet4.6|acs70331': 2
@@ -41,7 +41,8 @@ metadata:
     - 'agentic re-run. GPT cells route through the OpenAI Responses API:'
     - 'agent reasoning is a real reasoning summary. Claude cells use'
     - 'extended thinking at effort=medium; reasoning is thinking-block'
-    - 'text. qwen3.6-27b cells are from the prod LiteLLM gateway'
+    - 'text. qwen3.6-27b cells are served through a LiteLLM'
+    - 'gateway to a self-hosted vLLM instance'
     - '(qwen3.5-27b is retired; the qwen baseline renders datasheet'
     - 'pages to images). qwen runs through the Anthropic-shape'
     - 'passthrough to vLLM with reasoning enabled via the'

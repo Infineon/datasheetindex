@@ -1,8 +1,8 @@
 """Prepare the blind re-derivation of the grading surface.
 
-The paper's camera-ready deliverable, promised to R-T4Gz against RTR-5:
-a second annotator, blind to the current values, independently re-derives
-the two hand-authored fields that decide every fidelity number --
+Builds the blind worksheet for the re-derivation exercise: a second
+annotator, blind to the current values, independently re-derives the two
+hand-authored fields that decide every fidelity number --
 ``value_contains`` (the required-substring needles) and ``confidence_min``
 (the per-claim confidence floor) -- from the datasheets alone.
 
@@ -24,7 +24,7 @@ name, the prose description, the operating conditions, the expected unit,
 and which datasheet to read.
 
 Run:
-    uv run python scripts/prepare_rederivation.py --out data/rederivation.<name>.yaml
+    uv run python scripts/prepare_rederivation.py --out data/rederivation.<label>.yaml
 """
 
 from __future__ import annotations
@@ -42,7 +42,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 from chamberbench.claimsio import data_dir
 
 CLAIMS = data_dir() / "claims.yaml"
-DATASHEETS = data_dir() / "datasheets"
 
 # Fields that would hand the annotator the answer.
 WITHHELD = (
@@ -54,10 +53,18 @@ WITHHELD = (
     "claimed_max",
 )
 
-# claim-id prefix -> the datasheet to read.
+# claim-id prefix -> the name the datasheet is given inside the bundle.
+#
+# These are display names, not a location. The PDFs are not committed and do
+# not live under a fixed path: each claim carries its own ``pdf_source`` URL,
+# and the harness caches the download under ``corpus_dir()`` as
+# ``<sha256(url)[:12]>_<basename>.pdf``. So the bundle resolves bytes through
+# the claim (see ``_make_bundle``) and renames the copy to the plain name the
+# annotator sees on the ``DATASHEET:`` line -- a cache digest in the filename
+# means nothing to them.
 COMPONENT_PDF = {
     "dps310": "barometer.pdf",
-    "si115x": "fce10002ec99_light_sensor.pdf",
+    "si115x": "light_sensor.pdf",
     "acs70331": "current_sensor.pdf",
 }
 
@@ -156,7 +163,7 @@ def build(
     lines.append(
         f"  annotator: '{annotator}'"
         if annotator
-        else "  annotator: ''  # FILL IN: your name"
+        else "  annotator: ''  # FILL IN: a non-identifying label, e.g. 'annotator-1'"
     )
     lines.append(f"  n_claims: {len(claims)}")
     lines.append("  withheld_fields:")
@@ -271,7 +278,19 @@ def _audit_bundle(bundle: Path) -> tuple[list[str], list[str]]:
     return leaks, expected
 
 
-def _make_bundle(bundle: Path, skeleton: str) -> int:
+def _pdf_source(claims: list[dict[str, Any]], component: str) -> str | None:
+    """The ``pdf_source`` the claims themselves record for a component.
+
+    Taking it from the claim rather than from a second table here is what
+    stops the bundle and the graded run from ever reading different documents.
+    """
+    for claim in claims:
+        if _component(claim["id"]) == component and claim.get("pdf_source"):
+            return str(claim["pdf_source"])
+    return None
+
+
+def _make_bundle(bundle: Path, skeleton: str, claims: list[dict[str, Any]]) -> int:
     """A self-contained folder for an outside annotator -- no repo clone.
 
     The repository is not safe to hand to an outsider for this exercise. Four
@@ -288,13 +307,23 @@ def _make_bundle(bundle: Path, skeleton: str) -> int:
         GUIDE.read_text(encoding="utf-8"), encoding="utf-8"
     )
     (bundle / "rederivation.yaml").write_text(skeleton, encoding="utf-8")
-    for pdf in sorted(set(COMPONENT_PDF.values())):
-        shutil.copy2(DATASHEETS / pdf, bundle / "datasheets" / pdf)
+
+    # Imported here, not at module scope: resolving PDFs needs the harness
+    # extra, and everything else this script does -- including --help and
+    # writing the blind skeleton -- must keep working on a Tier-1 install.
+    from chamberbench.harness.anthropic_path import _resolve_pdf_to_local
+
+    copied = 0
+    for component, name in sorted(COMPONENT_PDF.items()):
+        source = _pdf_source(claims, component)
+        if source is None:
+            print(f"  WARNING: no claim names a pdf_source for {component}; skipped")
+            continue
+        shutil.copy2(_resolve_pdf_to_local(source), bundle / "datasheets" / name)
+        copied += 1
     leaks, expected = _audit_bundle(bundle)
     print(f"bundle: {bundle}")
-    print(
-        f"  README.md, rederivation.yaml, datasheets/ ({len(set(COMPONENT_PDF.values()))} PDFs)"
-    )
+    print(f"  README.md, rederivation.yaml, datasheets/ ({copied} PDFs)")
     if leaks:
         print("  LEAK AUDIT FAILED -- a NUMERIC needle (an answer) is present:")
         for line in leaks:
@@ -311,7 +340,14 @@ def main() -> int:
     ap.add_argument(
         "--out", type=Path, required=True, help="Where to write the blind skeleton"
     )
-    ap.add_argument("--annotator", default="", help="Pre-fill the annotator name")
+    ap.add_argument(
+        "--annotator",
+        default="",
+        help=(
+            "Pre-fill the annotator label. Use a non-identifying label such "
+            "as annotator-1, not a person's name"
+        ),
+    )
     ap.add_argument(
         "--force",
         action="store_true",
@@ -365,7 +401,7 @@ def main() -> int:
         # is flat, so a repo-relative DATASHEET line points at a directory that
         # is not there.
         flat, _, _ = build(claims, args.annotator, datasheet_prefix="datasheets")
-        return _make_bundle(bundle, flat)
+        return _make_bundle(bundle, flat, claims)
     return 0
 
 

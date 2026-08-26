@@ -1,0 +1,39 @@
+# Reference LiteLLM configuration for reproducing the chamber benchmark.
+#
+# The harness asks its gateway for aliases -- claudesonnet4.6, gpt-5.1,
+# qwen3.6-27b -- exactly as it did when the archive was produced. This file
+# is what maps those aliases onto models you can actually reach. That is
+# deliberate: it means no source change is needed to run the benchmark
+# against different providers, and the archive's filenames
+# (latest_chamber.qwen3.6-27b.json) keep matching what you run.
+#
+# Replace the api_key values and the qwen api_base with your own.
+# See README.md for the three surfaces this gateway must expose, and why
+# drop_params below is set to false rather than left at its default.
+
+model_list:
+  - model_name: claudesonnet4.6
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: gpt-5.1
+    litellm_params:
+      model: openai/gpt-5.1
+      api_key: os.environ/OPENAI_API_KEY
+
+  # Any OpenAI-compatible endpoint serving Qwen3.6-27B. See README.md for
+  # why enable_thinking matters and how to confirm it reached the server.
+  - model_name: qwen3.6-27b
+    litellm_params:
+      model: hosted_vllm/Qwen3.6-27B
+      api_base: os.environ/QWEN_API_BASE
+      api_key: os.environ/QWEN_API_KEY
+
+litellm_settings:
+  # Left at its default (true), LiteLLM silently discards any parameter it
+  # does not recognise -- including extra_body.chat_template_kwargs, the
+  # only channel that turns Qwen's reasoning off. A dropped flag does not
+  # error; it just runs the Qwen arm with thinking enabled. See
+  # README.md's "Fidelity: confirm the flag arrived" section.
+  drop_params: false

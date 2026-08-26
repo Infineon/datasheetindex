@@ -1,8 +1,34 @@
-"""Unit tests for the reproducibility-perturbation sweep (offline, no LLM)."""
+"""Unit tests for the reproducibility-perturbation sweep (offline, no LLM).
+
+One test at the bottom of this file, `test_build_only_writes_verified_pdf`,
+covers `scripts/perturbation.py --build-only` instead and is marked
+`network`: building the perturbed PDF needs to download the source datasheet
+on a machine that has never fetched it before. It is excluded from the
+default run by the `-m "not network"` addopts in pyproject.toml, so
+`uv run pytest -q` stays offline; run it explicitly with `-m network` (and
+network access) to exercise it.
+"""
 
 from __future__ import annotations
 
+import pytest
+
+# `pymupdf` arrives with `datasheetindex`, and `requests` with the harness
+# extra; neither is a Tier 1 dependency. Skip rather than raise a collection
+# error, so a Tier-1-only install still runs the suite. The pure sweep under
+# test lives in `chamberbench.perturbation` and needs none of this -- it is the
+# PDF-building half of `scripts/perturbation.py` that does.
+pymupdf = pytest.importorskip(
+    "pymupdf",
+    reason="needs the harness extra: uv pip install -e '.[harness]'",
+)
+requests = pytest.importorskip(
+    "requests",
+    reason="needs the harness extra: uv pip install -e '.[harness]'",
+)
+
 # pyproject sets pythonpath = ["src", "scripts"]; no sys.path surgery needed.
+import perturbation
 from chamberbench.claims import ChamberMeasurement, ClaimSpec
 from chamberbench.perturbation import sweep_claimed_max
 
@@ -53,3 +79,34 @@ def test_transition_edge_is_combined_uncertainty():
     assert fail["boundary_distance"] > fail["combined_uncertainty"]
     # combined is purely the measurement sigma (spec_tol == 0)
     assert abs(fail["combined_uncertainty"] - 0.0801) < 1e-6
+
+
+@pytest.mark.network
+def test_build_only_writes_verified_pdf(monkeypatch):
+    """`--build-only` builds and verifies the perturbed PDF without any
+    credentials and without ever reaching a model.
+
+    No API key is set, so a build that somehow needed one would raise
+    (`setup_credentials()` is never called on this path) instead of silently
+    picking up an ambient key. Skipped, not failed, if there is no network
+    route to the source datasheet -- that is an environment limit, not a
+    defect in `--build-only` itself.
+    """
+    for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "LITELLM_MASTER_KEY"):
+        monkeypatch.delenv(var, raising=False)
+
+    try:
+        path = perturbation.build_only()
+    except requests.exceptions.RequestException as exc:
+        pytest.skip("no network route to the source datasheet: " + str(exc))
+
+    assert path == perturbation.PERTURBED_PDF
+    assert path.exists()
+
+    doc = pymupdf.open(path)
+    try:
+        texts = [page.get_text() for page in doc]
+    finally:
+        doc.close()
+    assert all("1200" not in t for t in texts)
+    assert "945" in texts[0]

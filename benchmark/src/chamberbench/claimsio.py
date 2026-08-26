@@ -34,6 +34,15 @@ def archive_dir() -> Path:
     return Path(os.environ.get("CHAMBERBENCH_ARCHIVE_DIR", BENCHMARK_ROOT / "archive"))
 
 
+def corpus_dir() -> Path:
+    """Where the datasheet PDFs live.
+
+    Not committed: the corpus is third-party vendor documentation. See
+    ``docs/reproducing.md`` for the fetch step and checksums.
+    """
+    return Path(os.environ.get("CHAMBERBENCH_CORPUS_DIR", BENCHMARK_ROOT / "corpus"))
+
+
 CLAIMS_FILENAME = "claims.yaml"
 A4988_CLAIMS_FILENAME = "claims_a4988.yaml"
 

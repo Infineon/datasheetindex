@@ -48,6 +48,13 @@ library's tool surface, which is why the benchmark lives here. They catch a
 failure fidelity scoring cannot see: an agent that answers correctly without
 ever opening the document.
 
+It ships in two tiers. The first is fully offline: the grading surface, the
+archive, and the analyses reproduce every published number with no model
+client installed and no credentials. The second is the live agent harness
+that produced the archive -- all three model arms, driven through a gateway
+you supply, with a reference configuration and a per-artifact manifest saying
+which script wrote each archived file.
+
 It is a separate project under this repository, not part of the library. A
 plain `uv sync` at the root installs none of it, and the published wheel
 contains none of it. See [`benchmark/README.md`](./benchmark/README.md).

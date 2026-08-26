@@ -168,10 +168,15 @@ def test_create_llm_client_raises_partial_env(monkeypatch):
         create_llm_client()
 
 
-def test_create_llm_client_tls_verify_defaults_false(monkeypatch):
+def _verify_arg_for(monkeypatch, tls_verify: str | None) -> object:
+    """Build a client with ``LITELLM_TLS_VERIFY`` set (or unset) and report
+    the ``verify=`` argument that reached ``httpx.Client``."""
     monkeypatch.setenv("LITELLM_BASE_URL", "https://example.com")
     monkeypatch.setenv("LITELLM_MASTER_KEY", "secret")
-    monkeypatch.delenv("LITELLM_TLS_VERIFY", raising=False)
+    if tls_verify is None:
+        monkeypatch.delenv("LITELLM_TLS_VERIFY", raising=False)
+    else:
+        monkeypatch.setenv("LITELLM_TLS_VERIFY", tls_verify)
     _install_fake_dotenv(monkeypatch)
 
     seen_httpx_kwargs: dict[str, object] = {}
@@ -182,24 +187,51 @@ def test_create_llm_client_tls_verify_defaults_false(monkeypatch):
 
     llm = create_llm_client()
     assert callable(llm)
-    assert seen_httpx_kwargs["verify"] is False
+    return seen_httpx_kwargs["verify"]
 
 
-def test_create_llm_client_tls_verify_can_be_enabled(monkeypatch):
-    monkeypatch.setenv("LITELLM_BASE_URL", "https://example.com")
-    monkeypatch.setenv("LITELLM_MASTER_KEY", "secret")
-    monkeypatch.setenv("LITELLM_TLS_VERIFY", "true")
-    _install_fake_dotenv(monkeypatch)
+def test_create_llm_client_tls_verify_defaults_true(monkeypatch):
+    """An unset ``LITELLM_TLS_VERIFY`` must verify the certificate.
 
-    seen_httpx_kwargs: dict[str, object] = {}
-    _seen_openai_kwargs: dict[str, object] = {}
-    _patch_fake_clients(monkeypatch, seen_httpx_kwargs, _seen_openai_kwargs)
+    This is the security-relevant direction and the one that regressed: the
+    default used to be ``False``, so an ordinary install shipped the master
+    key to the gateway over an unauthenticated channel with nothing in the
+    call, the log or the result saying so. Asserting on the ``verify=``
+    argument that reaches ``httpx.Client`` -- rather than on
+    ``_parse_tls_verify_env`` alone -- keeps the wiring in scope, since a
+    correct parse that is never passed through fixes nothing.
+    """
+    assert _verify_arg_for(monkeypatch, None) is True
 
-    from datasheetindex.llm.client import create_llm_client
 
-    llm = create_llm_client()
-    assert callable(llm)
-    assert seen_httpx_kwargs["verify"] is True
+@pytest.mark.parametrize("spelling", ["0", "false", "no", "off"])
+def test_create_llm_client_tls_verify_opt_out_spellings(monkeypatch, spelling):
+    """Every documented opt-out spelling must still disable verification.
+
+    An escape hatch that honours one spelling and silently ignores the others
+    looks broken to exactly the reader who needs it -- a self-signed internal
+    gateway is the reason this knob exists, and that reader has no way to tell
+    "ignored" from "did not help".
+    """
+    assert _verify_arg_for(monkeypatch, spelling) is False
+
+
+@pytest.mark.parametrize("spelling", ["FALSE", "Off", " no "])
+def test_create_llm_client_tls_verify_opt_out_is_case_and_space_tolerant(
+    monkeypatch, spelling
+):
+    assert _verify_arg_for(monkeypatch, spelling) is False
+
+
+@pytest.mark.parametrize("spelling", ["true", "1", "yes", "", "  "])
+def test_create_llm_client_tls_verify_anything_else_verifies(monkeypatch, spelling):
+    """Only the four opt-out words turn verification off.
+
+    An empty or whitespace value is the accident case -- ``export
+    LITELLM_TLS_VERIFY=`` in a shell profile -- and it must fail towards
+    verifying rather than away from it.
+    """
+    assert _verify_arg_for(monkeypatch, spelling) is True
 
 
 def test_create_llm_client_timeout_and_retries_defaults(monkeypatch):

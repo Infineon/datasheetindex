@@ -39,7 +39,7 @@ def serialize_numerical(result: ParameterResult) -> str:
     tokens appeared inside the quoted row. The gate then measured "quoted the
     right row" rather than "extracted the right number" -- most of what it
     exists to measure. Demonstrated by construction in
-    tests/eval/test_helpers.py::TestSourceTextDoesNotSatisfyValueChecks.
+    tests/test_grading.py::test_serialize_numerical_excludes_source_text.
 
     Anything a case legitimately needs to match on other than a number is still
     reachable: `evaluate_case` appends `text_value` and `list_value` to the

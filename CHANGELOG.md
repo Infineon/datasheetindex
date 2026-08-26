@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **The LLM client verified no certificate unless you told it to, and nothing said so.** `_parse_tls_verify_env` returned `False` for an unset `LITELLM_TLS_VERIFY`, and that value went straight into `httpx.Client(verify=...)`, so the default install sent `LITELLM_MASTER_KEY` to `LITELLM_BASE_URL` over a channel an interposer could read. It failed silently in the worst direction: an unverified connection to an `https://` gateway succeeds exactly like a verified one, so no call, log line or result distinguished the two. Not a rare path either -- the LLM ToC fallback constructs this client automatically whenever a document's ToC scores below threshold, which 4 of 9 freshly fetched vendor datasheets do. **Unset now means verify.**
+- **The opt-out is unchanged and still spelled four ways.** `LITELLM_TLS_VERIFY=false` -- also `0`, `no`, `off`, case-insensitive and surrounding whitespace tolerated -- disables verification exactly as before. Only the meaning of *absence* moved. Everything else, including the empty string, verifies: `export LITELLM_TLS_VERIFY=` in a shell profile is an accident, and it must fail towards verifying.
+- **Pinned by tests, in both directions.** `tests/test_llm_client.py` asserts on the `verify=` argument that actually reaches `httpx.Client`, not on the parse helper alone -- a correct parse that is never wired through fixes nothing -- and covers the default plus every opt-out spelling, so neither the flip nor the escape hatch can regress unnoticed.
+
+### Compatibility at a glance
+- **This is a behaviour change for anyone pointing the library at a gateway whose certificate the local trust store does not accept** -- a self-signed cert on a proxy you run yourself is the usual case. Such a deployment worked by accident before and now raises an SSL verification error on the first LLM call. **Migration: set `LITELLM_TLS_VERIFY=false` to restore the old behaviour.** Prefer adding the gateway's CA to the trust store; the master key travels on this channel, so the opt-out is worth reserving for a proxy on `localhost` whose certificate you issued.
+- **Nothing else in the library changes.** The variable, its spellings, `LITELLM_TIMEOUT_SECONDS` and `LITELLM_MAX_RETRIES` are all as they were, and a deployment that already set `LITELLM_TLS_VERIFY` explicitly -- either way -- sees no difference.
+- **This does not make the repository verify TLS everywhere, and one path is deliberately untouched.** `index._urlopen_with_ssl_fallback`, used when a datasheet is fetched from a URL, still retries any `ssl.SSLCertVerificationError` with `CERT_NONE` after logging a warning, and has no opt-out. That is PDF download from vendor sites with improperly chained certificates, not credential-bearing traffic, and it is out of scope here -- but do not read this entry as a repository-wide guarantee.
+
 ## [0.34.0] - 2026-08-12
 
 ### Added

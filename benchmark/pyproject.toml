@@ -32,16 +32,45 @@ dependencies = [
 [project.optional-dependencies]
 # Only `classifier`'s auto-labelling pass calls a model. Every number in the
 # paper can be re-derived from the archive without this extra.
-classify = ["anthropic>=0.69", "python-dotenv>=1.0", "httpx>=0.28"]
+# httpx2 (not plain httpx) is what actually builds the client anthropic's
+# locked 1.0.0 accepts -- see harness's httpx2 comment below. httpx stays
+# declared too: other code in this extra's surface may still use it, and it
+# is not this fix's place to remove it.
+classify = ["anthropic>=0.69", "python-dotenv>=1.0", "httpx>=0.28", "httpx2>=2.0"]
 # `docs/reproducing.md` points readers at the test suite as the check that the
 # archive still reproduces the paper, so running it must not require guessing a
 # dependency.
 test = ["pytest>=8.0"]
+# The live agent harness. Tier 1 -- the grading surface and the archive -- needs
+# none of this: every number in the paper is re-derivable offline.
+harness = [
+    "anthropic>=0.69",
+    "openai>=1.60",
+    "httpx>=0.28",
+    # The locked anthropic==1.0.0 rejects a plain httpx.AsyncClient/Client
+    # as its `http_client` override (TypeError at construction: "Expected
+    # an instance of `httpx2.AsyncClient`"). openai==3.3.1 accepts either,
+    # so every client-construction site in this package (datasheet_tools,
+    # classifier, openai_path) standardizes on httpx2. Declared explicitly
+    # rather than relying on it arriving transitively through anthropic's
+    # own dependency graph -- the root pyproject.toml makes the identical
+    # argument about `jsonschema` and `mcp`: "relying on someone else's
+    # dependency graph to supply it is an implicit dependency waiting to
+    # break."
+    "httpx2>=2.0",
+    "requests>=2.32",
+    "tenacity>=9.0",
+    "python-dotenv>=1.0",
+    # Not on PyPI -- it IS this repository. Resolved from the parent directory
+    # via [tool.uv.sources] below. No version floor: the clone supplies it.
+    "datasheetindex",
+]
 
 [project.scripts]
 chamber-gates = "chamberbench.quality_gates:main"
 chamber-contamination-audit = "chamberbench.contamination_audit:main"
 chamber-classify = "chamberbench.classifier:main"
+chamber-run = "chamberbench.harness.run:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -59,8 +88,25 @@ exclude = ["archive/", "figures/"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "scripts"]
+# Deselected by default so `uv run pytest -q` stays true to the README's "No
+# network" claim (with the one already-documented exception in
+# docs/reproducing.md, which is not run under pytest at all). Opt in with
+# `pytest -m network` on a machine that has network access.
+markers = [
+    "network: needs network access (deselected by default; run with -m network)",
+]
+addopts = "-m \"not network\""
 
 [tool.ruff]
 line-length = 88
 target-version = "py313"
 src = ["src", "tests", "scripts"]
+
+# `datasheetindex` is not published to PyPI: it IS this repository. The benchmark
+# is a separate project nested inside it, so the library resolves from the parent
+# directory -- which is what makes cloning the repo sufficient for a reader.
+# No version floor: the clone supplies the version.
+# Readers on pip rather than uv install the parent first:
+#   pip install -e .. && pip install -e '.[harness]'
+[tool.uv.sources]
+datasheetindex = { path = "..", editable = true }

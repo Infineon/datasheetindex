@@ -48,7 +48,10 @@ datasheets/          the three PDFs
 
 Nothing else is needed — no repository, no Python, no install. Open
 `rederivation.yaml` in any text editor, find `annotator: ''` in the
-`metadata:` block near the top, and put your name between the quotes.
+`metadata:` block near the top, and put the label we gave you between
+the quotes — a non-identifying one such as `annotator-1`. Please do not
+put your name there: these files are published with the benchmark, and
+the label is only there to tell two annotators' files apart.
 
 ---
 
@@ -119,7 +122,7 @@ Rules of thumb, from how the field is actually used:
   form that is still certain to appear.
 - **Usually the number and the unit.** Two entries is the common case.
 - **Ranges take both ends.** A 3-48 kHz range wants both numbers.
-- **No prose, no labels, no padding.** Write `'1.7'`, not `'min 1.7'`;
+- **No prose, no labels, no padding.** Write `'12.3'`, not `'min 12.3'`;
   the word "min" is yours, not the agent's, and will never be in the
   string. For the same reason, no leading or trailing spaces — `' mVpp '`
   fails where `'mVpp'` passes.

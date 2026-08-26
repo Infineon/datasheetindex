@@ -1,11 +1,10 @@
 """Offline aggregation of repeated chamber runs.
 
-Extracted verbatim from the live-run driver (`variance_experiment.py` in the
-originating project), which cannot ship here: its module-level imports reach
-the agent harness, which is not part of this release. The aggregation itself
-is pure -- it reduces archived per-(model, repeat, claim) cells to the
-per-model mean +/- std that the paper's model-comparison table reports -- so
-it belongs in the package rather than in a script that cannot run.
+Extracted verbatim from the live-run driver, which ships here as
+`scripts/variance.py`. The aggregation itself is pure -- it reduces archived
+per-(model, repeat, claim) cells to the per-model mean +/- std that the
+paper's model-comparison table reports -- so it lives in the package, where it
+is importable without the harness extra the live driver needs.
 
 `aggregate_variance` is the entry point; the rest are its helpers.
 """

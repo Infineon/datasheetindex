@@ -19,7 +19,7 @@ datasheet states it anyway), so unit agreement is not independent
 evidence; the numeric needle is where fitting could have happened.
 
 Run:
-    uv run python scripts/score_rederivation.py --derivation data/rederivation.anna.yaml
+    uv run python scripts/score_rederivation.py --derivation data/rederivation.annotator2.yaml
 """
 
 from __future__ import annotations

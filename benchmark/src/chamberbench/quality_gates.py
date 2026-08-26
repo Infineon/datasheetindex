@@ -94,9 +94,9 @@ def _contamination_rate(
     """Return (n_with_submit, n_contaminated, rate) for the named model's
     trace file, or None when the trace file is missing.
 
-    Imports the audit module lazily so quality_gates stays importable in
-    environments that don't have the chamber_eval package installed
-    (e.g. CI smoke tests on subsets).
+    Imports `chamberbench.contamination_audit` lazily so quality_gates
+    stays importable in stripped-down environments (e.g. CI smoke tests on
+    subsets).
     """
     from chamberbench.contamination_audit import analyze_traces
 

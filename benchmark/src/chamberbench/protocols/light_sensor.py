@@ -74,7 +74,7 @@ def run(claim: ClaimSpec) -> ChamberMeasurement:
     """Compute a `ChamberMeasurement` for an Si115x claim.
 
     Branches on `claim.claim_kind`. The dispatcher in
-    `chamber_eval.reproducibility.run_protocol` reaches us by importing
+    `chamberbench.reproducibility.run_protocol` reaches us by importing
     this module's dotted path and calling `run`.
     """
     # Lazy imports so this module is cheap to load when the chamber
