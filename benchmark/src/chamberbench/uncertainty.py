@@ -111,7 +111,9 @@ if __name__ == "__main__":
 
     PRIMARY = "pressure_intake"
     REDUNDANTS = ("pressure_ambient", "pressure_downwind", "pressure_upwind")
-    ds = Dataset("wt_validate_v1", root="/tmp/cc_data", download=True)
+    from chamberbench.protocols._common import resolve_cache_root
+
+    ds = Dataset("wt_validate_v1", root=str(resolve_cache_root()), download=True)
     print(f"\nChamber-side sigma estimates ({PRIMARY} vs mean of {REDUNDANTS}):")
     print(f"{'experiment':<40s}  {'rows':>6s}  {'sigma_Pa':>9s}  {'spread_Pa':>10s}")
     for name in ds.available_experiments():

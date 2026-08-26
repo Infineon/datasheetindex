@@ -1,6 +1,6 @@
 """Engagement diagnostic protocol -- fidelity-only, no chamber-side verdict.
 
-Used for the qwen-engagement experiment (see docs/datasheetindex_chamber_benchmark.md
+Used for the qwen-engagement experiment (see docs/reproducing.md
 postmortem). Claims marked with `chamber_protocol: datasheet_agent.
 chamber_eval.protocols.engagement_diagnostic` are checked on the *agent*
 side only -- the chamber has no measurement that grounds them.

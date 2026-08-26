@@ -45,30 +45,46 @@ both are addressed in [`docs/reproducing.md`](docs/reproducing.md):
 
 ## Reproduce the published numbers, offline
 
-No API key. No network. No PDFs.
+No API key. No PDFs. No network — with two exceptions, marked in the table in
+[`docs/reproducing.md`](docs/reproducing.md): the two chamber-side analyses
+fetch the public Causal Chambers dataset (~1 MB, cached under
+`CHAMBER_CACHE_ROOT`, default `/tmp/cc_data`).
 
 ```bash
 cd benchmark
-uv venv && uv pip install -e .
+uv venv && uv pip install -e '.[test]'
 uv run python scripts/render_paper_tables.py    # the paper's model-comparison tables
 uv run python scripts/render_paper_figures.py   # its figures
+uv run pytest -q                                # 133 tests, incl. the paper's numbers
 ```
+
+`uv.lock` pins the numeric stack (numpy, pandas, matplotlib) the published
+numbers were computed with; `uv sync` uses it. An unpinned numpy is a real
+hazard for an artifact like this — a future change to a percentile or
+summation default would move a table with nothing failing.
 
 Everything under `scripts/` runs against `archive/` alone. That is the point
 of shipping the archive: the derivations are checkable without re-running a
 model, and without trusting that we ran one.
 
 To re-score the archive under a *different* grading surface — a re-derived
-claim set, stricter substrings, a different confidence floor — point the
-loader at it:
+claim set, stricter substrings, a different confidence floor — use
+`regrade_archive.py`, which runs the archived extractions back through the
+same grader that produced the published verdicts:
 
 ```bash
-CHAMBERBENCH_DATA_DIR=/path/to/your/claims uv run python scripts/render_paper_tables.py
+CHAMBERBENCH_DATA_DIR=/path/to/your/claims uv run python scripts/regrade_archive.py
 ```
 
-This is how the paper's blind re-derivation was scored, and it is the honest
-way to attack the results: the grading surface is hand-written, and a
-disagreement about it is a finding rather than a bug.
+This is the honest way to attack the results: the grading surface is
+hand-written, and a disagreement about it is a finding rather than a bug.
+
+**Two limits on that, stated up front.** Only `baseline_chamber.json` keeps the
+raw extractions, so only its 149 cells can be re-graded; the variance repeats
+store verdicts alone, and Table 1's spread therefore has to be taken on trust.
+And the env var reaches the *re-scoring* scripts — `regrade_archive.py`,
+`score_rederivation.py`, `strict_fidelity_rescore.py` — not the renderers,
+which print verdicts the archive already holds.
 
 ## The two axes, and why they are kept apart
 
@@ -101,7 +117,27 @@ HEAD is a valid experiment but not a reproduction of the paper.
 
 ## Licence and attribution
 
-MIT, as with the rest of this repository. The archived model outputs are ours
-to release; the datasheets they were derived from are not, and are fetched
-rather than vendored. The physical measurements come from the Causal Chambers
-dataset, which has its own terms — please cite Gamella et al. if you use it.
+MIT for everything we wrote — the code, the docs, the claim sets, and the
+archived model outputs. **That licence does not extend to everything in
+`archive/`.** The archived traces record what tools returned to the model, and
+those tool outputs contain short excerpts of third-party datasheets (Silicon
+Laboratories, Allegro MicroSystems) which remain their authors' copyright and
+are reproduced only so that published results can be verified. The datasheets
+themselves are not included here. [`NOTICE`](./NOTICE) states the scope
+precisely and gives a takedown contact.
+
+Physical measurements come from the Causal Chambers dataset, distributed under
+CC BY 4.0, which requires attribution:
+
+```bibtex
+@article{gamella2025chambers,
+  title   = {Causal Chambers as a Real-World Physical Testbed for {AI} Methodology},
+  author  = {Gamella, Juan L. and Peters, Jonas and B{\"u}hlmann, Peter},
+  journal = {Nature Machine Intelligence},
+  volume  = {7},
+  number  = {1},
+  pages   = {107--118},
+  year    = {2025},
+  doi     = {10.1038/s42256-024-00964-x},
+}
+```

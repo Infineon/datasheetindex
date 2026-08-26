@@ -2,10 +2,14 @@
 #
 # Each claim is verified against (a) the source datasheet PDF (fidelity) and
 # (b) the chamber data (reproducibility). The chamber's barometer is the
-# Infineon DPS310; the source datasheet lives at
-# eval/chamber/datasheets/barometer.pdf, which mirrors the chamber team's
-# own copy at hardware/datasheets/barometer.pdf in the causal-chamber repo
-# (CC BY 4.0).
+# Infineon DPS310. The datasheet is not shipped here; fetch it by part number
+# and verify the checksum in docs/reproducing.md. A copy is also mirrored at
+# hardware/datasheets/barometer.pdf in the causal-chamber repository.
+#
+# That mirror is NOT covered by the causal-chamber repository's CC BY 4.0
+# grant, which extends to the images and .csv files in its datasets. The
+# datasheets remain the copyright of their manufacturers and are mirrored
+# there for convenience only.
 #
 # Schema notes:
 #   - operating_conditions[].chamber_variable=""  -> condition is unmatchable
@@ -431,14 +435,14 @@ claims:
   # Source: hardware/datasheets/light_sensor.pdf (Silicon Labs Si115x Rev. 1.4).
   # Chamber: light tunnel (lt_*); the chamber has 3 Si115x units at distinct
   # positions (vis_1/vis_2/vis_3 + ir_1/2/3). They are NOT spatially redundant
-  # (Day-8 recon: vis_1 ~10000, vis_2 ~1500, vis_3 ~480 at fixed RGB), so the
+  # (recon: vis_1 ~10000, vis_2 ~1500, vis_3 ~480 at fixed RGB), so the
   # cross-sensor sigma protocol from the DPS310 path does not apply. The
   # light-sensor protocol module supports two reproducibility paths today:
   #   - claim_kind="typical" -> per-channel std at fixed RGB (precision)
   #   - claim_kind="range"   -> per-channel mean inside [min, max] (envelope)
   # claim_kind="linearity" routes to inconclusive via reason-stub (deferred to
   # Day 13+ pending dataset and framing decisions; verified end-to-end by the
-  # Day-9 W1 fix).
+  # later fix).
   #
   # Honest mix: 1 reproducibility-PASS (claim 11, ADC envelope) + 9 inconclusive.
   # The chamber lacks a NIST-traceable optical reference and does not expose
@@ -774,13 +778,13 @@ claims:
   # not a stated spec -- so it returned found=False with confidence
   # 0.93. The methodology's fidelity scorer correctly flagged this as
   # high-confidence-not-found, which is the right answer: the claim
-  # was thin. The Day-9 W1 reason-stub path is exercised end-to-end by
-  # the unit tests in tests/eval/test_protocol_common.py
+  # was thin. The reason-stub path is exercised end-to-end by
+  # the unit tests in tests/test_protocol_common.py
   # (TestStubVerdict, TestLightSensorLinearity, and
   # TestMakeStubMeasurement); we don't need a real claim to validate it.
   #
   # The claim was dropped on Day 11. Adding a real linearity claim
-  # awaits a datasheet that actually states one (or a Day-13+ slice
+  # awaits a datasheet that actually states one (or a later slice
   # that reframes the chamber benchmark to test inferred-monotonicity
   # claims explicitly, with the expected output being inconclusive).
 
@@ -788,7 +792,7 @@ claims:
   # ACS70331 (Allegro current sensor) -- engagement-diagnostic claims
   # ---------------------------------------------------------------------
   # Purpose: factor the training-data-recall confound out of the cross-
-  # model engagement story (see chamber_paper_plan.md "Day-15 update").
+  # model engagement story (see docs/reproducing.md).
   # The ACS70331 is a discontinued GMR-based current sensor IC; the
   # part appears in the chamber's BOM but is less indexed in public
   # corpora than DPS310 or Si115x. Claims here have NO chamber-side
@@ -849,7 +853,7 @@ claims:
       rows. Curator-error history: an earlier draft conflated
       ICC_START_UP's max with ICC's max; the model under test caught
       the mismatch and returned found=False with high confidence,
-      matching the Day-11 si115x-linearity drop pattern across a
+      matching the si115x-linearity drop pattern across a
       third component.
     expected_unit: "mA"
     claim_kind: "max"

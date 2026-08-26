@@ -5,7 +5,7 @@
 # best describes whether the classifier got this cell right.
 #
 # Allowed gold_label values (see
-# docs/chamber_failure_attribution_protocol.md for definitions):
+# docs/reproducing.md for definitions):
 #   classifier_correct                 -- classifier's per-event labels look right
 #   classifier_missed_tool_output      -- a tool returned bad content; classifier said ok
 #   classifier_missed_tool_selection   -- agent took an inefficient path; not caught

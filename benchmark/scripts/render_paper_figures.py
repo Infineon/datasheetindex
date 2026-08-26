@@ -28,7 +28,7 @@ from matplotlib.patches import Rectangle
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-from chamberbench.claimsio import archive_dir
+from chamberbench.claimsio import archive_dir, short_path
 
 BASELINE = archive_dir() / "baseline_chamber.json"
 # Cost/latency figure carries per-model error bars from the repeated runs;
@@ -342,7 +342,7 @@ def main() -> None:
         fig_cost_latency(variance),
         fig_fidelity(results, claim_ids),
     ):
-        print("  wrote", out.relative_to(PROJECT_ROOT))
+        print("  wrote", short_path(out))
     sweep = json.loads(
         (archive_dir() / "perturbation_sweep.json").read_text(encoding="utf-8")
     )

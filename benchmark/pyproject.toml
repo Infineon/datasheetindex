@@ -15,7 +15,7 @@ description = "Chamber-grounded benchmark for datasheet-extraction agents: the g
 readme = "README.md"
 requires-python = ">=3.13"
 license = "MIT"
-license-files = ["../LICENSE"]
+license-files = ["LICENSE"]
 authors = [{ name = "Infineon Technologies AG" }]
 dependencies = [
     "pydantic>=2.9",
@@ -33,6 +33,10 @@ dependencies = [
 # Only `classifier`'s auto-labelling pass calls a model. Every number in the
 # paper can be re-derived from the archive without this extra.
 classify = ["anthropic>=0.69", "python-dotenv>=1.0", "httpx>=0.28"]
+# `docs/reproducing.md` points readers at the test suite as the check that the
+# archive still reproduces the paper, so running it must not require guessing a
+# dependency.
+test = ["pytest>=8.0"]
 
 [project.scripts]
 chamber-gates = "chamberbench.quality_gates:main"

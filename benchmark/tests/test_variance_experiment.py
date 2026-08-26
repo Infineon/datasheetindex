@@ -8,12 +8,8 @@ path is integration-only, gated behind the 1-cell smoke in the script.
 from __future__ import annotations
 
 import statistics
-import sys
-from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
-
+# pyproject sets pythonpath = ["src", "scripts"]; no sys.path surgery needed.
 import chamberbench.variance as ve
 
 # ---------------------------------------------------------------------------

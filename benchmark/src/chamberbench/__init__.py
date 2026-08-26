@@ -29,12 +29,33 @@ repository-only artifact installed from ``benchmark/``.
 
 from __future__ import annotations
 
-__all__ = ["ARCHIVE_DIR", "BENCHMARK_ROOT", "DATA_DIR", "__version__"]
+from chamberbench.claimsio import (
+    archive_dir,
+    data_dir,
+    load_archive,
+    load_claim,
+    load_claims,
+)
+from chamberbench.grading import evaluate_case
+from chamberbench.reproducibility import verdict
+from chamberbench.silent_failure import detect_silent_failure
 
 __version__ = "1.0.0"
 
-from pathlib import Path
-
-BENCHMARK_ROOT = Path(__file__).resolve().parents[2]
-DATA_DIR = BENCHMARK_ROOT / "data"
-ARCHIVE_DIR = BENCHMARK_ROOT / "archive"
+# The public API is FUNCTIONS, not path constants. It used to export
+# BENCHMARK_ROOT / DATA_DIR / ARCHIVE_DIR, computed once at import -- which
+# silently ignored CHAMBERBENCH_DATA_DIR and CHAMBERBENCH_ARCHIVE_DIR, the
+# overrides the documentation tells a reproduction to set. Someone following
+# `__all__` would have got a path that quietly disregarded their override: a
+# wrong answer rather than an error.
+__all__ = [
+    "__version__",
+    "archive_dir",
+    "data_dir",
+    "detect_silent_failure",
+    "evaluate_case",
+    "load_archive",
+    "load_claim",
+    "load_claims",
+    "verdict",
+]

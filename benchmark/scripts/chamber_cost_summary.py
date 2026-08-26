@@ -3,10 +3,10 @@
 Reads:
   - `archive/latest_chamber.json`           (Sonnet, default model)
   - `archive/latest_chamber.gpt-5.1.json`
-  - `archive/latest_chamber.qwen3.5-27b.json`
-  - `archive/latest_traces.jsonl`           (agentic per-cell usage, Sonnet)
+  - `archive/latest_chamber.qwen3.6-27b.json`
+  - `archive/latest_traces.claudesonnet4.6.jsonl`  (agentic per-cell usage, Sonnet)
   - `archive/latest_traces.gpt-5.1.jsonl`
-  - `archive/latest_traces.qwen3.5-27b.jsonl`
+  - `archive/latest_traces.qwen3.6-27b.jsonl`
 
 The result JSONs carry baseline `usage` rolled up by the test runner; agentic
 usage may or may not be in the results yet (older runs predate the rollup
@@ -15,7 +15,7 @@ trace files and aggregate `final_output` + one-per-turn `tool_call`.
 
 Pricing is documented inline. Sonnet uses Anthropic's public list; gpt-5.1
 uses OpenAI's public list (the Azure passthrough on the internal gateway
-may differ); qwen3.5-27b uses a hosted-vLLM representative because the
+may differ); qwen3.6-27b uses a hosted-vLLM representative because the
 internal gateway's per-token cost is project-internal. All figures are
 labelled with their pricing source.
 
@@ -41,19 +41,19 @@ RESULTS_DIR = archive_dir()
 PRICING: dict[str, tuple[float, float, float, str]] = {
     "claudesonnet4.6": (3.00, 15.00, 0.30, "Anthropic public list"),
     "gpt-5.1": (1.25, 10.00, 0.125, "OpenAI public list (Azure gateway varies)"),
-    "qwen3.5-27b": (0.20, 0.60, 0.20, "hosted-vLLM 27B representative"),
+    "qwen3.6-27b": (0.20, 0.60, 0.20, "hosted-vLLM 27B representative"),
 }
 
 RESULT_FILES: dict[str, str] = {
     "claudesonnet4.6": "latest_chamber.json",
     "gpt-5.1": "latest_chamber.gpt-5.1.json",
-    "qwen3.5-27b": "latest_chamber.qwen3.5-27b.json",
+    "qwen3.6-27b": "latest_chamber.qwen3.6-27b.json",
 }
 
 TRACE_FILES: dict[str, str] = {
-    "claudesonnet4.6": "latest_traces.jsonl",
+    "claudesonnet4.6": "latest_traces.claudesonnet4.6.jsonl",
     "gpt-5.1": "latest_traces.gpt-5.1.jsonl",
-    "qwen3.5-27b": "latest_traces.qwen3.5-27b.jsonl",
+    "qwen3.6-27b": "latest_traces.qwen3.6-27b.jsonl",
 }
 
 

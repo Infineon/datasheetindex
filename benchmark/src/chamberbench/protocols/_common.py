@@ -5,7 +5,7 @@ protocol modules use, so adding a new component (e.g. Si115x in the light
 tunnel) doesn't require copying code from `barometer_dc_accuracy.py`.
 
 `select_steady_state_window`, `cross_sensor_sigma`, and the rest of the
-chamber-data math live in `chamber_eval/uncertainty.py`; this module
+chamber-data math live in `chamberbench/uncertainty.py`; this module
 imports from there but does not duplicate it. The reason this isn't all
 in one file: the actuator constants and condition-matching are
 protocol-shaped (they reference `ClaimSpec`), while the uncertainty
@@ -183,8 +183,8 @@ def make_stub_measurement(
 def resolve_cache_root() -> Path:
     """Default chamber-data download location; CHAMBER_CACHE_ROOT env overrides.
 
-    Lifted from per-protocol modules so a third protocol on Day 11+ does
-    not introduce yet another copy.
+    Lifted from per-protocol modules so an additional protocol does not
+    introduce yet another copy.
     """
     import os
 

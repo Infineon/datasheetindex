@@ -15,7 +15,7 @@ right", the inverse of what calibration is supposed to detect.
 
 This is a paper-richer finding than a bad calibration curve would have
 been. The methodology doc already records four known negative-class
-cases (1 Day-11 si115x-linearity drop + 3 Day-15 ACS70331 curator
+cases (1 si115x-linearity drop + 3 ACS70331 curator
 errors); all four were caught by the fidelity scorer surfacing
 high-confidence-not-found verdicts during *curation*, before the matrix
 proper ran. They live in commit history and the methodology doc, not in
@@ -39,7 +39,7 @@ What this module produces instead:
      quantity (lower = more confident) but should not be reported as a
      calibration metric in the paper.
 
-The "Day-17 = calibration analysis" plan line is therefore *executed
+The calibration analysis is therefore *executed
 in spirit* (we look at confidence behavior) but *re-scoped in letter*
 (no reliability diagram or ECE, because the data forbids it). The
 methodology doc's "Open questions" entry on confidence calibration is
@@ -67,7 +67,7 @@ import numpy as np
 # too. Counting `.parents[n]` from the module's own location -- what this
 # did before the benchmark was extracted -- silently pointed one directory
 # level above the repository once the file moved.
-from chamberbench.claimsio import archive_dir
+from chamberbench.claimsio import archive_dir, short_path
 
 # Only used to shorten paths in printed output.
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -389,8 +389,8 @@ def main() -> int:
     _print_summary(summary)
     p1 = confidence_distribution_figure(rows)
     p2 = confidence_vs_effort_figure(rows)
-    print(f"wrote {p1.relative_to(PROJECT_ROOT)}")
-    print(f"wrote {p2.relative_to(PROJECT_ROOT)}")
+    print(f"wrote {short_path(p1)}")
+    print(f"wrote {short_path(p2)}")
     return 0
 
 

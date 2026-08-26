@@ -25,7 +25,7 @@ from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-from chamberbench.claimsio import archive_dir
+from chamberbench.claimsio import archive_dir, short_path
 
 BASELINE = archive_dir() / "baseline_chamber.json"
 
@@ -84,7 +84,7 @@ def main() -> int:
     print("=" * 66)
     print("BASELINE vs. AGENTIC -- chamber benchmark corpus")
     print("=" * 66)
-    print(f"  source: {BASELINE.relative_to(PROJECT_ROOT)}")
+    print(f"  source: {short_path(BASELINE)}")
     print(f"  paired status-ok cells:      {paired}")
     print(f"  fidelity-verdict agreement:  {fid_agree}/{paired}")
     print(f"  reproducibility agreement:   {repro_agree}/{paired}")

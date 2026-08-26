@@ -1,6 +1,6 @@
 """Compute classifier-vs-gold agreement at cell level.
 
-Day-18 follow-up. Reads:
+Reads:
   - ``data/classifier_gold.yaml`` (hand-labelled)
   - ``archive/classifier_auto.{model}.json`` (auto-labelled,
     produced by prepare_gold_labelling.py)
@@ -12,7 +12,7 @@ Produces:
     drop into the methodology doc.
 
 The cell-level gold labels live in a controlled vocabulary
-(see docs/chamber_failure_attribution_protocol.md):
+(see docs/reproducing.md):
 
   classifier_correct
   classifier_missed_tool_output
@@ -52,7 +52,7 @@ import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-from chamberbench.claimsio import archive_dir, data_dir
+from chamberbench.claimsio import archive_dir, data_dir, short_path
 
 RESULTS_DIR = archive_dir()
 GOLD_YAML = data_dir() / "classifier_gold.yaml"
@@ -479,7 +479,7 @@ def _score_one(gold_path: Path) -> int:
         + f"~{(1 - agreement_rate) * 100:.0f}% classifier-disagreement bound in mind.*"
     )
     AGREEMENT_MD.write_text("\n".join(md_lines) + "\n", encoding="utf-8")
-    print(f"  wrote {AGREEMENT_MD.relative_to(PROJECT_ROOT)}")
+    print(f"  wrote {short_path(AGREEMENT_MD)}")
 
     return 0
 

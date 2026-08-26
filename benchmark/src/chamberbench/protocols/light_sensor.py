@@ -3,7 +3,7 @@
 Strategy
 --------
 The light tunnel exposes three Si115x units at distinct positions
-(`vis_1`/`vis_2`/`vis_3` plus IR companions). Day-8 recon confirmed they
+(`vis_1`/`vis_2`/`vis_3` plus IR companions). Reconnaissance confirmed they
 are NOT spatially redundant -- at fixed RGB they read on the order of
 10000 / 1500 / 480 counts. The cross-sensor sigma protocol that worked
 for the four DPS310 barometers cannot be applied here without spatial
@@ -163,7 +163,7 @@ def _run_precision(
         matched_conditions=matched,
         unmatched_conditions=unmatched,
         sample_n=int(arr.size),
-        # NaN: Si115x triplet is non-redundant (Day-8 recon); cross-sensor
+        # NaN: Si115x triplet is non-redundant (see recon notes); cross-sensor
         # spread is geometry-dominated and not a sensor signal here.
         # Reporting 0.0 would silently land at the origin in any plot
         # downstream of the trace JSON.

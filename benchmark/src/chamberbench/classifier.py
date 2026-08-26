@@ -23,8 +23,8 @@ overrides LLM.
 
 CLI:
     uv run python -m chamber.classifier \\
-        --traces eval_results/chamber/latest_traces.jsonl \\
-        --summary eval_results/chamber/latest_chamber.json \\
+        --traces archive/latest_traces.claudesonnet4.6.jsonl \\
+        --summary archive/latest_chamber.claudesonnet4.6.json \\
         [--llm-assist]
 
 Idempotent: re-running the classifier on the same trace + summary
@@ -40,6 +40,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Literal
+
+from chamberbench.claimsio import BENCHMARK_ROOT, archive_dir
 
 logger = logging.getLogger(__name__)
 
@@ -354,7 +356,7 @@ def _classify_llm(
         return rows
 
     # Set up the SDK env (TLS / base_url) the same way the engines do.
-    from chamberbench.credentials import setup_credentials
+    from chamberbench.credentials import setup_credentials, tls_verify_disabled
 
     setup_credentials()
 
@@ -364,7 +366,7 @@ def _classify_llm(
     base_url = os.environ.get("ANTHROPIC_BASE_URL")
     if base_url:
         kwargs["base_url"] = base_url
-    if os.environ.get("NODE_TLS_REJECT_UNAUTHORIZED") == "0":
+    if tls_verify_disabled():
         import httpx
 
         kwargs["http_client"] = httpx.Client(verify=False)
@@ -521,18 +523,25 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n", 1)[0])
     parser.add_argument(
         "--traces",
-        default="eval_results/chamber/latest_traces.jsonl",
+        default=None,  # resolved to archive_dir() below
         type=Path,
     )
     parser.add_argument(
         "--summary",
-        default="eval_results/chamber/latest_chamber.json",
+        default=None,  # resolved to archive_dir() below
         type=Path,
     )
     parser.add_argument("--llm-assist", action="store_true")
     parser.add_argument("--model", default="claudesonnet4.6")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
+    # Default to the shipped archive. The model-qualified names are the ones
+    # that exist here; the originating project's unqualified `latest_traces.jsonl`
+    # has no counterpart in this release.
+    if args.traces is None:
+        args.traces = archive_dir() / "latest_traces.claudesonnet4.6.jsonl"
+    if args.summary is None:
+        args.summary = archive_dir() / "latest_chamber.claudesonnet4.6.json"
 
     logging.basicConfig(
         level=logging.INFO if args.verbose else logging.WARNING,
@@ -548,7 +557,7 @@ def main() -> int:
 
             for env_path in (
                 Path(".env"),
-                Path(__file__).resolve().parents[3] / ".env",
+                BENCHMARK_ROOT / ".env",
             ):
                 if env_path.exists():
                     load_dotenv(env_path)

@@ -1,7 +1,7 @@
 """Quality gates for the chamber-grounded benchmark.
 
-Reads `eval_results/chamber/latest_chamber.json` (per-cell agreement
-matrix) and optionally `eval_results/chamber/baseline_chamber.json`
+Reads `archive/latest_chamber.json` (per-cell agreement
+matrix) and optionally `archive/baseline_chamber.json`
 (frozen reference) and decides pass/warn/fail.
 
 Baseline schemas supported:
@@ -43,7 +43,7 @@ Soft gates (exit 2 with warnings; exit 0 otherwise):
 
 Usage:
     uv run python -m chamber.quality_gates \
-        --results-dir eval_results/chamber/
+        --results-dir archive/
 
 Exit codes follow the same convention as eval/quality_gates.py:
   0 -- all hard + soft gates passed
@@ -59,6 +59,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
+
+from chamberbench.claimsio import archive_dir
 
 # --- Hard gates ------------------------------------------------------------
 FOUND_ACCURACY_MIN = 0.90
@@ -747,11 +749,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Chamber benchmark quality gates")
     parser.add_argument(
         "--results-dir",
-        default="eval_results/chamber",
+        default=None,  # resolved to archive_dir() below
         help="Directory containing latest_chamber.json and baseline_chamber.json",
     )
     args = parser.parse_args()
-    return run_gates(args.results_dir)
+    # Default to the shipped archive rather than the originating project's
+    # layout, which does not exist here.
+    results_dir = args.results_dir or str(archive_dir())
+    return run_gates(results_dir)
 
 
 if __name__ == "__main__":

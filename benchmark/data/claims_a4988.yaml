@@ -7,7 +7,7 @@
 # rationale about difficulty, not about measurability, and one that stops
 # applying once the physical oracle is demoted to a secondary contribution.
 #
-# These claims are deliberately kept OUT of eval/chamber/claims.yaml. The
+# These claims are deliberately kept OUT of data/claims.yaml. The
 # 25-claim set is frozen and every number in the paper is measured on it; this
 # is a separate population, reported separately, so the generalisation step is
 # visible rather than folded into a headline.
@@ -63,12 +63,12 @@ meta:
   scope: "fidelity-only; no chamber-side verdict"
 
 datasheets:
-  a4988: "eval/chamber/datasheets/motor_driver.pdf"
+  a4988: "the datasheet corpus (see docs/reproducing.md): motor_driver.pdf"
 
 claims:
   # --- Electrical Characteristics, Output Drivers ---------------------------
 - id: "a4988-logic-supply-voltage-range"
-  pdf_source: "eval/chamber/datasheets/motor_driver.pdf"
+  pdf_source: "the datasheet corpus (see docs/reproducing.md): motor_driver.pdf"
   parameter: "Logic supply voltage range"
   description: >
     Operating range of the logic supply rail, as given in the electrical
@@ -90,7 +90,7 @@ claims:
   verified_by: pdf_text_layer
   verified_date: '2026-07-26'
 - id: "a4988-load-supply-voltage-range"
-  pdf_source: "eval/chamber/datasheets/motor_driver.pdf"
+  pdf_source: "the datasheet corpus (see docs/reproducing.md): motor_driver.pdf"
   parameter: "Load supply voltage range"
   description: >
     Operating range of the motor load supply rail, as given in the electrical
@@ -112,7 +112,7 @@ claims:
   verified_by: pdf_text_layer
   verified_date: '2026-07-26'
 - id: "a4988-output-on-resistance"
-  pdf_source: "eval/chamber/datasheets/motor_driver.pdf"
+  pdf_source: "the datasheet corpus (see docs/reproducing.md): motor_driver.pdf"
   parameter: "Output on resistance"
   description: >
     Drain-source on resistance of the output drivers at the stated output
@@ -135,7 +135,7 @@ claims:
   verified_by: pdf_text_layer
   verified_date: '2026-07-26'
 - id: "a4988-body-diode-forward-voltage"
-  pdf_source: "eval/chamber/datasheets/motor_driver.pdf"
+  pdf_source: "the datasheet corpus (see docs/reproducing.md): motor_driver.pdf"
   parameter: "Body diode forward voltage"
   description: >
     Forward voltage of the output body diode at the stated diode current.
@@ -155,7 +155,7 @@ claims:
   verified_by: pdf_text_layer
   verified_date: '2026-07-26'
 - id: "a4988-logic-supply-current-max"
-  pdf_source: "eval/chamber/datasheets/motor_driver.pdf"
+  pdf_source: "the datasheet corpus (see docs/reproducing.md): motor_driver.pdf"
   parameter: "Logic supply current"
   description: >
     Maximum current drawn from the logic supply. The table distinguishes a
@@ -178,7 +178,7 @@ claims:
   verified_by: pdf_text_layer
   verified_date: '2026-07-26'
 - id: "a4988-logic-input-hysteresis"
-  pdf_source: "eval/chamber/datasheets/motor_driver.pdf"
+  pdf_source: "the datasheet corpus (see docs/reproducing.md): motor_driver.pdf"
   parameter: "Logic input hysteresis"
   description: >
     Input hysteresis of the logic pins, specified as a proportion of the
@@ -201,7 +201,7 @@ claims:
   verified_by: pdf_text_layer
   verified_date: '2026-07-26'
 - id: "a4988-blank-time"
-  pdf_source: "eval/chamber/datasheets/motor_driver.pdf"
+  pdf_source: "the datasheet corpus (see docs/reproducing.md): motor_driver.pdf"
   parameter: "Blank time"
   description: >
     Duration of the current-sense blanking interval, as given in the
@@ -224,7 +224,7 @@ claims:
   verified_by: pdf_text_layer
   verified_date: '2026-07-26'
 - id: "a4988-fixed-off-time"
-  pdf_source: "eval/chamber/datasheets/motor_driver.pdf"
+  pdf_source: "the datasheet corpus (see docs/reproducing.md): motor_driver.pdf"
   parameter: "Fixed off-time"
   description: >
     Duration of the fixed off-time interval under the stated oscillator pin
@@ -247,7 +247,7 @@ claims:
   verified_by: pdf_text_layer
   verified_date: '2026-07-26'
 - id: "a4988-thermal-shutdown-temperature"
-  pdf_source: "eval/chamber/datasheets/motor_driver.pdf"
+  pdf_source: "the datasheet corpus (see docs/reproducing.md): motor_driver.pdf"
   parameter: "Thermal shutdown temperature"
   description: >
     Junction temperature at which the device's thermal protection engages.
@@ -268,7 +268,7 @@ claims:
   verified_by: pdf_text_layer
   verified_date: '2026-07-26'
 - id: "a4988-operating-ambient-temperature"
-  pdf_source: "eval/chamber/datasheets/motor_driver.pdf"
+  pdf_source: "the datasheet corpus (see docs/reproducing.md): motor_driver.pdf"
   parameter: "Operating ambient temperature"
   description: >
     Ambient temperature range over which the part is rated to operate, for
@@ -290,7 +290,7 @@ claims:
   verified_by: pdf_text_layer
   verified_date: '2026-07-26'
 - id: "a4988-storage-temperature"
-  pdf_source: "eval/chamber/datasheets/motor_driver.pdf"
+  pdf_source: "the datasheet corpus (see docs/reproducing.md): motor_driver.pdf"
   parameter: "Storage temperature"
   description: >
     Temperature range over which the part may be stored, from the absolute
@@ -312,7 +312,7 @@ claims:
   verified_by: pdf_text_layer
   verified_date: '2026-07-26'
 - id: "a4988-reference-input-voltage-range"
-  pdf_source: "eval/chamber/datasheets/motor_driver.pdf"
+  pdf_source: "the datasheet corpus (see docs/reproducing.md): motor_driver.pdf"
   parameter: "Reference input voltage range"
   description: >
     Range of the current-reference input, as given in the electrical

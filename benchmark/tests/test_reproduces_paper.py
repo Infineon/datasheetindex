@@ -19,7 +19,7 @@ import json
 
 import pytest
 
-from chamberbench.claimsio import archive_dir, load_claims
+from chamberbench.claimsio import BENCHMARK_ROOT, archive_dir, load_claims
 from chamberbench.variance import aggregate_variance
 
 # Paper, Section 4: the claim set and the off-corpus set.
@@ -44,7 +44,10 @@ EXPECTED_FIDELITY = {
 def _variance():
     path = archive_dir() / "variance_chamber.json"
     if not path.exists():
-        pytest.skip("variance_chamber.json not present in the archive")
+        # NOT a skip. An absent archive is precisely the failure this file
+        # exists to catch; skipping turns "the release cannot reproduce the
+        # paper" into a green suite.
+        pytest.fail(f"{path} is missing; the release cannot reproduce the paper")
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -76,6 +79,56 @@ def test_claim_stability_matches_the_paper(model):
         stability["n_stable"] if "n_stable" in stability else stability.get("stable")
     )
     assert n_stable == EXPECTED_FIDELITY[model]["stable"]
+
+
+def test_cohens_kappa_matches_the_paper():
+    """kappa = 0.61 for the failure-attribution classifier (paper, Section 6.4).
+
+    Recomputed from the two shipped annotation files rather than read from the
+    committed report, so a change to either the gold labels or the agreement
+    computation fails here.
+    """
+    import subprocess
+    import sys
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(BENCHMARK_ROOT / "scripts" / "compute_classifier_agreement.py"),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=BENCHMARK_ROOT,
+        check=False,  # asserted below, with the stderr in the message
+    )
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    line = [ln for ln in proc.stdout.splitlines() if "Cohen's kappa" in ln]
+    assert line, f"no kappa line in output:\n{proc.stdout[-2000:]}"
+    kappa = float(line[0].split(":")[1].split("(")[0].strip())
+    assert kappa == pytest.approx(0.609, abs=0.005), f"kappa moved: {kappa}"
+
+
+def test_latency_and_confidence_have_not_drifted():
+    """Guards the archive against silent regeneration.
+
+    Pass counts alone do not: regenerating `variance_chamber.json` from the
+    superseded inputs leaves every pass count identical while moving GPT-5.1's
+    mean latency from 236s to 133s. Without these, that drift is invisible.
+    """
+    agg = aggregate_variance(_variance()["runs"])
+    expected = {
+        "claudesonnet4.6": {"latency_s": 76.0, "confidence": 0.97},
+        "gpt-5.1": {"latency_s": 236.0, "confidence": 0.94},
+        "qwen3.6-27b": {"latency_s": 130.0, "confidence": 0.95},
+    }
+    for model, want in expected.items():
+        got = agg[model]
+        assert got["latency_s"]["mean"] == pytest.approx(want["latency_s"], rel=0.05), (
+            f"{model} latency drifted: {got['latency_s']['mean']} vs {want['latency_s']}"
+        )
+        assert got["confidence"]["mean"] == pytest.approx(
+            want["confidence"], abs=0.01
+        ), f"{model} confidence drifted: {got['confidence']['mean']}"
 
 
 def test_reproducibility_verdict_never_sees_agent_output():

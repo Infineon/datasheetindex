@@ -41,14 +41,14 @@ Status values:
     quality_gates treats these as not-comparable, not as missing.
 
 Source-file precedence per (engine, model): for each (claim, engine,
-model) tuple we read sources in order; later sources win. The Layer-2
+model) tuple we read sources in order; later sources win. The final-revision
 agentic snapshot is read first so a post-rerun file that only contains
 baseline + ACS70331-agentic does not erase the 20 DPS310+Si115x agentic
 cells from the snapshot.
 
 Run:
     uv run python scripts/build_chamber_baseline.py \
-        --results-dir eval_results/chamber \
+        --results-dir archive \
         --out archive/baseline_chamber.json
 """
 
@@ -101,7 +101,7 @@ def _gather_for_model(
     raw dict the runner wrote -- this function only merges, it does not
     add `status` or restructure fields.
     """
-    # Source order matters: later sources win. The Layer-2 agentic
+    # Source order matters: later sources win. The final-revision agentic
     # snapshot goes first so a post-rerun file that only contains
     # baseline + ACS70331-agentic does not erase the 20 DPS310+Si115x
     # agentic cells from the snapshot.
@@ -124,7 +124,7 @@ def _gather_for_model(
 
 
 def _is_structural_baseline_fail(model: str, cell: dict[str, Any]) -> bool:
-    """Detect the Day-14 baseline-portability structural failure.
+    """Detect the baseline-portability structural failure.
 
     Pattern: model is not Anthropic-native, engine is baseline, and the
     cell carries a populated `engine_error`. After the 2026-05-20
@@ -145,7 +145,7 @@ def _is_structural_baseline_fail(model: str, cell: dict[str, Any]) -> bool:
     return bool(err)
 
 
-# Day-18 (2026-05-18) engagement-cost cliff: non-Anthropic agentic cells
+# Engagement-cost cliff (2026-05-18): non-Anthropic agentic cells
 # that exhaust the gateway's per-cell timeout or input-token budget. These
 # only surfaced after the oracle-leak audit removed the answer from the
 # prompt, forcing the agent to engage with the document instead of
@@ -186,7 +186,7 @@ def _classify(model: str, cell: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     if _is_structural_baseline_fail(model, cell):
         out["status"] = "not_applicable"
         out["not_applicable_reason"] = (
-            "Day-14 cross-provider portability finding: the non-agentic "
+            "Cross-provider portability finding: the non-agentic "
             "baseline sends the PDF as an Anthropic-native `document` "
             "content block; the LiteLLM Anthropic-shape passthrough does "
             "not translate this faithfully to "
@@ -200,7 +200,7 @@ def _classify(model: str, cell: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         gateway = "Azure OpenAI" if model.startswith("gpt") else "vLLM"
         out["status"] = "not_applicable"
         out["not_applicable_reason"] = (
-            "Day-18 engagement-cost cliff: the post-oracle-leak-fix agent "
+            "Engagement-cost cliff: the post-oracle-leak-fix agent "
             "engages with the document instead of reflecting the hint, "
             f"and this (gateway, model) pair exhausts the per-cell "
             f"{limit_kind} ({gateway}). Documented in the methodology "
@@ -309,10 +309,10 @@ def main() -> int:
         "--qwen-pending-reason",
         default=(
             "vLLM upstream under maintenance on 2026-05-13 "
-            "(litellm-staging.icp.infineon.com returned 503 with "
-            "HTML maintenance page on three consecutive T1 probes). "
-            "Re-execute when the gateway's Hosted_vllm health endpoint "
-            "is green; data sourced from Day-15/16 Layer-2 agentic snapshot "
+            "(the internal LiteLLM gateway returned 503 with an HTML "
+            "maintenance page on three consecutive probes). "
+            "Re-execute when the gateway's vLLM health endpoint "
+            "is green; data sourced from the prior agentic snapshot "
             "for the 20 DPS310+Si115x agentic cells (carried forward), "
             "and absent for the 5 ACS70331 agentic + 25 baseline cells."
         ),

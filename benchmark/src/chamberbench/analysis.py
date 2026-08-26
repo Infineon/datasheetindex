@@ -1,24 +1,23 @@
 """Chamber benchmark analysis -- aggregate cells and produce paper figures.
 
 Reads:
-  - ``eval_results/chamber/latest_chamber.{model}.json`` for each tracked
+  - ``archive/latest_chamber.{model}.json`` for each tracked
     model. Cells filtered to the canonical 20 (DPS310 + Si115x); the
     5 ACS70331 engagement-diagnostic cells are excluded by default
     because their reproducibility verdict is inconclusive by design
     (see ``protocols/engagement_diagnostic.py``).
-  - ``eval_results/chamber/latest_traces.{model}.jsonl`` for per-tool
+  - ``archive/latest_traces.{model}.jsonl`` for per-tool
     dispatch counts when the result file's per-cell ``n_tool_calls_
     by_tool`` is not granular enough.
 
-Writes ``eval_results/chamber/figures/`` containing the four paper
-figures for the chamber paper (docs/datasheetindex_chamber_benchmark.md):
+Writes ``archive/figures/`` containing the four paper
+figures for the chamber paper (docs/reproducing.md):
 
   1. fidelity_heatmap.png             -- 20 claims x N models, agentic
   2. tool_dispatch_heatmap.png        -- tool name x model, mean calls/cell
   3. cost_latency_scatter.png         -- one point per cell, coloured by model
   4. engagement_over_revisions.png    -- per-model mean nav_tools/cell across
-                                         Day-14 default, Day-15 Layer-1,
-                                         Day-15 Layer-2
+                                         revision 1, revision 2, revision 3
 
 The four-plot bundle is the paper's quantitative spine. Each figure
 caption (rendered in the paper, not here) names the takeaway in one
@@ -43,7 +42,7 @@ import numpy as np
 # too. Counting `.parents[n]` from the module's own location -- what this
 # did before the benchmark was extracted -- silently pointed one directory
 # level above the repository once the file moved.
-from chamberbench.claimsio import archive_dir
+from chamberbench.claimsio import archive_dir, short_path
 
 # Only used to shorten paths in printed output.
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -88,7 +87,7 @@ def _load_cells(model: str) -> dict[str, dict[str, Any]]:
     """Return the agentic cells for ``model`` keyed by claim_id.
 
     Filters to the headline DPS310+Si115x set; drops engine_error
-    cells (Day-14 structural baseline failures keep their original
+    cells (structural baseline failures keep their original
     `engine_error` field). Each value is the raw cell dict.
     """
     path = RESULTS_DIR / RESULT_FILES[model]
@@ -354,19 +353,29 @@ def cost_latency_scatter() -> Path:
 # ---------------------------------------------------------------------------
 
 
-# Manually curated historical data. The Day-14 default and Day-15
-# Layer-1 numbers come from earlier commits' aggregates (see
-# methodology doc tables); Layer-2 is computed live from the current
-# data files. If those earlier numbers are ever regenerated the
-# constants should be updated.
+# Manually curated historical data. Revisions 1 and 2 come from earlier
+# commits' aggregates and are not recomputable from the shipped archive,
+# which holds only the final revision; revision 3 is computed live from the
+# current data files. Revisions 1-2 delivered structured output through an
+# output_format constraint, which masked Qwen's tool tokens to zero;
+# revision 3 switched to the submit_claim_result tool, and the jump from
+# 0.0 to 11.6 nav tools/cell is that change, not a model change.
 HISTORICAL_NAV_TOOLS: dict[str, dict[str, float | None]] = {
     "claudesonnet4.6": {
-        "day14_default": 9.3,
-        "day15_layer1": 9.3,
-        "day15_layer2": None,
+        "revision1_output_format": 9.3,
+        "revision2_output_format": 9.3,
+        "revision3_submit_tool": None,
     },
-    "gpt-5.1": {"day14_default": 9.95, "day15_layer1": 9.95, "day15_layer2": None},
-    "qwen3.5-27b": {"day14_default": 0.0, "day15_layer1": 0.0, "day15_layer2": None},
+    "gpt-5.1": {
+        "revision1_output_format": 9.95,
+        "revision2_output_format": 9.95,
+        "revision3_submit_tool": None,
+    },
+    "qwen3.5-27b": {
+        "revision1_output_format": 0.0,
+        "revision2_output_format": 0.0,
+        "revision3_submit_tool": None,
+    },
 }
 
 
@@ -374,21 +383,22 @@ def engagement_over_revisions() -> Path:
     """Bar chart: per-model mean nav tools/cell over revisions.
 
     Tells the qwen 0.0 -> 11.6 story visually in one figure. The
-    Day-14 and Day-15-Layer-1 numbers are historical (curated
-    constants); the Day-15-Layer-2 column is computed live so the
-    figure stays honest when the matrix is regenerated.
+    Revisions 1-2 are historical (curated constants); revision 3 is
+    computed live so the figure stays honest when the matrix is
+    regenerated.
     """
-    revisions = ["day14_default", "day15_layer1", "day15_layer2"]
-    # Label revisions by the structured-output mechanism each used, not by
-    # internal Day-N / Layer-N codenames: revisions 1-2 delivered structured
-    # output through the output_format constraint (which masked Qwen's tool
-    # tokens to zero), revision 3 switched to the submit_claim_result tool.
+    revisions = [
+        "revision1_output_format",
+        "revision2_output_format",
+        "revision3_submit_tool",
+    ]
+    # Labelled by the structured-output mechanism each revision used.
     rev_labels = [
         "Revision 1\n(output_format)",
         "Revision 2\n(output_format)",
         "Revision 3\n(submit_claim_result)",
     ]
-    # Compute Layer-2 live
+    # Compute the final revision live
     for model in MODEL_ORDER:
         cells = list(_load_cells(model).values())
         nav = [
@@ -396,7 +406,7 @@ def engagement_over_revisions() -> Path:
             for r in cells
             if r.get("fidelity", {}).get("overall_pass")
         ]
-        HISTORICAL_NAV_TOOLS[model]["day15_layer2"] = (
+        HISTORICAL_NAV_TOOLS[model]["revision3_submit_tool"] = (
             statistics.mean(nav) if nav else 0.0
         )
 
@@ -459,7 +469,7 @@ def engagement_over_revisions() -> Path:
 
 def main() -> None:
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"writing figures to {FIGURES_DIR.relative_to(PROJECT_ROOT)}")
+    print(f"writing figures to {short_path(FIGURES_DIR)}")
     out1 = fidelity_heatmap()
     print(f"  [1/4] {out1.name}")
     out2 = tool_dispatch_heatmap()

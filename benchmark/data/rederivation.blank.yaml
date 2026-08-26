@@ -1,6 +1,6 @@
 # BLIND RE-DERIVATION OF THE GRADING SURFACE
 #
-# INSTRUCTIONS: docs/chamber_rederivation_guide.md -- read that first.
+# INSTRUCTIONS: docs/annotator_guide.md -- read that first.
 #
 # For each claim below, read the named datasheet and decide, on your own:
 #   value_contains -- the substrings an extraction MUST contain to count
@@ -9,9 +9,9 @@
 #   confidence_min -- the confidence floor below which you would not
 #                     accept the answer even if the substrings matched.
 #
-# Do NOT open eval/chamber/claims.yaml. It holds the values you are
+# Do NOT open data/claims.yaml. It holds the values you are
 # re-deriving, and the whole exercise is whether you land on them
-# independently. Also avoid eval_results/chamber/*.json (model runs).
+# independently. Also avoid archive/*.json (model runs).
 #
 # If you cannot find the parameter in the datasheet, leave value_contains
 # empty and say so in notes. An honest abstention is a result; a guess is
@@ -32,7 +32,7 @@ claims:
   # CLAIM: dps310-relative-accuracy
   # ======================================================================
   # PARAMETER:  Relative pressure accuracy
-  # DATASHEET:  eval/chamber/datasheets/barometer.pdf
+  # DATASHEET:  the DPS310 datasheet (see docs/reproducing.md)
   # UNIT:       hPa
   # CONDITIONS: temperature_C=25.0C, supply_voltage_VDD_V=3.0V   (* = load-bearing)
   # Stated relative accuracy of the DPS310 barometer. Tested against
@@ -47,7 +47,7 @@ claims:
   # CLAIM: dps310-absolute-accuracy
   # ======================================================================
   # PARAMETER:  Absolute pressure accuracy
-  # DATASHEET:  eval/chamber/datasheets/barometer.pdf
+  # DATASHEET:  the DPS310 datasheet (see docs/reproducing.md)
   # UNIT:       hPa
   # CONDITIONS: temperature_C=25.0C, external_pressure_reference=NonehPa*   (* = load-bearing)
   # Stated absolute pressure accuracy of the DPS310 barometer. The
@@ -63,7 +63,7 @@ claims:
   # CLAIM: dps310-pressure-precision-high
   # ======================================================================
   # PARAMETER:  Pressure precision (high precision mode)
-  # DATASHEET:  eval/chamber/datasheets/barometer.pdf
+  # DATASHEET:  the DPS310 datasheet (see docs/reproducing.md)
   # UNIT:       Pa
   # CONDITIONS: precision_mode_high=0.0*, supply_voltage_VDD_V=1.8V   (* = load-bearing)
   # Pressure precision in High Precision mode (units: Pa RMS). Tested
@@ -78,7 +78,7 @@ claims:
   # CLAIM: dps310-pressure-temp-sensitivity
   # ======================================================================
   # PARAMETER:  Pressure temperature sensitivity
-  # DATASHEET:  eval/chamber/datasheets/barometer.pdf
+  # DATASHEET:  the DPS310 datasheet (see docs/reproducing.md)
   # UNIT:       Pa/K
   # CONDITIONS: controlled_temperature=25.0C*   (* = load-bearing)
   # Pressure-vs-temperature sensitivity coefficient (Ap_tmp) of
@@ -94,7 +94,7 @@ claims:
   # CLAIM: dps310-temperature-accuracy
   # ======================================================================
   # PARAMETER:  Temperature accuracy
-  # DATASHEET:  eval/chamber/datasheets/barometer.pdf
+  # DATASHEET:  the DPS310 datasheet (see docs/reproducing.md)
   # UNIT:       C
   # CONDITIONS: external_temperature_reference=NoneC*   (* = load-bearing)
   # Datasheet-stated temperature-accuracy band across the operating
@@ -109,7 +109,7 @@ claims:
   # CLAIM: dps310-current-1hz-low-precision
   # ======================================================================
   # PARAMETER:  Current consumption at 1 Hz (low precision)
-  # DATASHEET:  eval/chamber/datasheets/barometer.pdf
+  # DATASHEET:  the DPS310 datasheet (see docs/reproducing.md)
   # UNIT:       uA
   # CONDITIONS: barometer_supply_current_measurement=NoneuA*   (* = load-bearing)
   # Typical supply current at the slowest sampling rate (1 Hz), Low
@@ -125,7 +125,7 @@ claims:
   # CLAIM: dps310-supply-voltage-vdd
   # ======================================================================
   # PARAMETER:  Supply voltage VDD
-  # DATASHEET:  eval/chamber/datasheets/barometer.pdf
+  # DATASHEET:  the DPS310 datasheet (see docs/reproducing.md)
   # UNIT:       V
   # CONDITIONS: controlled_VDD_sweep=NoneV*   (* = load-bearing)
   # Datasheet-stated VDD operating-voltage range. Chamber does not
@@ -139,7 +139,7 @@ claims:
   # CLAIM: dps310-meas-time-standard
   # ======================================================================
   # PARAMETER:  Pressure measurement time (standard mode)
-  # DATASHEET:  eval/chamber/datasheets/barometer.pdf
+  # DATASHEET:  the DPS310 datasheet (see docs/reproducing.md)
   # UNIT:       ms
   # CONDITIONS: single_conversion_timing=Nonems*   (* = load-bearing)
   # Typical single-conversion time in Standard precision mode. Chamber
@@ -153,7 +153,7 @@ claims:
   # CLAIM: dps310-pressure-rate-range
   # ======================================================================
   # PARAMETER:  Pressure measurement rate
-  # DATASHEET:  eval/chamber/datasheets/barometer.pdf
+  # DATASHEET:  the DPS310 datasheet (see docs/reproducing.md)
   # UNIT:       Hz
   # CONDITIONS: internal_sampling_rate_observable=NoneHz*   (* = load-bearing)
   # Datasheet-stated internal pressure-measurement rate range. Chamber
@@ -168,7 +168,7 @@ claims:
   # CLAIM: dps310-pressure-data-resolution
   # ======================================================================
   # PARAMETER:  Pressure data resolution
-  # DATASHEET:  eval/chamber/datasheets/barometer.pdf
+  # DATASHEET:  the DPS310 datasheet (see docs/reproducing.md)
   # UNIT:       Pa
   # CONDITIONS: precision_mode_observable=None*, supply_voltage_VDD_V=1.8V   (* = load-bearing)
   # Pressure data-resolution coefficient (Ap_res, Pa RMS). Chamber
@@ -184,7 +184,7 @@ claims:
   # CLAIM: dps310-operating-range
   # ======================================================================
   # PARAMETER:  Operating pressure range
-  # DATASHEET:  eval/chamber/datasheets/barometer.pdf
+  # DATASHEET:  the DPS310 datasheet (see docs/reproducing.md)
   # UNIT:       hPa
   # CONDITIONS: temperature_C=NoneC   (* = load-bearing)
   # Datasheet-stated operating pressure range (hPa). The chamber
@@ -201,7 +201,7 @@ claims:
   # CLAIM: si115x-adc-bit-depth
   # ======================================================================
   # PARAMETER:  ADC bit depth (visible channel envelope)
-  # DATASHEET:  eval/chamber/datasheets/fce10002ec99_light_sensor.pdf
+  # DATASHEET:  the datasheet corpus (see docs/reproducing.md): fce10002ec99_light_sensor.pdf
   # UNIT:       counts
   # CONDITIONS: (none stated)   (* = load-bearing)
   # Datasheet-stated ADC resolution (bit depth). Reproducibility test:
@@ -215,7 +215,7 @@ claims:
   # CLAIM: si115x-operating-temperature
   # ======================================================================
   # PARAMETER:  Operating temperature range
-  # DATASHEET:  eval/chamber/datasheets/fce10002ec99_light_sensor.pdf
+  # DATASHEET:  the datasheet corpus (see docs/reproducing.md): fce10002ec99_light_sensor.pdf
   # UNIT:       C
   # CONDITIONS: external_temperature_reference=NoneC*   (* = load-bearing)
   # Datasheet-stated operating ambient-temperature range (C). Chamber
@@ -231,7 +231,7 @@ claims:
   # CLAIM: si115x-supply-voltage-vdd
   # ======================================================================
   # PARAMETER:  VDD supply voltage range
-  # DATASHEET:  eval/chamber/datasheets/fce10002ec99_light_sensor.pdf
+  # DATASHEET:  the datasheet corpus (see docs/reproducing.md): fce10002ec99_light_sensor.pdf
   # UNIT:       V
   # CONDITIONS: controlled_VDD_sweep=NoneV*   (* = load-bearing)
   # Datasheet-stated VDD operating-voltage range. Chamber does not
@@ -245,7 +245,7 @@ claims:
   # CLAIM: si115x-standby-current-1v8
   # ======================================================================
   # PARAMETER:  Standby supply current at VDD=1.8 V
-  # DATASHEET:  eval/chamber/datasheets/fce10002ec99_light_sensor.pdf
+  # DATASHEET:  the datasheet corpus (see docs/reproducing.md): fce10002ec99_light_sensor.pdf
   # UNIT:       nA
   # CONDITIONS: supply_current_measurement_at_VDD_1v8=NonenA*, no_adc_no_i2c_activity=None*   (* = load-bearing)
   # Typical sleep-mode supply current (no ADC, no I2C activity) at the
@@ -261,7 +261,7 @@ claims:
   # CLAIM: si115x-active-current-3v3
   # ======================================================================
   # PARAMETER:  Active mode current at VDD=3.3 V
-  # DATASHEET:  eval/chamber/datasheets/fce10002ec99_light_sensor.pdf
+  # DATASHEET:  the datasheet corpus (see docs/reproducing.md): fce10002ec99_light_sensor.pdf
   # UNIT:       mA
   # CONDITIONS: supply_current_measurement_at_VDD_3v3=NonemA*   (* = load-bearing)
   # Typical supply current while responding to commands and
@@ -276,7 +276,7 @@ claims:
   # CLAIM: si115x-processing-time
   # ======================================================================
   # PARAMETER:  Processing time per measurement
-  # DATASHEET:  eval/chamber/datasheets/fce10002ec99_light_sensor.pdf
+  # DATASHEET:  the datasheet corpus (see docs/reproducing.md): fce10002ec99_light_sensor.pdf
   # UNIT:       us
   # CONDITIONS: per_conversion_timing_observable=Noneus*   (* = load-bearing)
   # Typical per-measurement processing time (tprocess) for ALS or
@@ -291,7 +291,7 @@ claims:
   # CLAIM: si115x-vis-response-525nm
   # ======================================================================
   # PARAMETER:  Small visible photodiode response at 525 nm
-  # DATASHEET:  eval/chamber/datasheets/fce10002ec99_light_sensor.pdf
+  # DATASHEET:  the datasheet corpus (see docs/reproducing.md): fce10002ec99_light_sensor.pdf
   # UNIT:       counts/(W/m^2)
   # CONDITIONS: external_optical_reference_W_per_m2=NoneW/m^2*, ADCMUX_setting=17*   (* = load-bearing)
   # Typical absolute responsivity (ADC counts per W/m^2) at 525 nm
@@ -308,7 +308,7 @@ claims:
   # CLAIM: si115x-als-resolution-mlx
   # ======================================================================
   # PARAMETER:  ALS resolution (mlx)
-  # DATASHEET:  eval/chamber/datasheets/fce10002ec99_light_sensor.pdf
+  # DATASHEET:  the datasheet corpus (see docs/reproducing.md): fce10002ec99_light_sensor.pdf
   # UNIT:       mlx
   # CONDITIONS: count_to_mlx_calibration=Nonemlx/count*   (* = load-bearing)
   # Datasheet-stated minimum-detectable ALS resolution (mlx). Chamber
@@ -324,7 +324,7 @@ claims:
   # CLAIM: si115x-supply-ripple
   # ======================================================================
   # PARAMETER:  VDD supply ripple voltage
-  # DATASHEET:  eval/chamber/datasheets/fce10002ec99_light_sensor.pdf
+  # DATASHEET:  the datasheet corpus (see docs/reproducing.md): fce10002ec99_light_sensor.pdf
   # UNIT:       mVpp
   # CONDITIONS: VDD_ripple_measurement=NonemVpp*   (* = load-bearing)
   # Maximum allowed VDD ripple (mVpp) over the spec frequency band at
@@ -339,7 +339,7 @@ claims:
   # CLAIM: acs70331-bandwidth
   # ======================================================================
   # PARAMETER:  Sensor -3 dB bandwidth
-  # DATASHEET:  eval/chamber/datasheets/current_sensor.pdf
+  # DATASHEET:  the datasheet corpus (see docs/reproducing.md): current_sensor.pdf
   # UNIT:       MHz
   # CONDITIONS: VCC_V=3.3V*   (* = load-bearing)
   # Engagement-diagnostic claim (tier EASY). The sensor's typical
@@ -356,7 +356,7 @@ claims:
   # CLAIM: acs70331-supply-current-max
   # ======================================================================
   # PARAMETER:  Supply current ICC max (steady state, fuses powered down)
-  # DATASHEET:  eval/chamber/datasheets/current_sensor.pdf
+  # DATASHEET:  the datasheet corpus (see docs/reproducing.md): current_sensor.pdf
   # UNIT:       mA
   # CONDITIONS: VCC_V=3.3V*, fuses_powered_down=1.0*, no_load=1.0   (* = load-bearing)
   # Engagement-diagnostic claim (tier MEDIUM). Maximum steady-state
@@ -371,7 +371,7 @@ claims:
   # CLAIM: acs70331-rise-time
   # ======================================================================
   # PARAMETER:  Rise time tr (10% to 90%) at 1 V output swing
-  # DATASHEET:  eval/chamber/datasheets/current_sensor.pdf
+  # DATASHEET:  the datasheet corpus (see docs/reproducing.md): current_sensor.pdf
   # UNIT:       ns
   # CONDITIONS: VCC_V=3.3V*, output_swing_V=1.0V*, rise_definition=90.0%*   (* = load-bearing)
   # Engagement-diagnostic claim (tier HARD). Typical rise time tr
@@ -386,7 +386,7 @@ claims:
   # CLAIM: acs70331-primary-resistance-qfn
   # ======================================================================
   # PARAMETER:  Primary conductor resistance RIP, QFN-12 package
-  # DATASHEET:  eval/chamber/datasheets/current_sensor.pdf
+  # DATASHEET:  the datasheet corpus (see docs/reproducing.md): current_sensor.pdf
   # UNIT:       mOhm
   # CONDITIONS: package=12.0pin_count_QFN*, TA_C=25.0C*   (* = load-bearing)
   # Engagement-diagnostic claim (tier HARD). Typical primary-conductor
@@ -401,7 +401,7 @@ claims:
   # CLAIM: acs70331-saturation-low
   # ======================================================================
   # PARAMETER:  Output saturation voltage VSAT_LOW (typical)
-  # DATASHEET:  eval/chamber/datasheets/current_sensor.pdf
+  # DATASHEET:  the datasheet corpus (see docs/reproducing.md): current_sensor.pdf
   # UNIT:       mV
   # CONDITIONS: VCC_V=3.3V*, RL_kohm=22.0kOhm*   (* = load-bearing)
   # Engagement-diagnostic claim (tier MEDIUM-HARD). Output saturation

@@ -35,7 +35,8 @@ logger = logging.getLogger(__name__)
 
 _configured = False
 
-BENCHMARK_ROOT = Path(__file__).resolve().parents[2]
+# Single source of truth; do not recompute it here.
+from chamberbench.claimsio import BENCHMARK_ROOT
 
 
 def setup_credentials() -> None:
@@ -48,17 +49,22 @@ def setup_credentials() -> None:
     if _configured:
         return
 
-    if not (os.getenv("ANTHROPIC_API_KEY") or os.getenv("LITELLM_MASTER_KEY")):
-        for env_path in (Path.cwd() / ".env", BENCHMARK_ROOT / ".env"):
-            if not env_path.exists():
-                continue
-            try:
-                from dotenv import load_dotenv
-            except ImportError:  # pragma: no cover - optional convenience
-                break
-            load_dotenv(env_path)
-            logger.info("Loaded environment from %s", env_path)
+    # Load .env UNCONDITIONALLY. Gating this on "no key is set yet" -- which an
+    # earlier version did -- means an `ANTHROPIC_API_KEY` exported in the shell
+    # suppresses the whole file, including `LITELLM_BASE_URL`, and the client
+    # then silently talks to the public API instead of the configured gateway.
+    # `load_dotenv` does not override already-set variables, so loading it
+    # always is both safe and what the originating project did.
+    for env_path in (Path.cwd() / ".env", BENCHMARK_ROOT / ".env"):
+        if not env_path.exists():
+            continue
+        try:
+            from dotenv import load_dotenv
+        except ImportError:  # pragma: no cover - optional convenience
             break
+        load_dotenv(env_path)
+        logger.info("Loaded environment from %s", env_path)
+        break
 
     api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("LITELLM_MASTER_KEY")
     if not api_key:
@@ -75,3 +81,20 @@ def setup_credentials() -> None:
         os.environ["ANTHROPIC_BASE_URL"] = base_url
 
     _configured = True
+
+
+def tls_verify_disabled() -> bool:
+    """Whether to skip TLS verification (self-signed internal gateway).
+
+    Reads ``DISABLE_TLS_VERIFY``. The replaced internal helper translated that
+    into ``NODE_TLS_REJECT_UNAUTHORIZED=0`` -- a *Node.js* variable, inherited
+    from a JavaScript agent SDK -- and the classifier still tested for the Node
+    name after the translation step was dropped, so the escape hatch silently
+    stopped working. One variable, read in one place.
+    """
+    return os.environ.get("DISABLE_TLS_VERIFY", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }

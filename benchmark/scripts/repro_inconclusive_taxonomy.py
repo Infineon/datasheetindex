@@ -39,7 +39,7 @@ from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-from chamberbench.claimsio import archive_dir
+from chamberbench.claimsio import archive_dir, short_path
 
 BASELINE = archive_dir() / "baseline_chamber.json"
 
@@ -105,7 +105,7 @@ def main() -> int:
     print("=" * 66)
     print("CHAMBER REPRODUCIBILITY: INCONCLUSIVE-VERDICT TAXONOMY")
     print("=" * 66)
-    print("  source:", BASELINE.relative_to(PROJECT_ROOT))
+    print("  source:", short_path(BASELINE))
     print("  definitive pass:", n_pass)
     print("  inconclusive:   ", total_inconclusive)
     print()

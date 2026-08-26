@@ -9,7 +9,7 @@ carries no run-to-run variance by construction.
 
 Every experimental-result number in the paper should come from this
 script rather than be transcribed by hand. Benchmark context:
-docs/datasheetindex_chamber_benchmark.md. Run:
+docs/reproducing.md. Run:
 
     uv run python scripts/render_paper_tables.py
 """

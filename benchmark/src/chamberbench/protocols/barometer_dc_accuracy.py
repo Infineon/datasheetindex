@@ -165,7 +165,7 @@ if __name__ == "__main__":
 
     claim = ClaimSpec(
         id="dps310-relative-accuracy",
-        pdf_source="eval/chamber/datasheets/barometer.pdf",
+        pdf_source="DPS310",  # corpus is fetched, not vendored; see docs/reproducing.md
         parameter="Relative pressure accuracy",
         expected_unit="hPa",
         claim_kind="dc_accuracy",

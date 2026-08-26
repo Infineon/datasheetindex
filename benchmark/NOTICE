@@ -1,0 +1,49 @@
+chamberbench — chamber-grounded benchmark
+Copyright (c) 2026 Infineon Technologies AG
+
+This project is licensed under the MIT License (see ../LICENSE). The scope of
+that licence is narrower than the directory it sits in, and the distinction
+matters:
+
+WHAT IS MIT-LICENSED
+  - All source under src/, scripts/ and tests/.
+  - All documentation under docs/ and the README.
+  - The claim sets and annotation files under data/.
+  - The archived model outputs under archive/ -- that is, the responses our
+    evaluated models produced, together with our own scoring of them.
+
+WHAT IS NOT OURS TO LICENSE
+  The archived traces in archive/*.jsonl record what tools returned to the
+  model during a run. Those tool outputs contain SHORT EXCERPTS of technical
+  datasheets published by third parties:
+
+    - Si115x                Silicon Laboratories Inc.
+    - ACS70331, A4988       Allegro MicroSystems, LLC
+    - DPS310                Infineon Technologies AG
+
+  Each excerpt is capped at roughly 1,500 characters, and no document is
+  reproduced in full or in a form from which it could be reconstructed:
+  figures and images are omitted entirely, and the text appears as
+  discontiguous fragments selected by the model's own navigation.
+
+  These excerpts are reproduced for the sole purpose of allowing published
+  evaluation results to be independently verified -- a transformative,
+  non-commercial research use. They remain the copyright of the respective
+  manufacturers and are NOT covered by the MIT licence above. No permission
+  to redistribute the underlying datasheets is granted or implied, and the
+  datasheets themselves are deliberately not included in this repository.
+
+  If you are a rights holder and would like material removed, please open an
+  issue at https://github.com/Infineon/datasheetindex/issues and we will
+  respond promptly.
+
+THIRD-PARTY DATA
+  Physical measurements come from the Causal Chambers dataset:
+
+    Gamella, J. L., Peters, J., and Buhlmann, P. (2025). Causal Chambers as a
+    Real-World Physical Testbed for AI Methodology. Nature Machine
+    Intelligence 7(1), 107-118. https://doi.org/10.1038/s42256-024-00964-x
+
+  The dataset is distributed under CC BY 4.0 and requires attribution; that
+  grant covers the images and .csv files in its datasets, and does NOT extend
+  to the manufacturer datasheets mirrored in that repository.

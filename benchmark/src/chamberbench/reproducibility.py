@@ -16,7 +16,7 @@ ClaimSpec", which reads as though an extraction were an input. It is not,
 and the phrasing misled at least one reader into believing the chamber
 grounded the extraction rather than the claim.)
 
-Verdict rule (from docs/datasheetindex_chamber_benchmark.md):
+Verdict rule (from docs/reproducing.md):
 1. If any *load-bearing* operating condition is unmatched -> inconclusive.
 2. If chamber sigma > spec_tolerance -> inconclusive: the apparatus cannot
    resolve the claim at the stated precision, so a "pass" is not

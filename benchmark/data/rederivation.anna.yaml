@@ -1,6 +1,6 @@
 # BLIND RE-DERIVATION OF THE GRADING SURFACE
 #
-# INSTRUCTIONS: docs/chamber_rederivation_guide.md -- read that first.
+# INSTRUCTIONS: docs/annotator_guide.md -- read that first.
 #
 # For each claim below, read the named datasheet and decide, on your own:
 #   value_contains -- the substrings an extraction MUST contain to count
@@ -9,9 +9,9 @@
 #   confidence_min -- the confidence floor below which you would not
 #                     accept the answer even if the substrings matched.
 #
-# Do NOT open eval/chamber/claims.yaml. It holds the values you are
+# Do NOT open data/claims.yaml. It holds the values you are
 # re-deriving, and the whole exercise is whether you land on them
-# independently. Also avoid eval_results/chamber/*.json (model runs).
+# independently. Also avoid archive/*.json (model runs).
 #
 # If you cannot find the parameter in the datasheet, leave value_contains
 # empty and say so in notes. An honest abstention is a result; a guess is

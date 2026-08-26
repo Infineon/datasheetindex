@@ -126,7 +126,7 @@ AGENT_VISIBLE_SPEC_FIELDS: frozenset[str] = frozenset(
 
 
 class ClaimSpec(BaseModel):
-    """A single claim to be verified. Loaded from eval/chamber/claims.yaml."""
+    """A single claim to be verified. Loaded from data/claims.yaml."""
 
     model_config = {"extra": "forbid"}
 
@@ -205,7 +205,7 @@ class ClaimResult(BaseModel):
 
 
 class ChamberMeasurement(BaseModel):
-    """Reproducibility-side payload, populated by eval/chamber/protocols/*."""
+    """Reproducibility-side payload, populated by chamberbench/protocols/*."""
 
     model_config = {"extra": "forbid"}
 

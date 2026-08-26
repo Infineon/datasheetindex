@@ -24,7 +24,7 @@ name, the prose description, the operating conditions, the expected unit,
 and which datasheet to read.
 
 Run:
-    uv run python scripts/prepare_rederivation.py --out eval/chamber/rederivation.<name>.yaml
+    uv run python scripts/prepare_rederivation.py --out data/rederivation.<name>.yaml
 """
 
 from __future__ import annotations
@@ -124,9 +124,7 @@ def build(
     lines: list[str] = []
     lines.append("# BLIND RE-DERIVATION OF THE GRADING SURFACE")
     lines.append("#")
-    lines.append(
-        "# INSTRUCTIONS: docs/chamber_rederivation_guide.md -- read that first."
-    )
+    lines.append("# INSTRUCTIONS: docs/annotator_guide.md -- read that first.")
     lines.append("#")
     lines.append(
         "# For each claim below, read the named datasheet and decide, on your own:"
@@ -224,7 +222,7 @@ def _wrap(text: str, width: int) -> list[str]:
     return out
 
 
-GUIDE = PROJECT_ROOT / "docs" / "chamber_rederivation_guide.md"
+GUIDE = PROJECT_ROOT / "docs" / "annotator_guide.md"
 
 
 def _needles() -> tuple[set[str], set[str]]:
@@ -277,7 +275,7 @@ def _make_bundle(bundle: Path, skeleton: str) -> int:
     """A self-contained folder for an outside annotator -- no repo clone.
 
     The repository is not safe to hand to an outsider for this exercise. Four
-    tracked files carry the answers: claims.yaml itself, eval/chamber/README.md
+    tracked files carry the answers: claims.yaml itself, archive/README.md
     (6 needles), the pre-screen output (25), and classifier_gold.yaml, which
     prints "GOLD must-contain" above each of its cells and covers 20 of the 25
     claims -- the same exposure that disqualifies the annotator who did that

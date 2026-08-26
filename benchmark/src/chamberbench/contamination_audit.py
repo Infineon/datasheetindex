@@ -43,12 +43,12 @@ delta.
 
 Run:
     uv run python -m chamberbench.contamination_audit \\
-        --traces eval_results/chamber/latest_traces.claudesonnet4.6.jsonl \\
-        --out eval_results/chamber/contamination_audit.claudesonnet4.6.json
+        --traces archive/latest_traces.claudesonnet4.6.jsonl \\
+        --out archive/contamination_audit.claudesonnet4.6.json
 
 Or aggregate across all models on disk:
     uv run python -m chamberbench.contamination_audit \\
-        --results-dir eval_results/chamber
+        --results-dir archive
 """
 
 from __future__ import annotations

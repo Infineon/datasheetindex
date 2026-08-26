@@ -45,7 +45,7 @@ from chamberbench.classifier import classify_run
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-from chamberbench.claimsio import archive_dir, data_dir
+from chamberbench.claimsio import archive_dir, data_dir, short_path
 
 RESULTS_DIR = archive_dir()
 EVAL_DIR = data_dir()
@@ -397,7 +397,7 @@ def build_gold_skeleton(
     lines: list[str] = []
     lines.append("# Chamber failure-attribution gold labels (CELL-LEVEL)")
     lines.append("#")
-    lines.append("# INSTRUCTIONS: docs/chamber_annotator_guide.md -- read that first.")
+    lines.append("# INSTRUCTIONS: docs/annotator_guide.md -- read that first.")
     lines.append("# Label blind: do NOT open archive/classifier_auto.*.json")
     lines.append(
         "# (the classifier's own predictions) or another annotator's gold file."
@@ -408,7 +408,7 @@ def build_gold_skeleton(
     lines.append("# best describes whether the classifier got this cell right.")
     lines.append("#")
     lines.append("# Allowed gold_label values (see")
-    lines.append("# docs/chamber_failure_attribution_protocol.md for definitions):")
+    lines.append("# docs/reproducing.md for definitions):")
     lines.append(
         "#   classifier_correct                 -- classifier's per-event labels look right"
     )
@@ -660,7 +660,7 @@ def main() -> int:
         ),
         encoding="utf-8",
     )
-    print(f"  wrote {SAMPLED_CELLS.relative_to(PROJECT_ROOT)}")
+    print(f"  wrote {short_path(SAMPLED_CELLS)}")
 
     print()
     print("== Step 4: running classifier per model (manual rule pass) ==")
@@ -674,7 +674,7 @@ def main() -> int:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(yaml_text, encoding="utf-8")
     try:
-        shown = args.out.relative_to(PROJECT_ROOT)
+        shown = short_path(args.out)
     except ValueError:
         shown = args.out
     print(f"  wrote {shown}")
@@ -690,7 +690,7 @@ def main() -> int:
     print(
         f"   Estimated annotation time: ~{max(15, len(sample) * 2)} minutes at 2 min/cell (scan events, pick label)."
     )
-    print("   See docs/chamber_failure_attribution_protocol.md for the rubric.")
+    print("   See docs/reproducing.md for the rubric.")
     return 0
 
 

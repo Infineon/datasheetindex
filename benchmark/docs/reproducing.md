@@ -2,8 +2,12 @@
 
 Two questions get confused with each other, and they have different answers:
 
-1. **Can you check our arithmetic?** Yes, completely, offline, with no API key
-   and no PDFs. Everything in this repository serves that question.
+1. **Can you check our arithmetic?** Almost completely, offline, with no API
+   key and no PDFs. Everything in this repository serves that question. The
+   qualification is real and worth reading: the variance repeats store
+   verdicts without the extractions that produced them, so Table 1's spread
+   can be recomputed but not re-graded. See
+   [Attacking the grading surface](#attacking-the-grading-surface).
 2. **Can you re-run our agent and get our numbers?** Partly, and less than you
    might expect — for reasons that are mostly not about code. See
    [Why a re-run will differ](#why-a-re-run-will-differ).
@@ -13,17 +17,21 @@ the one this release actually supports.
 
 ## What regenerates what
 
-Every command below reads only `archive/` and `data/`.
+Every command below reads only `archive/` and `data/`, except the two marked
+**net** — those fetch the public Causal Chambers dataset (~1 MB, cached under
+`CHAMBER_CACHE_ROOT`, default `/tmp/cc_data`). Nothing calls a model.
 
 | Paper artifact | Command |
 |---|---|
 | Table 1, cross-model results | `python scripts/render_paper_tables.py` |
 | Figures (dispatch, fidelity, cost/latency, perturbation) | `python scripts/render_paper_figures.py` |
 | Classifier agreement, Cohen's κ | `python scripts/compute_classifier_agreement.py` |
-| Blind re-derivation scoring | `python scripts/score_rederivation.py` |
+| Blind re-derivation scoring | `python scripts/score_rederivation.py --derivation data/rederivation.anna.yaml` |
 | Strict-fidelity re-score | `python scripts/strict_fidelity_rescore.py` |
-| Reproducibility decomposition | `python scripts/repro_inconclusive_taxonomy.py` |
+| Reproducibility decomposition **(net)** | `python scripts/repro_inconclusive_taxonomy.py` |
 | Detector false-positive scan | `python scripts/silent_failure_fp_scan.py` |
+| Re-grade the archive under the current claim set | `python scripts/regrade_archive.py` |
+| Natural-divergence scan **(net)** | `python scripts/scan_natural_divergence.py` |
 | Cost summary | `python scripts/chamber_cost_summary.py` |
 | Baseline vs agentic | `python scripts/baseline_vs_agentic.py` |
 
@@ -42,13 +50,37 @@ self-reported confidence).
 Re-score the same archive under your own version of those fields:
 
 ```bash
-CHAMBERBENCH_DATA_DIR=/path/to/your/claims python scripts/render_paper_tables.py
+CHAMBERBENCH_DATA_DIR=/path/to/your/claims python scripts/regrade_archive.py
 ```
 
-This is how the paper's blind re-derivation was scored, and
+`regrade_archive.py` walks the archived extractions back through
+`evaluate_case` — the same function that produced the published verdicts — so
+the matcher is held fixed and only your claim set varies.
+
+**The renderers do not work this way, and it matters.**
+`render_paper_tables.py` and the other reporting scripts print verdicts that
+were computed at run time and stored in the archive; pointing
+`CHAMBERBENCH_DATA_DIR` at them changes nothing. The scripts that genuinely
+honour it are `regrade_archive.py`, `score_rederivation.py` and
+`strict_fidelity_rescore.py`.
+
+**Only part of the archive is re-gradable.** `baseline_chamber.json` retains
+`claim_result` (the raw extraction) for 149 cells. The variance repeats store
+verdicts only — so repeats 2 and 3, which produce Table 1's per-run spread and
+the Qwen instability headline, **cannot be re-graded from what is shipped**.
+Those verdicts have to be taken on trust, and the earlier answer to "can you
+check our arithmetic" is qualified by exactly that.
+
+Run with no override and you should see **148 agree, 1 flip**. The flip is
+`acs70331-saturation-low`, and it is expected: that claim's needle was
+`VSAT_LOW`, a symbol that can never appear in the string needles are matched
+against, so the cell was recorded as a failure. The repaired needle (`20`,
+`mV`) matches, and the archive still holds the pre-repair verdict. The paper
+discloses the repair; this is what it looks like from the outside.
+
 [`annotator_guide.md`](annotator_guide.md) is the instruction set the
-independent annotator worked from. A disagreement here is a finding; please
-report it rather than assuming it is a bug.
+independent annotator worked from. A disagreement is a finding; please report
+it rather than assuming it is a bug.
 
 ## Version pinning — read this before re-running
 

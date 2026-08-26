@@ -1,7 +1,7 @@
 # Chamber failure-attribution gold labels (CELL-LEVEL)
 #
-# INSTRUCTIONS: docs/chamber_annotator_guide.md -- read that first.
-# Label blind: do NOT open eval_results/chamber/classifier_auto.*.json
+# INSTRUCTIONS: docs/annotator_guide.md -- read that first.
+# Label blind: do NOT open archive/classifier_auto.*.json
 # (the classifier's own predictions) or another annotator's gold file.
 #
 # One gold_label per cell. Scan the events listed in the
@@ -9,7 +9,7 @@
 # best describes whether the classifier got this cell right.
 #
 # Allowed gold_label values (see
-# docs/chamber_failure_attribution_protocol.md for definitions):
+# docs/reproducing.md for definitions):
 #   classifier_correct                 -- classifier's per-event labels look right
 #   classifier_missed_tool_output      -- a tool returned bad content; classifier said ok
 #   classifier_missed_tool_selection   -- agent took an inefficient path; not caught

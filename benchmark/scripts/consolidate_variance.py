@@ -3,7 +3,7 @@
 The variance experiment (revision item 3) ran in three pieces because two
 harness/infra issues surfaced mid-run:
 
-  - GPT-5.1's 15-turn budget was a stale Day-13 artifact (no real context
+  - GPT-5.1's 15-turn budget was a stale artifact (no real context
     constraint -- measured ~30k tokens at turn 30, far under its window).
     A fair cross-model comparison needs a uniform 30-turn budget, so the
     GPT-5.1 leg was re-run at max_turns=30 -> variance_gpt_rerun.json.
@@ -30,6 +30,7 @@ Run:
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from datetime import UTC, datetime
@@ -65,6 +66,41 @@ def _live_repeat(data: dict[str, Any], model: str) -> dict[str, Any]:
 
 
 def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument(
+        "--out",
+        type=Path,
+        default=OUT,
+        help="Where to write the consolidated file (default: the shipped archive path).",
+    )
+    ap.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite the shipped variance_chamber.json anyway.",
+    )
+    args = ap.parse_args()
+
+    # The shipped archive/variance_chamber.json is a PRIMARY artifact, not this
+    # script's output. It is dated 2026-06-05 and carries no `_consolidation`
+    # key, while the inputs below are the superseded 2026-05-22 run: the Claude
+    # and GPT-5.1 legs of the published results come from a later re-run that is
+    # not in the archive. Running this script therefore does not reconstruct the
+    # published file -- it REPLACES two of three model legs with older data, and
+    # silently moves the paper's Table 1 (GPT-5.1 mean latency 236s -> 133s).
+    # It is kept because it documents how the May consolidation was performed.
+    if args.out.exists() and not args.force:
+        print(f"REFUSING to overwrite {args.out}.")
+        print(
+            "  It is the published artifact and was NOT produced by this script "
+            "from these inputs;"
+        )
+        print(
+            "  regenerating would revert the Claude and GPT-5.1 legs to the "
+            "superseded 2026-05-22 run."
+        )
+        print("  Pass --out <new-path> to write elsewhere, or --force to overwrite.")
+        return 1
+
     main_data = json.loads(MAIN.read_text(encoding="utf-8"))
     gpt_data = json.loads(GPT_RERUN.read_text(encoding="utf-8"))
     qwen_data = json.loads(QWEN_RERUN.read_text(encoding="utf-8"))
@@ -135,9 +171,11 @@ def main() -> int:
             ),
         },
     }
-    OUT.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    args.out.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
 
-    print(f"wrote {OUT}")
+    print(f"wrote {args.out}")
     agg = payload["aggregate"]
     for model in payload["models"]:
         a = agg[model]

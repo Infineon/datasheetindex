@@ -67,3 +67,19 @@ def load_archive(name: str) -> Any:
     import json
 
     return json.loads((archive_dir() / name).read_text(encoding="utf-8"))
+
+
+def short_path(p: Path) -> str:
+    """Path relative to the benchmark root when possible, absolute otherwise.
+
+    `CHAMBERBENCH_ARCHIVE_DIR` / `CHAMBERBENCH_DATA_DIR` are documented as the
+    way to point this code at an external archive or claim set, so paths
+    derived from them routinely sit outside the benchmark tree. A bare
+    `Path.relative_to` raises `ValueError` on exactly that case -- and did so
+    in five reporting scripts, AFTER the work was done, turning a completed
+    run into a non-zero exit.
+    """
+    try:
+        return str(p.relative_to(BENCHMARK_ROOT))
+    except ValueError:
+        return str(p)
