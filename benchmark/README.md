@@ -45,9 +45,9 @@ both are addressed in [`docs/reproducing.md`](docs/reproducing.md):
 
 ## Reproduce the published numbers, offline
 
-No API key. No PDFs. No network — with two exceptions, marked in the table in
-[`docs/reproducing.md`](docs/reproducing.md): the two chamber-side analyses
-fetch the public Causal Chambers dataset (~1 MB, cached under
+No API key. No PDFs. No network — with one exception, marked in the table in
+[`docs/reproducing.md`](docs/reproducing.md): `scan_natural_divergence.py`
+fetches the public Causal Chambers dataset (~1 MB, cached under
 `CHAMBER_CACHE_ROOT`, default `/tmp/cc_data`).
 
 ```bash
@@ -55,7 +55,7 @@ cd benchmark
 uv venv && uv pip install -e '.[test]'
 uv run python scripts/render_paper_tables.py    # the paper's model-comparison tables
 uv run python scripts/render_paper_figures.py   # its figures
-uv run pytest -q                                # 133 tests, incl. the paper's numbers
+uv run pytest -q                                # 141 tests, incl. the paper's numbers
 ```
 
 `uv.lock` pins the numeric stack (numpy, pandas, matplotlib) the published

@@ -17,8 +17,8 @@ the one this release actually supports.
 
 ## What regenerates what
 
-Every command below reads only `archive/` and `data/`, except the two marked
-**net** — those fetch the public Causal Chambers dataset (~1 MB, cached under
+Every command below reads only `archive/` and `data/`, except the one marked
+**net** — it fetches the public Causal Chambers dataset (~1 MB, cached under
 `CHAMBER_CACHE_ROOT`, default `/tmp/cc_data`). Nothing calls a model.
 
 | Paper artifact | Command |
@@ -28,15 +28,15 @@ Every command below reads only `archive/` and `data/`, except the two marked
 | Classifier agreement, Cohen's κ | `python scripts/compute_classifier_agreement.py` |
 | Blind re-derivation scoring | `python scripts/score_rederivation.py --derivation data/rederivation.anna.yaml` |
 | Strict-fidelity re-score | `python scripts/strict_fidelity_rescore.py` |
-| Reproducibility decomposition **(net)** | `python scripts/repro_inconclusive_taxonomy.py` |
+| Reproducibility decomposition | `python scripts/repro_inconclusive_taxonomy.py` |
 | Detector false-positive scan | `python scripts/silent_failure_fp_scan.py` |
 | Re-grade the archive under the current claim set | `python scripts/regrade_archive.py` |
 | Natural-divergence scan **(net)** | `python scripts/scan_natural_divergence.py` |
 | Cost summary | `python scripts/chamber_cost_summary.py` |
 | Baseline vs agentic | `python scripts/baseline_vs_agentic.py` |
 
-The two **(net)** commands exit **1** if the Causal Chambers dataset cannot be
-fetched, and print which claims were skipped. That is deliberate: the claims
+The **(net)** command exits **1** if the Causal Chambers dataset cannot be
+fetched, and prints which claims were skipped. That is deliberate: the claims
 needing chamber data are exactly the ones that can produce a non-inconclusive
 verdict, so an unreachable dataset must not be reported as "no failures found".
 An exit of 1 there means *incomplete*, not *failed*.

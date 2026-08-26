@@ -54,26 +54,26 @@ FIGURES_DIR = RESULTS_DIR / "figures"
 PRICING: dict[str, tuple[float, float]] = {
     "claudesonnet4.6": (3.00, 15.00),
     "gpt-5.1": (1.25, 10.00),
-    "qwen3.5-27b": (0.20, 0.60),
+    "qwen3.6-27b": (0.20, 0.60),
 }
 
 RESULT_FILES: dict[str, str] = {
     "claudesonnet4.6": "latest_chamber.claudesonnet4.6.json",
     "gpt-5.1": "latest_chamber.gpt-5.1.json",
-    "qwen3.5-27b": "latest_chamber.qwen3.5-27b.json",
+    "qwen3.6-27b": "latest_chamber.qwen3.6-27b.json",
 }
 
 # Models in canonical plot order (left-to-right, top-to-bottom).
-MODEL_ORDER: list[str] = ["claudesonnet4.6", "gpt-5.1", "qwen3.5-27b"]
+MODEL_ORDER: list[str] = ["claudesonnet4.6", "gpt-5.1", "qwen3.6-27b"]
 MODEL_COLOURS: dict[str, str] = {
     "claudesonnet4.6": "#cc7028",  # Anthropic accent
     "gpt-5.1": "#10a37f",  # OpenAI accent
-    "qwen3.5-27b": "#615ced",  # Qwen accent
+    "qwen3.6-27b": "#615ced",  # Qwen accent
 }
 MODEL_LABELS: dict[str, str] = {
     "claudesonnet4.6": "Claude Sonnet 4.6",
     "gpt-5.1": "GPT-5.1",
-    "qwen3.5-27b": "Qwen3.5-27B",
+    "qwen3.6-27b": "Qwen3.5-27B",
 }
 
 # Claims in the headline matrix (DPS310 + Si115x). ACS70331 cells are
@@ -371,7 +371,7 @@ HISTORICAL_NAV_TOOLS: dict[str, dict[str, float | None]] = {
         "revision2_output_format": 9.95,
         "revision3_submit_tool": None,
     },
-    "qwen3.5-27b": {
+    "qwen3.6-27b": {
         "revision1_output_format": 0.0,
         "revision2_output_format": 0.0,
         "revision3_submit_tool": None,

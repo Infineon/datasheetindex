@@ -532,6 +532,11 @@ def main() -> int:
         type=Path,
     )
     parser.add_argument("--llm-assist", action="store_true")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Allow writing labels back into files inside the archive.",
+    )
     parser.add_argument("--model", default="claudesonnet4.6")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
@@ -542,6 +547,25 @@ def main() -> int:
         args.traces = archive_dir() / "latest_traces.claudesonnet4.6.jsonl"
     if args.summary is None:
         args.summary = archive_dir() / "latest_chamber.claudesonnet4.6.json"
+
+    # `classify_run` writes its labels BACK into both files it reads. Pointing
+    # the defaults at the archive (so the command works at all) therefore made
+    # the no-argument invocation replace primary evidence in place. Refuse,
+    # unless the caller says otherwise.
+    if not args.force:
+        inside = [
+            p
+            for p in (args.traces, args.summary)
+            if archive_dir() in Path(p).resolve().parents
+        ]
+        if inside:
+            print(
+                "REFUSING to classify in place: this rewrites the files it reads,\n"
+                "  and these live in the archive:\n"
+                + "".join(f"    {p}\n" for p in inside)
+                + "  Copy them elsewhere and pass --traces/--summary, or use --force."
+            )
+            return 1
 
     logging.basicConfig(
         level=logging.INFO if args.verbose else logging.WARNING,

@@ -80,9 +80,9 @@ class TestAgainstTheArchive:
 
     ARMS: ClassVar[list[str]] = [
         f"{arm}.{model}.json"
-        for arm in ("closed_book", "null_tool_injection")
+        for arm in ("closed_book", "null_tool_injection", "wrong_content")
         for model in ("claudesonnet4.6", "gpt-5.1", "qwen3.6-27b")
-    ]
+    ] + ["null_tool_injection.qwen3.6-27b.thinking_on.json"]
 
     def _doc(self, name):
         path = archive_dir() / name
@@ -109,10 +109,18 @@ class TestAgainstTheArchive:
         mismatches = []
         for rec in cells:
             recomputed = detect_silent_failure(self._as_cell(rec))
-            if bool(recomputed.flagged) != bool(rec.get("detector_flagged")):
+            # Compare the RULE SET, not just the boolean. Disabling R1
+            # entirely leaves every archive cell still `flagged` (a nav-0 cell
+            # falls through to R2), so a boolean-only assertion cannot see it.
+            recorded_rules = sorted(rec.get("detector_rules") or [])
+            if (
+                bool(recomputed.flagged) != bool(rec.get("detector_flagged"))
+                or sorted(recomputed.rules) != recorded_rules
+            ):
                 mismatches.append(
-                    f"{rec.get('claim_id')}: recorded={rec.get('detector_flagged')} "
-                    f"recomputed={recomputed.flagged}"
+                    f"{rec.get('claim_id')}: recorded={rec.get('detector_flagged')}"
+                    f"/{recorded_rules} recomputed={recomputed.flagged}"
+                    f"/{sorted(recomputed.rules)}"
                 )
         assert not mismatches, (
             f"{name}: detector drifted on {len(mismatches)} cell(s): "

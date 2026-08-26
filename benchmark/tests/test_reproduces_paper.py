@@ -81,16 +81,29 @@ def test_claim_stability_matches_the_paper(model):
     assert n_stable == EXPECTED_FIDELITY[model]["stable"]
 
 
-def test_cohens_kappa_matches_the_paper():
+def test_cohens_kappa_matches_the_paper(tmp_path):
     """kappa = 0.61 for the failure-attribution classifier (paper, Section 6.4).
 
     Recomputed from the two shipped annotation files rather than read from the
     committed report, so a change to either the gold labels or the agreement
     computation fails here.
+
+    Runs against a COPY of the archive inputs. The script rewrites
+    `classifier_agreement.md` unconditionally, so pointing it at the real
+    archive made `pytest` dirty the tracked evidence -- and the README tells
+    readers to run pytest.
     """
+    import os
+    import shutil
     import subprocess
     import sys
 
+    for src in archive_dir().glob("classifier_auto.*.json"):
+        shutil.copy2(src, tmp_path / src.name)
+    assert list(tmp_path.glob("classifier_auto.*.json")), "no auto-label files to copy"
+
+    env = dict(os.environ)
+    env["CHAMBERBENCH_ARCHIVE_DIR"] = str(tmp_path)
     proc = subprocess.run(
         [
             sys.executable,
@@ -99,12 +112,13 @@ def test_cohens_kappa_matches_the_paper():
         capture_output=True,
         text=True,
         cwd=BENCHMARK_ROOT,
-        check=False,  # asserted below, with the stderr in the message
+        env=env,
+        check=False,
     )
     assert proc.returncode == 0, proc.stderr[-2000:]
     line = [ln for ln in proc.stdout.splitlines() if "Cohen's kappa" in ln]
     assert line, f"no kappa line in output:\n{proc.stdout[-2000:]}"
-    kappa = float(line[0].split(":")[1].split("(")[0].strip())
+    kappa = float(line[0].split("):")[1].split("(")[0].strip())
     assert kappa == pytest.approx(0.609, abs=0.005), f"kappa moved: {kappa}"
 
 

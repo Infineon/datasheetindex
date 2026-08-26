@@ -50,6 +50,12 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/chamberbench"]
 
+# Not published to PyPI: the archive carries third-party datasheet excerpts, and
+# the benchmark is distributed through the git repository. Excluded here for the
+# same reason the root project excludes `benchmark/` from ITS sdist.
+[tool.hatch.build.targets.sdist]
+exclude = ["archive/", "figures/"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "scripts"]

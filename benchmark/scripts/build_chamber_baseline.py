@@ -63,7 +63,7 @@ from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-from chamberbench.claimsio import archive_dir, data_dir
+from chamberbench.claimsio import archive_dir, data_dir, short_path
 
 DEFAULT_RESULTS_DIR = archive_dir()
 DEFAULT_OUT = DEFAULT_RESULTS_DIR / "baseline_chamber.json"
@@ -289,7 +289,7 @@ def build(
     return {
         "schema_version": 2,
         "timestamp": datetime.now(UTC).isoformat(),
-        "claims_path": str(claims_path.relative_to(PROJECT_ROOT)),
+        "claims_path": short_path(claims_path),
         "claim_ids": claim_ids,
         "engines": list(ENGINES),
         "models": list(MODELS),
@@ -305,6 +305,12 @@ def main() -> int:
     ap.add_argument("--results-dir", default=str(DEFAULT_RESULTS_DIR))
     ap.add_argument("--claims-path", default=str(data_dir() / "claims.yaml"))
     ap.add_argument("--out", default=str(DEFAULT_OUT))
+    ap.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing baseline. Without this, writing over the "
+        "shipped archive is refused.",
+    )
     ap.add_argument(
         "--qwen-pending-reason",
         default=(
@@ -345,6 +351,14 @@ def main() -> int:
         return 0
 
     out_path = Path(args.out)
+    # `baseline_chamber.json` is the archive's primary artifact and the only
+    # re-gradable one. Running this script with no arguments used to replace it
+    # silently -- the same hazard `consolidate_variance.py` is guarded against.
+    if out_path.exists() and not args.force and not args.dry_run:
+        print(f"REFUSING to overwrite {short_path(out_path)}.")
+        print("  It is primary evidence, not a build output.")
+        print("  Pass --out <new-path> to write elsewhere, or --force to overwrite.")
+        return 1
     out_path.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"wrote {out_path}")
     return 0

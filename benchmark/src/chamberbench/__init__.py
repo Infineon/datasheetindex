@@ -29,16 +29,7 @@ repository-only artifact installed from ``benchmark/``.
 
 from __future__ import annotations
 
-from chamberbench.claimsio import (
-    archive_dir,
-    data_dir,
-    load_archive,
-    load_claim,
-    load_claims,
-)
-from chamberbench.grading import evaluate_case
-from chamberbench.reproducibility import verdict
-from chamberbench.silent_failure import detect_silent_failure
+from typing import TYPE_CHECKING, Any
 
 __version__ = "1.0.0"
 
@@ -48,6 +39,11 @@ __version__ = "1.0.0"
 # overrides the documentation tells a reproduction to set. Someone following
 # `__all__` would have got a path that quietly disregarded their override: a
 # wrong answer rather than an error.
+#
+# Resolved LAZILY (PEP 562). Importing them eagerly pulled numpy and pydantic
+# into every `import chamberbench`, taking it from ~22ms to ~830ms -- a cost
+# paid by every console script and every analysis, to populate names most
+# callers never touch.
 __all__ = [
     "__version__",
     "archive_dir",
@@ -59,3 +55,39 @@ __all__ = [
     "load_claims",
     "verdict",
 ]
+
+_EXPORTS = {
+    "archive_dir": "chamberbench.claimsio",
+    "data_dir": "chamberbench.claimsio",
+    "load_archive": "chamberbench.claimsio",
+    "load_claim": "chamberbench.claimsio",
+    "load_claims": "chamberbench.claimsio",
+    "evaluate_case": "chamberbench.grading",
+    "verdict": "chamberbench.reproducibility",
+    "detect_silent_failure": "chamberbench.silent_failure",
+}
+
+if TYPE_CHECKING:  # pragma: no cover - for type checkers and editors only
+    from chamberbench.claimsio import (
+        archive_dir,
+        data_dir,
+        load_archive,
+        load_claim,
+        load_claims,
+    )
+    from chamberbench.grading import evaluate_case
+    from chamberbench.reproducibility import verdict
+    from chamberbench.silent_failure import detect_silent_failure
+
+
+def __getattr__(name: str) -> Any:
+    module = _EXPORTS.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    import importlib
+
+    return getattr(importlib.import_module(module), name)
+
+
+def __dir__() -> list[str]:
+    return sorted(__all__)

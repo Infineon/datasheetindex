@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from urllib.error import URLError
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
@@ -24,8 +23,11 @@ def main() -> int:
     for claim in _load_claims():
         try:
             m = run_protocol(claim)
-        except (OSError, URLError) as exc:
-            # Chamber data could not be loaded -- almost always a missing or
+        except (OSError, ImportError, AttributeError) as exc:
+            # Chamber data or its protocol module could not be loaded
+            # (URLError subclasses OSError; ImportError covers a claim whose
+            # chamber_protocol names no real module, e.g. the not_gradable
+            # sentinel in the off-corpus claim set) -- almost always a missing or
             # unreachable download. This is NOT a result: the claims that need
             # chamber data are precisely the ones that could produce a
             # non-inconclusive verdict, so swallowing this and printing
