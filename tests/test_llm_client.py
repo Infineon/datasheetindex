@@ -1056,6 +1056,26 @@ def test_a_cyclic_cause_chain_terminates():
     assert _tls_verification_failure(a) is None
 
 
+def test_a_severed_chain_is_not_followed_past_the_severing():
+    """``raise X from None`` cuts the chain on purpose; the walk must respect it.
+
+    Otherwise an unrelated error raised while handling a certificate failure is
+    classified as one -- and that classification is neither retryable nor
+    degradable, so the build would abort quoting a remedy that cannot fix it.
+    """
+    import ssl
+
+    from datasheetindex.llm.client import _tls_verification_failure
+
+    try:
+        try:
+            raise ssl.SSLCertVerificationError("original")
+        except ssl.SSLCertVerificationError:
+            raise ValueError("unrelated, and the chain is severed") from None
+    except ValueError as exc:
+        assert _tls_verification_failure(exc) is None
+
+
 def test_an_ordinary_failure_is_not_mistaken_for_a_tls_one():
     from datasheetindex.llm.client import _tls_verification_failure
 

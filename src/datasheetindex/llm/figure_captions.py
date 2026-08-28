@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, cast
 
 import pymupdf
 
-from datasheetindex.llm.client import LlmTlsVerificationError
 from datasheetindex.tools.vision import inspect_page
 
 if TYPE_CHECKING:
@@ -297,16 +296,22 @@ def caption_figures_in_place(
         image_base64 = payload[1]
         try:
             reply = vision_client.describe_image(CAPTION_SYSTEM_PROMPT, image_base64)
-        except LlmTlsVerificationError:
-            # Degrading here marks the artifact incomplete, so the document is
-            # re-captioned on every subsequent build -- forever, because a
-            # certificate the trust store rejects does not fix itself. What the
-            # operator would see is a slow build and a warning per figure, with
-            # the one actionable line buried in each traceback. `list(pool.map)`
-            # re-raises this out of the dispatch below; the pool's own shutdown
-            # still drains the siblings, which fail the same way immediately.
-            raise
         except Exception:
+            # Deliberately NOT carved out for LlmTlsVerificationError, unlike
+            # the ToC fallback. Captioning runs at step 6b and the artifacts are
+            # written at step 8, so raising here would abort the build and write
+            # *nothing* -- for a document whose index is otherwise complete and
+            # whose ToC may be perfectly good. An unusable artifact is a worse
+            # outcome than uncaptioned figures, and the ToC fallback's argument
+            # (an empty ToC is indistinguishable from a document with no
+            # outline) does not transfer to a case where the outline is fine.
+            #
+            # Legibility still improves, without the raise: the warning below
+            # now carries the named error's full remedy instead of openai's
+            # "Connection error.". The re-captioning loop this would have
+            # closed is pre-existing behaviour for any persistent caption
+            # failure, and closing it belongs with `figure_captions_pending`'s
+            # non-transient treatment in `reuse_blocker`, not here.
             logger.warning(
                 "Figure caption failed on page %s", entry["page"], exc_info=True
             )

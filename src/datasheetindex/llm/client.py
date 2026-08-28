@@ -148,7 +148,17 @@ def _tls_verification_failure(
         seen.add(id(current))
         if isinstance(current, ssl.SSLCertVerificationError):
             return current
-        current = current.__cause__ or current.__context__
+        if current.__cause__ is not None:
+            current = current.__cause__
+        elif current.__suppress_context__:
+            # ``raise X from None`` severs the chain deliberately. Following
+            # ``__context__`` past that would classify an unrelated error as a
+            # certificate failure -- which is neither retryable nor degradable
+            # at any of the three sites, so the build would abort with a remedy
+            # that cannot fix it. This is how ``traceback`` walks a chain too.
+            return None
+        else:
+            current = current.__context__
     return None
 
 

@@ -387,6 +387,18 @@ moment one appears. The probe is `_VisionResolver.has_client()` rather than
 fallback needs any text client. `toc_fallback_raised` and `figure_caption_failed`
 stay transient -- those are genuine failures worth retrying.
 
+One failure is carved out of that, in one direction only. A TLS certificate the
+local trust store rejects raises `LlmTlsVerificationError` out of the ToC
+fallback and out of `build()`, rather than becoming `toc_fallback_raised`: it is
+permanent, it is fixed in one variable (`LITELLM_TLS_VERIFY`, or the trust
+store), and its note would otherwise sit unread inside an artifact whose ToC is
+empty for a reason indistinguishable from a document that genuinely has no
+outline. **Figure captioning is deliberately NOT carved out.** Captioning runs
+at step 6b and the artifacts are written at step 8, so raising there would
+abort the build and write nothing at all -- for a document whose index, and
+possibly whose ToC, is otherwise complete. `figure_caption_failed` therefore
+still absorbs a TLS failure; only the logged message gets better.
+
 #### Decisions already settled by measurement
 
 Every number here comes from one **7-vendor corpus** (TI, Espressif, Bosch,
