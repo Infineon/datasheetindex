@@ -21,7 +21,7 @@ def _install_fake_dotenv(monkeypatch) -> None:
     )
 
 
-class _TrackedHttpxClient:
+class _TrackedHttpx2Client:
     def __init__(self) -> None:
         self.closed = False
 
@@ -103,11 +103,11 @@ class _FakeChat:
 
 def _patch_fake_clients(
     monkeypatch,
-    seen_httpx_kwargs: dict[str, object],
+    seen_httpx2_kwargs: dict[str, object],
     seen_openai_kwargs: dict[str, object],
-    httpx_clients: list[_TrackedHttpxClient] | None = None,
+    httpx2_clients: list[_TrackedHttpx2Client] | None = None,
 ) -> _FakeChat:
-    """Install fake ``httpx``/``openai`` modules; return the chat fake.
+    """Install fake ``httpx2``/``openai`` modules; return the chat fake.
 
     The chat fake is returned rather than discarded so a test can assert what
     ``create_llm_client`` wired into it. Before it was real, ``chat.completions``
@@ -129,17 +129,17 @@ def _patch_fake_clients(
             self.responses = _ForbiddenResponses()
             self.chat = types.SimpleNamespace(completions=chat)
 
-    def _fake_httpx_client(**kwargs):
-        seen_httpx_kwargs.clear()
-        seen_httpx_kwargs.update(kwargs)
-        client = _TrackedHttpxClient()
-        if httpx_clients is not None:
-            httpx_clients.append(client)
+    def _fake_httpx2_client(**kwargs):
+        seen_httpx2_kwargs.clear()
+        seen_httpx2_kwargs.update(kwargs)
+        client = _TrackedHttpx2Client()
+        if httpx2_clients is not None:
+            httpx2_clients.append(client)
         return client
 
-    fake_httpx = types.SimpleNamespace(Client=_fake_httpx_client)
+    fake_httpx2 = types.SimpleNamespace(Client=_fake_httpx2_client)
     fake_openai = types.SimpleNamespace(OpenAI=_FakeOpenAI)
-    monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
+    monkeypatch.setitem(sys.modules, "httpx2", fake_httpx2)
     monkeypatch.setitem(sys.modules, "openai", fake_openai)
     return chat
 
@@ -170,7 +170,7 @@ def test_create_llm_client_raises_partial_env(monkeypatch):
 
 def _verify_arg_for(monkeypatch, tls_verify: str | None) -> object:
     """Build a client with ``LITELLM_TLS_VERIFY`` set (or unset) and report
-    the ``verify=`` argument that reached ``httpx.Client``."""
+    the ``verify=`` argument that reached ``httpx2.Client``."""
     monkeypatch.setenv("LITELLM_BASE_URL", "https://example.com")
     monkeypatch.setenv("LITELLM_MASTER_KEY", "secret")
     if tls_verify is None:
@@ -179,15 +179,15 @@ def _verify_arg_for(monkeypatch, tls_verify: str | None) -> object:
         monkeypatch.setenv("LITELLM_TLS_VERIFY", tls_verify)
     _install_fake_dotenv(monkeypatch)
 
-    seen_httpx_kwargs: dict[str, object] = {}
+    seen_httpx2_kwargs: dict[str, object] = {}
     _seen_openai_kwargs: dict[str, object] = {}
-    _patch_fake_clients(monkeypatch, seen_httpx_kwargs, _seen_openai_kwargs)
+    _patch_fake_clients(monkeypatch, seen_httpx2_kwargs, _seen_openai_kwargs)
 
     from datasheetindex.llm.client import create_llm_client
 
     llm = create_llm_client()
     assert callable(llm)
-    return seen_httpx_kwargs["verify"]
+    return seen_httpx2_kwargs["verify"]
 
 
 def test_create_llm_client_tls_verify_defaults_true(monkeypatch):
@@ -197,7 +197,7 @@ def test_create_llm_client_tls_verify_defaults_true(monkeypatch):
     default used to be ``False``, so an ordinary install shipped the master
     key to the gateway over an unauthenticated channel with nothing in the
     call, the log or the result saying so. Asserting on the ``verify=``
-    argument that reaches ``httpx.Client`` -- rather than on
+    argument that reaches ``httpx2.Client`` -- rather than on
     ``_parse_tls_verify_env`` alone -- keeps the wiring in scope, since a
     correct parse that is never passed through fixes nothing.
     """
@@ -241,9 +241,9 @@ def test_create_llm_client_timeout_and_retries_defaults(monkeypatch):
     monkeypatch.delenv("LITELLM_MAX_RETRIES", raising=False)
     _install_fake_dotenv(monkeypatch)
 
-    seen_httpx_kwargs: dict[str, object] = {}
+    seen_httpx2_kwargs: dict[str, object] = {}
     seen_openai_kwargs: dict[str, object] = {}
-    _patch_fake_clients(monkeypatch, seen_httpx_kwargs, seen_openai_kwargs)
+    _patch_fake_clients(monkeypatch, seen_httpx2_kwargs, seen_openai_kwargs)
 
     from datasheetindex.llm.client import (
         DEFAULT_MAX_RETRIES,
@@ -253,7 +253,7 @@ def test_create_llm_client_timeout_and_retries_defaults(monkeypatch):
 
     llm = create_llm_client()
     assert callable(llm)
-    assert seen_httpx_kwargs["timeout"] == DEFAULT_TIMEOUT_SECONDS
+    assert seen_httpx2_kwargs["timeout"] == DEFAULT_TIMEOUT_SECONDS
     assert seen_openai_kwargs["timeout"] == DEFAULT_TIMEOUT_SECONDS
     assert seen_openai_kwargs["max_retries"] == DEFAULT_MAX_RETRIES
 
@@ -265,15 +265,15 @@ def test_create_llm_client_timeout_and_retries_override(monkeypatch):
     monkeypatch.setenv("LITELLM_MAX_RETRIES", "5")
     _install_fake_dotenv(monkeypatch)
 
-    seen_httpx_kwargs: dict[str, object] = {}
+    seen_httpx2_kwargs: dict[str, object] = {}
     seen_openai_kwargs: dict[str, object] = {}
-    _patch_fake_clients(monkeypatch, seen_httpx_kwargs, seen_openai_kwargs)
+    _patch_fake_clients(monkeypatch, seen_httpx2_kwargs, seen_openai_kwargs)
 
     from datasheetindex.llm.client import create_llm_client
 
     llm = create_llm_client()
     assert callable(llm)
-    assert seen_httpx_kwargs["timeout"] == 12.5
+    assert seen_httpx2_kwargs["timeout"] == 12.5
     assert seen_openai_kwargs["timeout"] == 12.5
     assert seen_openai_kwargs["max_retries"] == 5
 
@@ -302,19 +302,19 @@ def test_create_llm_client_invalid_retries_raises(monkeypatch):
         create_llm_client()
 
 
-def test_close_llm_client_closes_httpx_client(monkeypatch):
+def test_close_llm_client_closes_httpx2_client(monkeypatch):
     monkeypatch.setenv("LITELLM_BASE_URL", "https://example.com")
     monkeypatch.setenv("LITELLM_MASTER_KEY", "secret")
     _install_fake_dotenv(monkeypatch)
 
-    seen_httpx_kwargs: dict[str, object] = {}
+    seen_httpx2_kwargs: dict[str, object] = {}
     seen_openai_kwargs: dict[str, object] = {}
-    httpx_clients: list[_TrackedHttpxClient] = []
+    httpx2_clients: list[_TrackedHttpx2Client] = []
     _patch_fake_clients(
         monkeypatch,
-        seen_httpx_kwargs,
+        seen_httpx2_kwargs,
         seen_openai_kwargs,
-        httpx_clients=httpx_clients,
+        httpx2_clients=httpx2_clients,
     )
 
     from datasheetindex.llm.client import close_llm_client, create_llm_client
@@ -322,8 +322,8 @@ def test_close_llm_client_closes_httpx_client(monkeypatch):
     llm = create_llm_client()
     close_llm_client(llm)
 
-    assert len(httpx_clients) == 1
-    assert httpx_clients[0].closed is True
+    assert len(httpx2_clients) == 1
+    assert httpx2_clients[0].closed is True
 
 
 def test_get_structured_output_client_returns_none_for_plain_callable():
@@ -350,13 +350,13 @@ def test_get_structured_output_client_exposes_schema_calls(monkeypatch):
                 )
             )
 
-    def _fake_httpx_client(**_kwargs):
-        return _TrackedHttpxClient()
+    def _fake_httpx2_client(**_kwargs):
+        return _TrackedHttpx2Client()
 
     monkeypatch.setitem(
         sys.modules,
-        "httpx",
-        types.SimpleNamespace(Client=_fake_httpx_client),
+        "httpx2",
+        types.SimpleNamespace(Client=_fake_httpx2_client),
     )
     monkeypatch.setitem(
         sys.modules,
@@ -1002,3 +1002,189 @@ def test_create_llm_client_integration():
         assert len(result) > 0
     finally:
         close_llm_client(llm)
+
+
+# --- TLS verification failures are named, not swallowed ----------------------
+# A gateway whose certificate does not verify is the one LLM failure the
+# transport describes uselessly: openai raises `APIConnectionError("Connection
+# error.")` and the `ssl.SSLCertVerificationError` naming the real cause sits
+# three links down the exception chain (openai -> httpx2 -> httpcore2 -> ssl,
+# and NOT three links of `__cause__`: the last hop is `__context__` only,
+# measured against a self-signed local server). Every caller of this client
+# wraps its calls in a blanket `except Exception` that logs a warning, so
+# without a distinguishable type the symptom is a silently empty ToC -- exactly
+# what `LITELLM_TLS_VERIFY` defaulting to verify made possible for anyone whose
+# gateway is fronted by a private CA.
+
+
+def _cert_error(msg="certificate verify failed: self-signed certificate"):
+    """Rebuild the chain openai hands us, with the shape it really has.
+
+    Built by *raising*, not by assigning ``__cause__``, because the difference
+    is the whole game. ``httpcore2``'s connection pool re-raises with ``raise
+    exc from None``, which clears ``__cause__`` and sets ``__suppress_context__``
+    -- so the ``ssl.SSLCertVerificationError`` is reachable only through the
+    ``__context__`` of a link that claims its context is suppressed. Measured
+    against a real self-signed server through ``httpx2.Client(verify=True)``:
+
+        httpx2.ConnectError     cause=ConnectError  suppress=True
+        httpcore2.ConnectError  cause=None          suppress=True
+          context=ssl.SSLCertVerificationError
+
+    A fixture that assigns ``__cause__`` leaves ``__suppress_context__`` false at
+    every level and so passes against walks that fail on the real stack -- which
+    is exactly how a chain-walk change shipped that detected nothing at all.
+    """
+    import ssl
+
+    try:
+        try:
+            raise ssl.SSLCertVerificationError(
+                f"[SSL: CERTIFICATE_VERIFY_FAILED] {msg}"
+            )
+        except ssl.SSLCertVerificationError:
+            # The pool's re-raise: severs __cause__, leaves the ssl error on
+            # __context__ only.
+            raise ConnectionError("[SSL: CERTIFICATE_VERIFY_FAILED] " + msg) from None
+    except ConnectionError as transport:
+        try:
+            raise RuntimeError("Connection error.") from transport
+        except RuntimeError as api:
+            return api
+
+
+def test_tls_failure_is_found_through_the_whole_cause_chain():
+    from datasheetindex.llm.client import _tls_verification_failure
+
+    assert _tls_verification_failure(_cert_error()) is not None
+
+
+def test_tls_failure_is_found_through_context_as_well_as_cause():
+    """An `except`-and-raise without `from` links via `__context__`, not `__cause__`."""
+    import ssl
+
+    from datasheetindex.llm.client import _tls_verification_failure
+
+    outer = RuntimeError("Connection error.")
+    outer.__context__ = ssl.SSLCertVerificationError("nope")
+    assert _tls_verification_failure(outer) is not None
+
+
+def test_a_cyclic_cause_chain_terminates():
+    """`raise ... from` can build a cycle; walking it must not hang the build."""
+    from datasheetindex.llm.client import _tls_verification_failure
+
+    a = RuntimeError("a")
+    b = RuntimeError("b")
+    a.__cause__ = b
+    b.__cause__ = a
+    assert _tls_verification_failure(a) is None
+
+
+def test_the_shape_httpcore2_actually_raises_is_detected():
+    """The regression test for the walk, pinned to the real chain shape.
+
+    ``httpcore2`` re-raises ``from None``, so honouring ``__suppress_context__``
+    stops the walk at the one link that holds the certificate error and the
+    feature silently detects nothing. This asserts the production shape rather
+    than a hand-assembled one; the fixture's docstring records the measurement.
+    """
+    import ssl
+
+    from datasheetindex.llm.client import _tls_verification_failure
+
+    chain = _cert_error()
+    # Guard the fixture itself: if it stops reproducing the severed link, this
+    # test would keep passing while covering nothing.
+    severed = chain.__cause__
+    assert severed is not None
+    assert severed.__cause__ is None
+    assert severed.__suppress_context__ is True
+    assert isinstance(severed.__context__, ssl.SSLCertVerificationError)
+
+    assert isinstance(_tls_verification_failure(chain), ssl.SSLCertVerificationError)
+
+
+def test_an_ordinary_failure_is_not_mistaken_for_a_tls_one():
+    from datasheetindex.llm.client import _tls_verification_failure
+
+    assert _tls_verification_failure(RuntimeError("Connection error.")) is None
+
+
+def _client_raising(exc):
+    """A `_ManagedLlmClient` whose every gateway call raises `exc`."""
+    from datasheetindex.llm.client import _ManagedLlmClient
+
+    class _Boom:
+        def create(self, **_kwargs):
+            raise exc
+
+    return _ManagedLlmClient(
+        types.SimpleNamespace(completions=_Boom()).completions, object(), "gpt-4.1"
+    )
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        pytest.param(lambda c: c("system", "user"), id="text"),
+        pytest.param(
+            lambda c: c.structured_json("s", "u", name="n", schema={"type": "object"}),
+            id="structured",
+        ),
+        pytest.param(lambda c: c.describe_image("s", "QUJD"), id="vision"),
+    ],
+)
+def test_every_call_shape_reports_a_tls_failure_as_such(call, monkeypatch):
+    """Text, structured and vision all reach the gateway; all three must name it."""
+    from datasheetindex.llm.client import LlmTlsVerificationError
+
+    monkeypatch.setenv("LITELLM_BASE_URL", "https://gateway.example/v1")
+    with pytest.raises(LlmTlsVerificationError) as excinfo:
+        call(_client_raising(_cert_error()))
+
+    message = str(excinfo.value)
+    # The message has to carry the whole remedy: which endpoint failed, the
+    # preferred fix, and the escape hatch. A named type with a bare "TLS error"
+    # would move the problem rather than solve it.
+    assert "gateway.example" in message
+    assert "LITELLM_TLS_VERIFY" in message
+    assert "trust store" in message
+
+
+def test_the_original_transport_error_is_kept_as_the_cause(monkeypatch):
+    """Nothing is hidden: the raw chain stays reachable for a traceback."""
+    import ssl
+
+    from datasheetindex.llm.client import LlmTlsVerificationError
+
+    monkeypatch.setenv("LITELLM_BASE_URL", "https://gateway.example/v1")
+    with pytest.raises(LlmTlsVerificationError) as excinfo:
+        _client_raising(_cert_error())("s", "u")
+
+    from datasheetindex.llm.client import _tls_verification_failure
+
+    original = excinfo.value.__cause__
+    assert isinstance(original, RuntimeError)
+    # The ssl error is still reachable from the raised error, not just from the
+    # one it wrapped -- a traceback shows the whole chain.
+    assert isinstance(
+        _tls_verification_failure(excinfo.value), ssl.SSLCertVerificationError
+    )
+
+
+def test_a_non_tls_failure_is_left_exactly_as_it_was(monkeypatch):
+    """The narrowing must not swallow or reshape any other error."""
+    monkeypatch.setenv("LITELLM_BASE_URL", "https://gateway.example/v1")
+    boom = ValueError("something else entirely")
+    with pytest.raises(ValueError, match="something else entirely"):
+        _client_raising(boom)("s", "u")
+
+
+def test_the_message_names_the_variable_when_the_url_is_unset(monkeypatch):
+    """A client built from an explicit argument may leave the env var unset."""
+    from datasheetindex.llm.client import LlmTlsVerificationError
+
+    monkeypatch.delenv("LITELLM_BASE_URL", raising=False)
+    with pytest.raises(LlmTlsVerificationError, match="LITELLM_BASE_URL"):
+        _client_raising(_cert_error())("s", "u")

@@ -7,7 +7,7 @@ left that file behind as a permanent tripwire; 0.30.0 moved the text and
 structured calls for the same measured reason and would otherwise have left none.
 
 The credential-skip pattern is ``_has_env`` (in ``tests/conftest.py``), which
-skips when ``.env`` is missing, when ``python-dotenv``/``httpx``/``openai`` are
+skips when ``.env`` is missing, when ``python-dotenv``/``httpx2``/``openai`` are
 absent (a plain ``uv sync`` excludes the ``[llm]`` extra), or when the two
 LiteLLM variables are unset -- and which opts these tests out of the autouse
 ``_hermetic_llm_env`` fixture that scrubs credentials everywhere else.

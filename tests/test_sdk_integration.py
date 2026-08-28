@@ -19,7 +19,7 @@ import pymupdf
 import pytest
 
 from datasheetindex import create_datasheet_tools_server
-from tests.conftest import sdk_envelope_to_content
+from tests.conftest import mcp_call, mcp_is_error, mcp_mime, sdk_envelope_to_content
 
 pytest.importorskip("claude_agent_sdk")
 pytest.importorskip("mcp")
@@ -41,15 +41,17 @@ def pdf_path(tmp_path):
 
 
 def _call_tool(server, name, args):
-    """Dispatch through the SDK server's real CallToolRequest handler."""
+    """Dispatch through the SDK server's real CallToolRequest handler.
+
+    ``create_sdk_mcp_server`` returns an ``mcp.server.lowlevel.Server``, so the
+    handler is reached exactly the way our own local server's is -- and it moved
+    on mcp 2.x exactly the same way. ``mcp_call`` owns that branch; going
+    through the 1.x-only ``request_handlers`` dict here is what broke this file
+    when ``claude-agent-sdk`` lifted its ``mcp<2`` pin and the lock followed.
+    """
     from mcp import types
 
-    handler = server.request_handlers[types.CallToolRequest]
-    request = types.CallToolRequest(
-        method="tools/call",
-        params=types.CallToolRequestParams(name=name, arguments=args),
-    )
-    return asyncio.run(handler(request)).root
+    return mcp_call(server, types, name, args)
 
 
 def test_inspect_page_returns_an_image_through_the_real_sdk(pdf_path, tmp_path):
@@ -67,16 +69,16 @@ def test_inspect_page_returns_an_image_through_the_real_sdk(pdf_path, tmp_path):
         "build_datasheet",
         {"pdf_source": str(pdf_path), "output_dir": str(tmp_path / "out")},
     )
-    assert build.isError is False
+    assert mcp_is_error(build) is False
 
     result = _call_tool(server, "inspect_page", {"page": 1})
 
-    assert result.isError is False, (
+    assert mcp_is_error(result) is False, (
         f"inspect_page failed through the real SDK: "
         f"{[getattr(c, 'text', c) for c in result.content]}"
     )
     assert result.content[0].type == "image"
-    assert result.content[0].mimeType == "image/png"
+    assert mcp_mime(result.content[0]) == "image/png"
     assert result.content[0].data
 
 
@@ -108,12 +110,12 @@ def test_error_results_name_the_exception_type_through_the_real_sdk(pdf_path, tm
 
     # Path 1: rejected before our code runs, with a message we do not author.
     missing_arg = _call_tool(server, "get_section_text", {"start_page": 1})
-    assert missing_arg.isError is True
+    assert mcp_is_error(missing_arg) is True
     assert "required property" in missing_arg.content[0].text
 
     # Path 2: schema-valid, raises inside the handler, prefixed on the way out.
     out_of_range = _call_tool(server, "inspect_page", {"page": 9999})
-    assert out_of_range.isError is True
+    assert mcp_is_error(out_of_range) is True
     assert out_of_range.content[0].text.startswith("ValueError: ")
     assert "out of range" in out_of_range.content[0].text
 
@@ -150,4 +152,4 @@ def test_conftest_mirror_matches_the_real_sdk_converter(pdf_path, tmp_path):
     mirrored = sdk_envelope_to_content(envelope)
 
     assert [block["type"] for block in mirrored] == [c.type for c in real.content]
-    assert mirrored[0]["mimeType"] == real.content[0].mimeType
+    assert mirrored[0]["mimeType"] == mcp_mime(real.content[0])

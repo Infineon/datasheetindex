@@ -3,7 +3,7 @@
 Follows the credential-skip pattern used throughout the suite for real-gateway
 tests (see ``tests/test_summarizer.py``, ``tests/test_llm_client.py``,
 ``tests/test_toc_fallback.py``): ``_has_env`` (in ``tests/conftest.py``) skips
-when ``.env`` is missing, when ``python-dotenv``/``httpx``/``openai`` are not
+when ``.env`` is missing, when ``python-dotenv``/``httpx2``/``openai`` are not
 installed (a plain ``uv sync`` excludes the ``[llm]`` extra), or when the two
 LiteLLM environment variables are unset -- and it opts this test out of the
 autouse ``_hermetic_llm_env`` fixture that otherwise scrubs LITELLM

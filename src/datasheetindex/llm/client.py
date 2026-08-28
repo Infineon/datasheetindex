@@ -11,9 +11,11 @@ from __future__ import annotations
 import importlib
 import logging
 import os
+import ssl
 import time
 import weakref
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Protocol, cast
 
@@ -105,6 +107,117 @@ def _close_resource(resource: object | None) -> None:
         close()
 
 
+class LlmTlsVerificationError(RuntimeError):
+    """The LLM gateway's TLS certificate could not be verified.
+
+    Raised in place of the transport's own error, which describes this failure
+    uselessly: openai reports ``APIConnectionError("Connection error.")`` and
+    the ``ssl.SSLCertVerificationError`` naming the real cause sits three links
+    down the exception chain (openai -> httpx2 -> httpcore2 -> ssl, measured
+    against a self-signed local server). It is **not** three links of
+    ``__cause__``: httpcore2 re-raises ``from None``, so the last hop is
+    reachable only through ``__context__``. Do not shorten this to "the cause
+    chain" -- that misreading is what produced a guard that detected nothing,
+    and ``_tls_verification_failure`` carries the measurement.
+
+    A *distinguishable type* is the point, not the nicer message. Every caller
+    of this client wraps its calls in a blanket ``except Exception`` that logs a
+    warning and degrades -- ``llm/toc_fallback.py`` returns ``[]`` when the
+    first chunk fails, which reaches the caller as an index with **no ToC
+    entries**, indistinguishable from a document that genuinely has no outline.
+    So the one LLM failure an operator can actually fix was also the least
+    visible one. Two degrading sites now let this type through -- the ToC
+    fallback's chunk loop and ``index.build``'s fallback handler. Figure
+    captioning deliberately does not: it runs before the artifacts are
+    written, so raising there destroys an otherwise-complete index.
+
+    Scoped deliberately to *certificate verification*, not to connection errors
+    at large. An unreachable host, a DNS failure or a refused connection are
+    transient and worth degrading over; a certificate the local trust store will
+    not accept is a permanent fact about the deployment that no retry and no
+    later build will change. That is also why it is not retryable below.
+    """
+
+
+def _tls_verification_failure(
+    exc: BaseException,
+) -> ssl.SSLCertVerificationError | None:
+    """Find a certificate-verification failure anywhere in ``exc``'s causes.
+
+    Walks ``__cause__`` first and falls back to ``__context__``: a bare
+    ``raise`` inside an ``except`` block links implicitly through the latter.
+    Cycle-guarded because ``raise X from Y`` can build one, and this runs on the
+    failure path of every gateway call.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, ssl.SSLCertVerificationError):
+            return current
+        # ``__context__`` is followed even when ``__suppress_context__`` is set,
+        # and that is load-bearing rather than sloppy. ``httpcore2``'s connection
+        # pool re-raises every exception as ``raise exc from None``, which clears
+        # ``__cause__`` and sets ``__suppress_context__`` -- so on the real stack
+        # the ``ssl.SSLCertVerificationError`` hangs off ``__context__`` of a
+        # link that claims its context is suppressed:
+        #
+        #   httpx2.ConnectError     cause=ConnectError  suppress=True
+        #   httpcore2.ConnectError  cause=None          suppress=True
+        #     context=ssl.SSLCertVerificationError   <-- only reachable here
+        #
+        # Honouring the flag was tried and reverted: it stops the walk at
+        # exactly that link, so nothing is ever detected and the whole feature
+        # silently does nothing. The cost is that an unrelated error raised
+        # ``from None`` while handling a certificate failure is still classified
+        # as one -- a shape no library in this stack produces, and one where an
+        # ``ssl.SSLCertVerificationError`` did genuinely occur anyway.
+        # Identity, not truthiness: an exception type that subclasses an empty
+        # collection is falsy, and `or` would skip a real __cause__ branch.
+        current = (
+            current.__cause__ if current.__cause__ is not None else current.__context__
+        )
+    return None
+
+
+def _raise_if_tls_verification_failed(exc: Exception) -> None:
+    """Re-raise ``exc`` as :class:`LlmTlsVerificationError` if that is what it is.
+
+    A no-op for every other failure, so it is safe as the first statement of a
+    blanket ``except`` block.
+    """
+    cause = _tls_verification_failure(exc)
+    if cause is None:
+        return
+    target = os.environ.get("LITELLM_BASE_URL") or "the URL in LITELLM_BASE_URL"
+    raise LlmTlsVerificationError(
+        f"TLS certificate verification failed for the LLM gateway at {target}: "
+        f"{cause}. Add the gateway's CA certificate to the trust store, or set "
+        "LITELLM_TLS_VERIFY=false to skip verification. Prefer the trust store: "
+        "LITELLM_MASTER_KEY travels on this channel."
+    ) from exc
+
+
+@contextmanager
+def _naming_tls_failures() -> Iterator[None]:
+    """Wrap a gateway call so a certificate failure arrives as a named error.
+
+    Every call shape -- text, structured and vision -- reaches the gateway
+    inside this block, so the conversion cannot be wired into two of the three
+    and missed on the last.
+
+    A context manager rather than a ``create(**kwargs)`` wrapper on purpose:
+    forwarding through ``**kwargs`` erases ``_ChatCompletionsApi.create``'s
+    signature, and the type checker stops checking `model=`/`messages=` at all
+    three call sites. Here the call keeps its own shape and stays checked.
+    """
+    try:
+        yield
+    except Exception as exc:
+        _raise_if_tls_verification_failed(exc)
+        raise
+
+
 _RETRY_MAX_ATTEMPTS = 5
 _RETRY_BASE_DELAY = 4.0
 _RETRY_MAX_DELAY = 60.0
@@ -124,6 +237,11 @@ VISION_MAX_TOKENS = 300
 
 def _is_retryable(exc: Exception) -> bool:
     """Check if an API error is retryable (429 or 5xx)."""
+    if isinstance(exc, LlmTlsVerificationError):
+        # Permanent by construction, and stated rather than left to the
+        # substring check below -- which would match a certificate message
+        # mentioning a rate by accident.
+        return False
     status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
     if isinstance(status, int):
         return status == 429 or status >= 500
@@ -199,13 +317,14 @@ def _call_with_retry(
     last_exc: Exception | None = None
     for attempt in range(_RETRY_MAX_ATTEMPTS):
         try:
-            response = chat_api.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-            )
+            with _naming_tls_failures():
+                response = chat_api.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                )
             return _read_chat_reply(response, model, what="Text completion")[0]
         except Exception as exc:
             last_exc = exc
@@ -272,22 +391,23 @@ def _call_structured_with_retry(
             if max_output_tokens is not None:
                 optional["max_tokens"] = max_output_tokens
 
-            response = chat_api.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                response_format={
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": name,
-                        "strict": True,
-                        "schema": schema,
+            with _naming_tls_failures():
+                response = chat_api.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    response_format={
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": name,
+                            "strict": True,
+                            "schema": schema,
+                        },
                     },
-                },
-                **optional,
-            )
+                    **optional,
+                )
             content, finish_reason = _read_chat_reply(
                 response, model, what="Structured completion"
             )
@@ -425,47 +545,48 @@ class _ManagedLlmClient:
         one type-checks and then fails at the gateway. Worth keeping in mind if
         this call is ever ported back.
         """
-        response = self._chat_api.create(
-            model=self._vision_model,
-            messages=[
-                # The prompt is sent twice, deliberately. It is parity with the
-                # Responses shape this replaced (``instructions=`` *and* an
-                # ``input_text`` part), the measured 1074/1084 input tokens
-                # quoted above already include it, and it keeps the instruction
-                # visible to a model that weights the system role weakly.
-                # Deleting either copy changes every number in this docstring.
-                {"role": "system", "content": system},
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": system},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:{media_type};base64,{image_base64}",
-                                "detail": "high",
+        with _naming_tls_failures():
+            response = self._chat_api.create(
+                model=self._vision_model,
+                messages=[
+                    # The prompt is sent twice, deliberately. It is parity with the
+                    # Responses shape this replaced (``instructions=`` *and* an
+                    # ``input_text`` part), the measured 1074/1084 input tokens
+                    # quoted above already include it, and it keeps the instruction
+                    # visible to a model that weights the system role weakly.
+                    # Deleting either copy changes every number in this docstring.
+                    {"role": "system", "content": system},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": system},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{media_type};base64,{image_base64}",
+                                    "detail": "high",
+                                },
                             },
-                        },
-                    ],
-                },
-            ],
-            # ``max_tokens``, not ``max_completion_tokens``, and the choice was
-            # measured rather than inherited. Both names are accepted by every
-            # model this gateway serves -- gpt-4.1, the self-hosted qwen and
-            # gpt-5-mini all answered under either -- so the newer spelling buys
-            # no compatibility, while ``max_tokens`` is the one an
-            # OpenAI-compatible backend such as vLLM is certain to know.
-            #
-            # It is worth being clear about what *neither* name protects
-            # against: a **reasoning** model spends this budget on thinking
-            # before it writes anything. gpt-5-mini returned an empty caption
-            # with ``finish_reason="length"`` and 300 of 300 tokens billed as
-            # reasoning, identically under both spellings. So the guard against
-            # that is the log below and the note on
-            # ``DATASHEETINDEX_VISION_MODEL`` -- name a non-reasoning vision
-            # model -- not the parameter name.
-            max_tokens=VISION_MAX_TOKENS,
-        )
+                        ],
+                    },
+                ],
+                # ``max_tokens``, not ``max_completion_tokens``, and the choice was
+                # measured rather than inherited. Both names are accepted by every
+                # model this gateway serves -- gpt-4.1, the self-hosted qwen and
+                # gpt-5-mini all answered under either -- so the newer spelling buys
+                # no compatibility, while ``max_tokens`` is the one an
+                # OpenAI-compatible backend such as vLLM is certain to know.
+                #
+                # It is worth being clear about what *neither* name protects
+                # against: a **reasoning** model spends this budget on thinking
+                # before it writes anything. gpt-5-mini returned an empty caption
+                # with ``finish_reason="length"`` and 300 of 300 tokens billed as
+                # reasoning, identically under both spellings. So the guard against
+                # that is the log below and the note on
+                # ``DATASHEETINDEX_VISION_MODEL`` -- name a non-reasoning vision
+                # model -- not the parameter name.
+                max_tokens=VISION_MAX_TOKENS,
+            )
         # An empty caption is worse here than the shared warning conveys, so the
         # vision-specific advice stays: ``caption_figures_in_place`` scores a
         # blank reply as ``failed``, which marks the artifact incomplete and
@@ -492,7 +613,7 @@ DEFAULT_MAX_RETRIES = 2
 
 
 def _parse_tls_verify_env(value: str | None) -> bool:
-    """Resolve ``LITELLM_TLS_VERIFY`` into an ``httpx`` ``verify`` argument.
+    """Resolve ``LITELLM_TLS_VERIFY`` into an ``httpx2`` ``verify`` argument.
 
     Unset means **verify**. It used to mean the opposite, which made every
     default install send ``LITELLM_MASTER_KEY`` to ``LITELLM_BASE_URL`` over a
@@ -696,9 +817,14 @@ def create_llm_client(model: str | None = None) -> LlmCallable:
         os.environ.get("LITELLM_TIMEOUT_SECONDS")
     )
     max_retries = _parse_max_retries_env(os.environ.get("LITELLM_MAX_RETRIES"))
-    httpx = importlib.import_module("httpx")
+    # `httpx2` is httpx 2.x under its new distribution name, and it is openai
+    # 3.x's own transport -- the injected `http_client` comes from the same
+    # library the SDK is built on rather than a second HTTP stack installed
+    # only for this line. Imported lazily, like `openai`, so `[llm]` stays
+    # optional; the extra pins the two together.
+    httpx2 = importlib.import_module("httpx2")
     openai = importlib.import_module("openai")
-    http_client = httpx.Client(verify=tls_verify, timeout=timeout_seconds)
+    http_client = httpx2.Client(verify=tls_verify, timeout=timeout_seconds)
     client = openai.OpenAI(
         base_url=base_url.rstrip("/") + "/v1",
         api_key=api_key,

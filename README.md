@@ -105,6 +105,16 @@ your deployment rather than of this library:
 call; the vision model is deployment-level only, and deliberately not a tool
 argument -- an agent has no way to know what a given gateway serves.
 
+TLS verification is **on** by default. `LITELLM_TLS_VERIFY=false` (also `0`,
+`no`, `off`) turns it off, for a gateway whose certificate the local trust store
+cannot accept -- an internal CA missing from the image, or a self-signed cert on
+localhost. Adding that CA to the trust store is the better fix: `LITELLM_MASTER_KEY`
+travels on this channel. A certificate that fails verification raises
+`LlmTlsVerificationError` (exported from the package root) naming the gateway
+and both remedies, rather than degrading to an index with no ToC entries. Figure
+captioning is the exception: it still degrades, because the artifact is complete
+without captions.
+
 `claude-agent-sdk` is only required for the SDK-flavored handoff
 (`create_datasheet_tools_server`). The tool logic itself is framework-neutral --
 non-SDK hosts get it via `create_datasheet_tool_defs()` with no SDK import (see

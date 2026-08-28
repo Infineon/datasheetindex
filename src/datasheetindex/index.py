@@ -36,7 +36,11 @@ from datasheetindex.core.structure import (
     extract_toc,
 )
 from datasheetindex.core.textfile import scan_pages
-from datasheetindex.llm.client import close_llm_client, get_vision_client
+from datasheetindex.llm.client import (
+    LlmTlsVerificationError,
+    close_llm_client,
+    get_vision_client,
+)
 from datasheetindex.llm.figure_captions import (
     DEFAULT_MAX_FIGURE_CAPTIONS,
     caption_figures_in_place,
@@ -766,6 +770,16 @@ class DatasheetIndex:
                             "LLM ToC fallback rejected; using original ToC (%s)",
                             candidate_reason,
                         )
+                except LlmTlsVerificationError:
+                    # Deliberately not a note. Every other fallback failure is
+                    # transient and degrades to the native ToC, which is the
+                    # right trade -- but a certificate the trust store rejects
+                    # recurs on every build, is fixed in one variable, and would
+                    # leave its note unread inside an artifact that looks fine.
+                    # This is what makes a missed LITELLM_TLS_VERIFY migration
+                    # visible on the first build instead of showing up as
+                    # quietly worse navigation.
+                    raise
                 except Exception:
                     logger.warning(
                         "LLM ToC fallback failed; using original ToC",

@@ -605,3 +605,32 @@ def test_eligible_count_counts_distinct_images():
 
     assert eligible_caption_count(figures, 20) == 1
     assert eligible_caption_count(figures, 0) == 0
+
+
+def test_a_tls_failure_is_absorbed_here_rather_than_destroying_the_artifact():
+    """The counterpart to the ToC fallback, and deliberately the other way round.
+
+    Captioning runs at step 6b of ``index.build``; the artifacts are written at
+    step 8. Raising here would abort the build and write *nothing* -- for a
+    document whose index, and possibly whose ToC, is otherwise complete. An
+    unusable artifact is worse than uncaptioned figures, so this one failure
+    stays absorbed. Only the logged message improves, because the named error
+    carries the remedy that ``openai``'s "Connection error." did not.
+    """
+    from datasheetindex.llm.client import LlmTlsVerificationError
+
+    class _TlsVision:
+        def describe_image(self, *_args, **_kwargs):
+            raise LlmTlsVerificationError("add the CA to the trust store")
+
+    doc = _doc_with_images(2)
+    figures = _figures(doc)
+    try:
+        outcome = caption_figures_in_place(
+            doc, figures, vision_client=_TlsVision(), max_figure_captions=20
+        )
+    finally:
+        doc.close()
+
+    assert outcome.failed is True
+    assert outcome.captioned == 0

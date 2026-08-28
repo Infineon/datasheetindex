@@ -297,6 +297,21 @@ def caption_figures_in_place(
         try:
             reply = vision_client.describe_image(CAPTION_SYSTEM_PROMPT, image_base64)
         except Exception:
+            # Deliberately NOT carved out for LlmTlsVerificationError, unlike
+            # the ToC fallback. Captioning runs at step 6b and the artifacts are
+            # written at step 8, so raising here would abort the build and write
+            # *nothing* -- for a document whose index is otherwise complete and
+            # whose ToC may be perfectly good. An unusable artifact is a worse
+            # outcome than uncaptioned figures, and the ToC fallback's argument
+            # (an empty ToC is indistinguishable from a document with no
+            # outline) does not transfer to a case where the outline is fine.
+            #
+            # Legibility still improves, without the raise: the warning below
+            # now carries the named error's full remedy instead of openai's
+            # "Connection error.". The re-captioning loop this would have
+            # closed is pre-existing behaviour for any persistent caption
+            # failure, and closing it belongs with `figure_captions_pending`'s
+            # non-transient treatment in `reuse_blocker`, not here.
             logger.warning(
                 "Figure caption failed on page %s", entry["page"], exc_info=True
             )

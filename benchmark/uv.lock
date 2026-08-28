@@ -332,10 +332,10 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "httpx", marker = "extra == 'llm'", specifier = ">=0.27.0" },
+    { name = "httpx2", marker = "extra == 'llm'", specifier = ">=2.7.0" },
     { name = "jsonschema", marker = "extra == 'mcp'", specifier = ">=4.20.0" },
     { name = "mcp", extras = ["cli"], marker = "extra == 'mcp'", specifier = ">=1.26.0" },
-    { name = "openai", marker = "extra == 'llm'", specifier = ">=2.16.0" },
+    { name = "openai", marker = "extra == 'llm'", specifier = ">=3.5.0" },
     { name = "pymupdf", specifier = ">=1.25.0" },
     { name = "pymupdf4llm", marker = "extra == 'layout'", specifier = ">=1.27.0" },
     { name = "python-dotenv", marker = "extra == 'llm'", specifier = ">=1.0.0" },

@@ -584,3 +584,33 @@ def test_generate_toc_integration():
 
     quality = assess_toc_quality(nodes, total_pages=5)
     assert quality.score >= 0.5, quality.details
+
+
+# --- A TLS failure must not be degraded into an empty ToC --------------------
+
+
+def test_a_tls_failure_propagates_instead_of_returning_an_empty_toc():
+    """The blanket ``except`` here is what made a bad certificate invisible.
+
+    A first-chunk failure returns ``[]``, which the caller cannot tell apart
+    from a document that genuinely has no outline -- so an operator whose
+    gateway is fronted by a private CA got quietly worse navigation and no
+    error. Every *other* failure still degrades that way on purpose; this one
+    is permanent and fixable, so it is the caller's to see.
+    """
+    from datasheetindex.llm.client import LlmTlsVerificationError
+
+    def llm(system: str, user: str) -> str:
+        raise LlmTlsVerificationError("certificate verify failed")
+
+    with pytest.raises(LlmTlsVerificationError):
+        generate_toc_from_text("--- PAGE 1 ---\n1 Overview\n", 1, llm)
+
+
+def test_an_ordinary_chunk_failure_still_degrades_to_an_empty_toc():
+    """The counterpart: narrowing the escape must not widen it."""
+
+    def llm(system: str, user: str) -> str:
+        raise RuntimeError("gateway had a bad day")
+
+    assert generate_toc_from_text("--- PAGE 1 ---\n1 Overview\n", 1, llm) == []
