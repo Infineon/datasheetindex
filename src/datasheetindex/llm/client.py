@@ -492,7 +492,7 @@ DEFAULT_MAX_RETRIES = 2
 
 
 def _parse_tls_verify_env(value: str | None) -> bool:
-    """Resolve ``LITELLM_TLS_VERIFY`` into an ``httpx`` ``verify`` argument.
+    """Resolve ``LITELLM_TLS_VERIFY`` into an ``httpx2`` ``verify`` argument.
 
     Unset means **verify**. It used to mean the opposite, which made every
     default install send ``LITELLM_MASTER_KEY`` to ``LITELLM_BASE_URL`` over a
@@ -696,9 +696,14 @@ def create_llm_client(model: str | None = None) -> LlmCallable:
         os.environ.get("LITELLM_TIMEOUT_SECONDS")
     )
     max_retries = _parse_max_retries_env(os.environ.get("LITELLM_MAX_RETRIES"))
-    httpx = importlib.import_module("httpx")
+    # `httpx2` is httpx 2.x under its new distribution name, and it is openai
+    # 3.x's own transport -- the injected `http_client` comes from the same
+    # library the SDK is built on rather than a second HTTP stack installed
+    # only for this line. Imported lazily, like `openai`, so `[llm]` stays
+    # optional; the extra pins the two together.
+    httpx2 = importlib.import_module("httpx2")
     openai = importlib.import_module("openai")
-    http_client = httpx.Client(verify=tls_verify, timeout=timeout_seconds)
+    http_client = httpx2.Client(verify=tls_verify, timeout=timeout_seconds)
     client = openai.OpenAI(
         base_url=base_url.rstrip("/") + "/v1",
         api_key=api_key,

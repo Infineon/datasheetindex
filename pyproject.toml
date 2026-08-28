@@ -12,16 +12,34 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-llm = ["openai>=2.16.0", "python-dotenv>=1.0.0", "httpx>=0.27.0"]
+# `httpx2`, not `httpx`: the two are one project either side of a rename, and
+# `httpx` ended at 0.28.1 while 2.x ships under the new distribution name.
+#
+# The floor on `openai` is what makes this a pair. openai 3.x declares `httpx2`
+# and no longer declares `httpx`, so its own transport is httpx2 -- and the
+# `http_client=` we hand it must come from the same library the SDK is built
+# on. It is NOT a hard type check: openai 3.5.0 accepts a plain `httpx.Client`
+# and a full round trip through one succeeds (measured, not assumed -- the
+# anthropic SDK in `benchmark/` *does* reject the old class, which is not the
+# same situation). Declaring `httpx` anyway would install a second, redundant
+# HTTP stack (httpx + httpcore alongside httpx2 + httpcore2) whose only user is
+# us, and leave the SDK and its injected client on different implementations.
+# One stack is the point; that is why the two bounds move together.
+llm = ["openai>=3.5.0", "python-dotenv>=1.0.0", "httpx2>=2.7.0"]
 layout = ["pymupdf4llm>=1.27.0"]
 # Deliberately unbounded across the 1.x/2.x major boundary: `mcp_server.py`
 # supports both APIs, so the resolver is free to pick either. An upper bound
-# would break `uvx --from datasheetindex[mcp]` (which resolves 2.x) and a lower
-# bound of 2 would break `claude-agent-sdk`, which still requires `mcp<2` and is
-# what the `sdk` dependency-group installs. Only one `mcp` can be present at a
-# time, so the version is negotiated by whatever else is in the environment --
-# not by a constraint we can usefully declare here. Revisit once the SDK lifts
-# its pin; see `_build_mcp_server`.
+# would break `uvx --from datasheetindex[mcp]` (which resolves 2.x); a lower
+# bound of 2 would break any consumer still held under the boundary by its own
+# graph. Only one `mcp` can be present at a time, so the version is negotiated
+# by whatever else is in the environment -- not by a constraint we can usefully
+# declare here. See `_build_mcp_server`.
+#
+# `claude-agent-sdk` used to be that consumer: it required `mcp<2.0.0`, which
+# made `uv lock` unsatisfiable under a `>=2` bound (uv builds one universal
+# resolution and the `sdk` group is part of it) and pinned the lock to 1.x.
+# 0.2.147 widened that to `mcp<3.0.0`, so the lock now resolves 2.x and 1.x is
+# the major nothing exercises by default.
 #
 # `jsonschema` is declared even though it resolves anyway as a core (non-extra)
 # requirement of `mcp` on both majors: `mcp_server._compile_validators` imports

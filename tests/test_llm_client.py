@@ -21,7 +21,7 @@ def _install_fake_dotenv(monkeypatch) -> None:
     )
 
 
-class _TrackedHttpxClient:
+class _TrackedHttpx2Client:
     def __init__(self) -> None:
         self.closed = False
 
@@ -103,11 +103,11 @@ class _FakeChat:
 
 def _patch_fake_clients(
     monkeypatch,
-    seen_httpx_kwargs: dict[str, object],
+    seen_httpx2_kwargs: dict[str, object],
     seen_openai_kwargs: dict[str, object],
-    httpx_clients: list[_TrackedHttpxClient] | None = None,
+    httpx2_clients: list[_TrackedHttpx2Client] | None = None,
 ) -> _FakeChat:
-    """Install fake ``httpx``/``openai`` modules; return the chat fake.
+    """Install fake ``httpx2``/``openai`` modules; return the chat fake.
 
     The chat fake is returned rather than discarded so a test can assert what
     ``create_llm_client`` wired into it. Before it was real, ``chat.completions``
@@ -129,17 +129,17 @@ def _patch_fake_clients(
             self.responses = _ForbiddenResponses()
             self.chat = types.SimpleNamespace(completions=chat)
 
-    def _fake_httpx_client(**kwargs):
-        seen_httpx_kwargs.clear()
-        seen_httpx_kwargs.update(kwargs)
-        client = _TrackedHttpxClient()
-        if httpx_clients is not None:
-            httpx_clients.append(client)
+    def _fake_httpx2_client(**kwargs):
+        seen_httpx2_kwargs.clear()
+        seen_httpx2_kwargs.update(kwargs)
+        client = _TrackedHttpx2Client()
+        if httpx2_clients is not None:
+            httpx2_clients.append(client)
         return client
 
-    fake_httpx = types.SimpleNamespace(Client=_fake_httpx_client)
+    fake_httpx2 = types.SimpleNamespace(Client=_fake_httpx2_client)
     fake_openai = types.SimpleNamespace(OpenAI=_FakeOpenAI)
-    monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
+    monkeypatch.setitem(sys.modules, "httpx2", fake_httpx2)
     monkeypatch.setitem(sys.modules, "openai", fake_openai)
     return chat
 
@@ -170,7 +170,7 @@ def test_create_llm_client_raises_partial_env(monkeypatch):
 
 def _verify_arg_for(monkeypatch, tls_verify: str | None) -> object:
     """Build a client with ``LITELLM_TLS_VERIFY`` set (or unset) and report
-    the ``verify=`` argument that reached ``httpx.Client``."""
+    the ``verify=`` argument that reached ``httpx2.Client``."""
     monkeypatch.setenv("LITELLM_BASE_URL", "https://example.com")
     monkeypatch.setenv("LITELLM_MASTER_KEY", "secret")
     if tls_verify is None:
@@ -179,15 +179,15 @@ def _verify_arg_for(monkeypatch, tls_verify: str | None) -> object:
         monkeypatch.setenv("LITELLM_TLS_VERIFY", tls_verify)
     _install_fake_dotenv(monkeypatch)
 
-    seen_httpx_kwargs: dict[str, object] = {}
+    seen_httpx2_kwargs: dict[str, object] = {}
     _seen_openai_kwargs: dict[str, object] = {}
-    _patch_fake_clients(monkeypatch, seen_httpx_kwargs, _seen_openai_kwargs)
+    _patch_fake_clients(monkeypatch, seen_httpx2_kwargs, _seen_openai_kwargs)
 
     from datasheetindex.llm.client import create_llm_client
 
     llm = create_llm_client()
     assert callable(llm)
-    return seen_httpx_kwargs["verify"]
+    return seen_httpx2_kwargs["verify"]
 
 
 def test_create_llm_client_tls_verify_defaults_true(monkeypatch):
@@ -197,7 +197,7 @@ def test_create_llm_client_tls_verify_defaults_true(monkeypatch):
     default used to be ``False``, so an ordinary install shipped the master
     key to the gateway over an unauthenticated channel with nothing in the
     call, the log or the result saying so. Asserting on the ``verify=``
-    argument that reaches ``httpx.Client`` -- rather than on
+    argument that reaches ``httpx2.Client`` -- rather than on
     ``_parse_tls_verify_env`` alone -- keeps the wiring in scope, since a
     correct parse that is never passed through fixes nothing.
     """
@@ -241,9 +241,9 @@ def test_create_llm_client_timeout_and_retries_defaults(monkeypatch):
     monkeypatch.delenv("LITELLM_MAX_RETRIES", raising=False)
     _install_fake_dotenv(monkeypatch)
 
-    seen_httpx_kwargs: dict[str, object] = {}
+    seen_httpx2_kwargs: dict[str, object] = {}
     seen_openai_kwargs: dict[str, object] = {}
-    _patch_fake_clients(monkeypatch, seen_httpx_kwargs, seen_openai_kwargs)
+    _patch_fake_clients(monkeypatch, seen_httpx2_kwargs, seen_openai_kwargs)
 
     from datasheetindex.llm.client import (
         DEFAULT_MAX_RETRIES,
@@ -253,7 +253,7 @@ def test_create_llm_client_timeout_and_retries_defaults(monkeypatch):
 
     llm = create_llm_client()
     assert callable(llm)
-    assert seen_httpx_kwargs["timeout"] == DEFAULT_TIMEOUT_SECONDS
+    assert seen_httpx2_kwargs["timeout"] == DEFAULT_TIMEOUT_SECONDS
     assert seen_openai_kwargs["timeout"] == DEFAULT_TIMEOUT_SECONDS
     assert seen_openai_kwargs["max_retries"] == DEFAULT_MAX_RETRIES
 
@@ -265,15 +265,15 @@ def test_create_llm_client_timeout_and_retries_override(monkeypatch):
     monkeypatch.setenv("LITELLM_MAX_RETRIES", "5")
     _install_fake_dotenv(monkeypatch)
 
-    seen_httpx_kwargs: dict[str, object] = {}
+    seen_httpx2_kwargs: dict[str, object] = {}
     seen_openai_kwargs: dict[str, object] = {}
-    _patch_fake_clients(monkeypatch, seen_httpx_kwargs, seen_openai_kwargs)
+    _patch_fake_clients(monkeypatch, seen_httpx2_kwargs, seen_openai_kwargs)
 
     from datasheetindex.llm.client import create_llm_client
 
     llm = create_llm_client()
     assert callable(llm)
-    assert seen_httpx_kwargs["timeout"] == 12.5
+    assert seen_httpx2_kwargs["timeout"] == 12.5
     assert seen_openai_kwargs["timeout"] == 12.5
     assert seen_openai_kwargs["max_retries"] == 5
 
@@ -302,19 +302,19 @@ def test_create_llm_client_invalid_retries_raises(monkeypatch):
         create_llm_client()
 
 
-def test_close_llm_client_closes_httpx_client(monkeypatch):
+def test_close_llm_client_closes_httpx2_client(monkeypatch):
     monkeypatch.setenv("LITELLM_BASE_URL", "https://example.com")
     monkeypatch.setenv("LITELLM_MASTER_KEY", "secret")
     _install_fake_dotenv(monkeypatch)
 
-    seen_httpx_kwargs: dict[str, object] = {}
+    seen_httpx2_kwargs: dict[str, object] = {}
     seen_openai_kwargs: dict[str, object] = {}
-    httpx_clients: list[_TrackedHttpxClient] = []
+    httpx2_clients: list[_TrackedHttpx2Client] = []
     _patch_fake_clients(
         monkeypatch,
-        seen_httpx_kwargs,
+        seen_httpx2_kwargs,
         seen_openai_kwargs,
-        httpx_clients=httpx_clients,
+        httpx2_clients=httpx2_clients,
     )
 
     from datasheetindex.llm.client import close_llm_client, create_llm_client
@@ -322,8 +322,8 @@ def test_close_llm_client_closes_httpx_client(monkeypatch):
     llm = create_llm_client()
     close_llm_client(llm)
 
-    assert len(httpx_clients) == 1
-    assert httpx_clients[0].closed is True
+    assert len(httpx2_clients) == 1
+    assert httpx2_clients[0].closed is True
 
 
 def test_get_structured_output_client_returns_none_for_plain_callable():
@@ -350,13 +350,13 @@ def test_get_structured_output_client_exposes_schema_calls(monkeypatch):
                 )
             )
 
-    def _fake_httpx_client(**_kwargs):
-        return _TrackedHttpxClient()
+    def _fake_httpx2_client(**_kwargs):
+        return _TrackedHttpx2Client()
 
     monkeypatch.setitem(
         sys.modules,
-        "httpx",
-        types.SimpleNamespace(Client=_fake_httpx_client),
+        "httpx2",
+        types.SimpleNamespace(Client=_fake_httpx2_client),
     )
     monkeypatch.setitem(
         sys.modules,

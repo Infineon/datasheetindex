@@ -16,6 +16,14 @@ import types
 import pymupdf
 import pytest
 
+# The cross-major MCP drivers live in conftest: `tests/test_sdk_integration.py`
+# needs the identical branch against the SDK-built server. See the comment there.
+from tests.conftest import mcp_call as _call
+from tests.conftest import mcp_input_schema as _input_schema
+from tests.conftest import mcp_is_error as _is_error
+from tests.conftest import mcp_list_tools as _list_tools
+from tests.conftest import mcp_mime as _mime
+
 
 def _make_pdf(path, text="Supply voltage 4.5V to 5.5V"):
     doc = pymupdf.open()
@@ -25,69 +33,6 @@ def _make_pdf(path, text="Supply voltage 4.5V to 5.5V"):
     writer.write_text(page)
     doc.save(str(path))
     doc.close()
-
-
-# --- Cross-major drivers ------------------------------------------------------
-# mcp 1.x registers handlers in a `request_handlers` dict keyed by request type
-# and wraps results in a ServerResult root; mcp 2.x exposes them via
-# `get_request_handler(method)` and returns the result directly. The helpers
-# below hide that so every behavioural test below is written once and asserts
-# the same thing on both majors -- which is the whole point of the dual-support
-# branch in `_build_mcp_server`.
-#
-# The 2.x handler is called with a ``None`` request context. That is not a stub
-# standing in for behaviour: our handlers close over the tool session and never
-# read the context, so passing one would add setup (a live ServerSession) that
-# proves nothing. If a handler ever starts using it, this raises rather than
-# silently passing.
-
-
-def _is_v2(server):
-    return hasattr(server, "get_request_handler")
-
-
-def _list_tools(server, types):
-    if _is_v2(server):
-        entry = server.get_request_handler("tools/list")
-        return asyncio.run(entry.handler(None, None)).tools
-    request = types.ListToolsRequest(method="tools/list")
-    handler = server.request_handlers[type(request)]
-    return asyncio.run(handler(request)).root.tools
-
-
-def _call(server, types, name, arguments):
-    if _is_v2(server):
-        entry = server.get_request_handler("tools/call")
-        params = entry.params_type.model_validate(
-            {"name": name, "arguments": arguments}
-        )
-        return asyncio.run(entry.handler(None, params))
-    request = types.CallToolRequest(
-        method="tools/call",
-        params=types.CallToolRequestParams(name=name, arguments=arguments),
-    )
-    handler = server.request_handlers[type(request)]
-    return asyncio.run(handler(request)).root
-
-
-def _is_error(result):
-    """``CallToolResult.isError`` (mcp 1.x) / ``.is_error`` (mcp 2.x)."""
-    return result.is_error if hasattr(result, "is_error") else result.isError
-
-
-def _mime(block):
-    """``ImageContent.mimeType`` (mcp 1.x) / ``.mime_type`` (mcp 2.x)."""
-    return block.mime_type if hasattr(block, "mime_type") else block.mimeType
-
-
-def _input_schema(tool):
-    """``Tool.inputSchema`` (mcp 1.x) / ``.input_schema`` (mcp 2.x).
-
-    Only the *attribute* was renamed. ``mcp_server`` still constructs with
-    ``inputSchema=``, which 2.x accepts as an alias -- so this asymmetry is
-    real and the production code needs no branch for it.
-    """
-    return tool.input_schema if hasattr(tool, "input_schema") else tool.inputSchema
 
 
 def test_create_local_mcp_server_stores_config():
