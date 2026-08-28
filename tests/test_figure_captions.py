@@ -634,3 +634,153 @@ def test_a_tls_failure_is_absorbed_here_rather_than_destroying_the_artifact():
 
     assert outcome.failed is True
     assert outcome.captioned == 0
+
+
+def test_a_permanent_failure_is_reported_once_and_named(caplog):
+    """A broken gateway must say so, once, instead of N anonymous warnings.
+
+    Two figures means two failures; before this the operator got two warnings
+    naming pages and no cause, and the actionable line sat inside each
+    traceback. The cost of staying broken is what hurts here -- every
+    build_datasheet call rebuilds the document from scratch (86.5s measured on
+    the 134-page PSoC 6) because `figure_caption_failed` blocks artifact reuse
+    -- so the fix is to make the breakage short-lived, not the rebuild cheap.
+    """
+    import logging
+
+    from datasheetindex.llm.client import LlmTlsVerificationError
+
+    class _TlsVision:
+        def describe_image(self, *_args, **_kwargs):
+            raise LlmTlsVerificationError(
+                "TLS certificate verification failed for the LLM gateway at "
+                "https://gw.example: add the CA to the trust store, or set "
+                "LITELLM_TLS_VERIFY=false."
+            )
+
+    doc = _doc_with_images(2)
+    figures = _figures(doc)
+    try:
+        with caplog.at_level(
+            logging.ERROR, logger="datasheetindex.llm.figure_captions"
+        ):
+            outcome = caption_figures_in_place(
+                doc, figures, vision_client=_TlsVision(), max_figure_captions=20
+            )
+    finally:
+        doc.close()
+
+    assert outcome.blocked is True
+    # Reuse semantics are deliberately unchanged: this stays a failure.
+    assert outcome.failed is True
+    assert outcome.captioned == 0
+
+    errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert len(errors) == 1, f"expected exactly one ERROR, got {len(errors)}"
+    assert "LITELLM_TLS_VERIFY" in errors[0].getMessage()
+
+
+def test_an_ordinary_failure_is_not_reported_as_a_misconfiguration(caplog):
+    """The counterpart: a gateway blip must not send anyone to fix a config."""
+    import logging
+
+    doc = _doc_with_images(2)
+    figures = _figures(doc)
+    try:
+        with caplog.at_level(logging.DEBUG):
+            outcome = caption_figures_in_place(
+                doc,
+                figures,
+                vision_client=RecordingVision(fail_on={0, 1}),
+                max_figure_captions=20,
+            )
+    finally:
+        doc.close()
+
+    assert outcome.failed is True
+    assert outcome.blocked is False
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+
+def test_one_permanent_failure_among_successes_is_not_blocked(caplog):
+    """``blocked`` means no caption CAN arrive, not that one call was rejected.
+
+    A 401 during a key rotation, or a 403 on one oversized image, leaves the
+    other figures captioned. Publishing ``figure_captions_blocked: true`` on a
+    document that carries real captions is the exact confusion the key was
+    added to remove, inverted -- and the ERROR would send an operator to fix a
+    gateway that just served three captions.
+    """
+    import logging
+
+    class _OneBadCall:
+        """Rejects the first dispatched call and serves the rest.
+
+        The counter is incremented and read under one lock, for the reason
+        ``RecordingVision`` records above: dispatch is concurrent, so an
+        unlocked ``+= 1`` followed by a separate read lets two threads both
+        see 1 (two rejections) or both see 2 (none), and the test then fails
+        or -- worse -- passes vacuously with nothing rejected at all.
+        """
+
+        def __init__(self):
+            self._lock = threading.Lock()
+            self._calls = 0
+
+        def describe_image(self, *_args, **_kwargs):
+            with self._lock:
+                self._calls += 1
+                index = self._calls
+            if index == 1:
+                raise _forbidden()
+            return "a plot of something"
+
+    doc = _doc_with_images(4)
+    figures = _figures(doc)
+    try:
+        with caplog.at_level(logging.DEBUG):
+            outcome = caption_figures_in_place(
+                doc, figures, vision_client=_OneBadCall(), max_figure_captions=20
+            )
+    finally:
+        doc.close()
+
+    assert outcome.captioned == 3
+    assert outcome.failed is True
+    assert outcome.blocked is False
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+
+def _forbidden() -> Exception:
+    class _GatewayStatusError(Exception):
+        status_code = 403
+
+    return _GatewayStatusError("forbidden")
+
+
+def test_an_all_blank_document_is_not_blocked():
+    """The reachable empty-``rendered`` path, and the one the guard is for.
+
+    A document with *no figures* returns early at ``if not eligible`` and never
+    evaluates ``blocked`` at all -- so a test built on one pins the dataclass
+    default, not the guard. An all-blank document is the case that reaches the
+    comparison with ``rendered`` empty, where ``len(permanent) == len(rendered)``
+    is vacuously true and ``permanent[0]`` would raise IndexError.
+    """
+
+    class _NeverCalled:
+        def describe_image(self, *_args, **_kwargs):
+            raise AssertionError("a blank region must not be dispatched")
+
+    doc = _doc_with_single_raster(_paint_blank)
+    figures = _figures(doc)
+    assert figures, "the fixture must produce an eligible region to be meaningful"
+    try:
+        outcome = caption_figures_in_place(
+            doc, figures, vision_client=_NeverCalled(), max_figure_captions=20
+        )
+    finally:
+        doc.close()
+
+    assert outcome.blank == 1
+    assert outcome.blocked is False

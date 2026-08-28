@@ -41,6 +41,21 @@ _EMPTY_SEARCH_RASTER_NOTE = (
     "concluding the term is absent."
 )
 
+#: The same note for a build whose captioning is blocked. The advice above
+#: turns on reading a caption, and on such a build every caption is null and
+#: no rebuild will change that -- so sending the agent to the digest would be
+#: sending it to look at nothing. The remedy survives; only the route to a
+#: candidate page changes.
+_EMPTY_SEARCH_BLOCKED_CAPTIONS_NOTE = (
+    "No text-layer match. This document contains raster figures whose contents "
+    "are pixels, not text, so a term inside one is unreachable from here. "
+    "Captioning is blocked on this build (see 'figure_captions_blocked'), so "
+    "the 'figures' digest carries no captions to steer by: read the pages its "
+    "'pages' list names with inspect_page before concluding the term is "
+    "absent. That list is capped, so on a figure-heavy document the full "
+    "figures array in the ToC JSON at json_path is the complete set."
+)
+
 
 @dataclass(frozen=True)
 class DatasheetToolDef:
@@ -244,7 +259,11 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
             # document actually holds pixels a search cannot reach, and only on
             # a miss: a note on every call is noise the agent reads past.
             if not results and tools.has_raster_figures():
-                payload["note"] = _EMPTY_SEARCH_RASTER_NOTE
+                payload["note"] = (
+                    _EMPTY_SEARCH_BLOCKED_CAPTIONS_NOTE
+                    if tools.captions_blocked()
+                    else _EMPTY_SEARCH_RASTER_NOTE
+                )
             return _ok(payload)
         except Exception as exc:
             return _err_exc(exc)
@@ -326,6 +345,11 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                 "index cannot give coordinates for: still worth a full-page "
                 "inspect_page. The complete figures array, with regions for "
                 "inspect_page(region=...), is in the ToC JSON at json_path.\n\n"
+                "'figure_captions_blocked': true (absent when captioning is "
+                "healthy) means every caption attempt was permanently rejected. "
+                "Captions are missing because captioning is broken, not because "
+                "nothing was worth describing: rebuilding will not produce them, "
+                "so read figure pages with inspect_page directly.\n\n"
                 "'toc_source' is where the ToC came from: 'pdf_outline' (the "
                 "PDF's own bookmarks -- pages exact), 'llm_reconstructed' "
                 "(rewritten from body text -- every start_page is inferred, "

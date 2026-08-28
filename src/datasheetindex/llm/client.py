@@ -235,6 +235,43 @@ _RETRY_MAX_DELAY = 60.0
 VISION_MAX_TOKENS = 300
 
 
+#: Statuses that mean the deployment is misconfigured rather than unlucky.
+#:
+#: 404 is deliberately absent. It reads like "the model does not exist", but a
+#: gateway also returns it for a route that is temporarily unregistered -- and
+#: the wrong-model case already repairs itself, because
+#: ``DATASHEETINDEX_VISION_MODEL`` is part of the artifact-reuse key, so
+#: correcting the name invalidates the artifact without any help from here.
+_PERMANENT_STATUS_CODES = frozenset({401, 403})
+
+
+def is_permanent_llm_failure(exc: BaseException) -> bool:
+    """Is this a misconfiguration no retry and no later build will fix?
+
+    The point is to tell "your certificate is wrong" apart from "the gateway
+    had a bad afternoon", so a caller can say the first out loud and stay quiet
+    about the second. Being wrong in the loud direction is the expensive one:
+    it sends an operator to fix a gateway that is already fine, so anything
+    unrecognised is treated as transient.
+
+    Duck-typed on ``status_code`` -- the openai SDK sets it on its status
+    errors -- so this stays importable with no ``[llm]`` extra installed.
+    ``_is_retryable`` duck-types the same attribute but also falls back to
+    ``.code`` and to a message substring; this one deliberately does not, since
+    an unrecognised shape must stay transient rather than be guessed permanent.
+    """
+    # Both forms, and both are needed. The type alone misses a raw transport
+    # chain from any future path that skipped the conversion; the chain walk
+    # alone misses a directly-constructed LlmTlsVerificationError, which has no
+    # __cause__ -- and since that type is exported from the package root,
+    # raising one bare is something a caller may legitimately do.
+    if isinstance(exc, LlmTlsVerificationError):
+        return True
+    if _tls_verification_failure(exc) is not None:
+        return True
+    return getattr(exc, "status_code", None) in _PERMANENT_STATUS_CODES
+
+
 def _is_retryable(exc: Exception) -> bool:
     """Check if an API error is retryable (429 or 5xx)."""
     if isinstance(exc, LlmTlsVerificationError):

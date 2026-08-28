@@ -253,3 +253,42 @@ def test_distinct_images_do_not_share_an_xref():
 
     assert len(entries) == 2
     assert entries[0]["xref"] != entries[1]["xref"]
+
+
+def test_blocked_captioning_is_published_in_the_json(tmp_path, monkeypatch):
+    """An agent must be able to tell "nothing to caption" from "captioning is broken".
+
+    Both leave every figure uncaptioned, and only the builder knows which
+    happened. Left unpublished, an agent keeps asking for captions that can
+    never arrive.
+    """
+    import pymupdf
+
+    from datasheetindex import DatasheetIndex
+    from datasheetindex.llm.client import LlmTlsVerificationError
+
+    pdf = tmp_path / "figs.pdf"
+    doc = pymupdf.open()
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 400, 400))
+    pix.set_rect(pix.irect, (255, 255, 255))
+    pix.set_rect(pymupdf.IRect(0, 200, 400, 201), (0, 0, 0))
+    page = doc.new_page(width=595, height=842)
+    page.insert_image(pymupdf.Rect(50, 50, 500, 400), pixmap=pix)
+    doc.save(str(pdf))
+    doc.close()
+
+    class _TlsVision:
+        def describe_image(self, *_args, **_kwargs):
+            raise LlmTlsVerificationError("certificate verify failed")
+
+    monkeypatch.setattr(
+        "datasheetindex.index.get_vision_client", lambda _c: _TlsVision()
+    )
+    monkeypatch.setattr(
+        DatasheetIndex, "_try_create_default_llm_client", lambda _self: object()
+    )
+
+    with DatasheetIndex(str(pdf)) as idx:
+        artifacts = idx.build(output_dir=str(tmp_path / "out"))
+
+    assert artifacts.json_data["figure_captions_blocked"] is True

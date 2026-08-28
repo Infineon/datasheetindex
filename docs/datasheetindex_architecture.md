@@ -1313,6 +1313,7 @@ class DatasheetIndex:
             "figures": scan.figures,
             "figures_excluded": {...},
             "figure_captions_excluded": {...},
+            "figure_captions_blocked": bool,   # every attempt permanently rejected
         }
         json_path = Path(output_dir) / f"{filename}.json"
         text_path = Path(output_dir) / f"{filename}.txt"

@@ -884,6 +884,14 @@ class DatasheetTools:
             "toc": artifacts.json_data.get("toc"),
             "figures": _figure_digest(artifacts.json_data.get("figures")),
         }
+        # Only published when true, and only then does it cost tokens. The
+        # digest above reports `raster` and `captioned` but never *why*
+        # `captioned` is 0, so an agent behind a rejected certificate sees
+        # {raster: 12, captioned: 0} and cannot tell it from a document with
+        # nothing captionable -- and keeps asking for captions that can never
+        # arrive. Same wall the 0.25.0 figures digest was added to climb.
+        if artifacts.json_data.get("figure_captions_blocked"):
+            manifest["figure_captions_blocked"] = True
         if not manifest["toc"]:
             manifest["hint"] = _NO_TOC_HINT
         return manifest
@@ -963,6 +971,16 @@ class DatasheetTools:
                 if breadcrumb:
                     match["breadcrumb"] = breadcrumb
         return matches
+
+    def captions_blocked(self) -> bool:
+        """True when this build's captioning failed permanently, for every figure.
+
+        Read by the zero-hit ``search_text`` note, whose standing advice is to
+        steer by a caption -- which on such a build does not exist and cannot
+        arrive. Absent on a healthy artifact and on anything built before
+        0.36.0, so ``.get`` rather than ``[]``.
+        """
+        return bool(self._require_artifacts().json_data.get("figure_captions_blocked"))
 
     def has_raster_figures(self) -> bool:
         """True when the built artifacts index at least one raster region.
