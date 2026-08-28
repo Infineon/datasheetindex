@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.35.0] - 2026-08-28
 
 ### Changed
 - **The `[llm]` extra moved from `httpx` to `httpx2`, and floors `openai` at 3.5.0 to match.** `httpx` ended at 0.28.1; 2.x ships under the new distribution name `httpx2`, and openai 3.x declares that one and no longer declares `httpx` at all. The two bounds move together on purpose: `create_llm_client` injects an `http_client`, and it should come from the same library the SDK is built on. Keeping `httpx` declared would have installed a second, redundant HTTP stack (`httpx` + `httpcore` alongside `httpx2` + `httpcore2`) whose only consumer was our one `Client(...)` call.
