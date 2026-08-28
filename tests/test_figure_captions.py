@@ -605,3 +605,30 @@ def test_eligible_count_counts_distinct_images():
 
     assert eligible_caption_count(figures, 20) == 1
     assert eligible_caption_count(figures, 0) == 0
+
+
+def test_a_tls_failure_propagates_instead_of_failing_every_caption():
+    """A bad certificate fails every figure, and "failed" is not the useful word.
+
+    Each caption's blanket ``except`` turns the failure into ``failed``, which
+    marks the artifact incomplete and re-captions the whole document on every
+    subsequent build -- forever, since the certificate does not fix itself. The
+    operator sees a slow build and warnings naming figures, not the one-line
+    cause they can act on. Other caption failures still degrade exactly as
+    before (see ``test_a_raising_call_leaves_the_build_successful_but_failed_flagged``).
+    """
+    from datasheetindex.llm.client import LlmTlsVerificationError
+
+    class _TlsVision:
+        def describe_image(self, *_args, **_kwargs):
+            raise LlmTlsVerificationError("certificate verify failed")
+
+    doc = _doc_with_images(2)
+    figures = _figures(doc)
+    try:
+        with pytest.raises(LlmTlsVerificationError):
+            caption_figures_in_place(
+                doc, figures, vision_client=_TlsVision(), max_figure_captions=20
+            )
+    finally:
+        doc.close()

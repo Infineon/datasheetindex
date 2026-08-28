@@ -1002,3 +1002,140 @@ def test_create_llm_client_integration():
         assert len(result) > 0
     finally:
         close_llm_client(llm)
+
+
+# --- TLS verification failures are named, not swallowed ----------------------
+# A gateway whose certificate does not verify is the one LLM failure the
+# transport describes uselessly: openai raises `APIConnectionError("Connection
+# error.")` and the `ssl.SSLCertVerificationError` naming the real cause sits
+# three links down the `__cause__` chain (openai -> httpx2 -> httpcore2 -> ssl,
+# measured against a self-signed local server). Every caller of this client
+# wraps its calls in a blanket `except Exception` that logs a warning, so
+# without a distinguishable type the symptom is a silently empty ToC -- exactly
+# what `LITELLM_TLS_VERIFY` defaulting to verify made possible for anyone whose
+# gateway is fronted by a private CA.
+
+
+def _cert_error(msg="certificate verify failed: self-signed certificate"):
+    """Rebuild the real chain openai hands us on a verification failure."""
+    import ssl
+
+    root = ssl.SSLCertVerificationError(f"[SSL: CERTIFICATE_VERIFY_FAILED] {msg}")
+    transport = ConnectionError("[SSL: CERTIFICATE_VERIFY_FAILED] " + msg)
+    transport.__cause__ = root
+    api = RuntimeError("Connection error.")
+    api.__cause__ = transport
+    return api
+
+
+def test_tls_failure_is_found_through_the_whole_cause_chain():
+    from datasheetindex.llm.client import _tls_verification_failure
+
+    assert _tls_verification_failure(_cert_error()) is not None
+
+
+def test_tls_failure_is_found_through_context_as_well_as_cause():
+    """An `except`-and-raise without `from` links via `__context__`, not `__cause__`."""
+    import ssl
+
+    from datasheetindex.llm.client import _tls_verification_failure
+
+    outer = RuntimeError("Connection error.")
+    outer.__context__ = ssl.SSLCertVerificationError("nope")
+    assert _tls_verification_failure(outer) is not None
+
+
+def test_a_cyclic_cause_chain_terminates():
+    """`raise ... from` can build a cycle; walking it must not hang the build."""
+    from datasheetindex.llm.client import _tls_verification_failure
+
+    a = RuntimeError("a")
+    b = RuntimeError("b")
+    a.__cause__ = b
+    b.__cause__ = a
+    assert _tls_verification_failure(a) is None
+
+
+def test_an_ordinary_failure_is_not_mistaken_for_a_tls_one():
+    from datasheetindex.llm.client import _tls_verification_failure
+
+    assert _tls_verification_failure(RuntimeError("Connection error.")) is None
+
+
+def _client_raising(exc):
+    """A `_ManagedLlmClient` whose every gateway call raises `exc`."""
+    from datasheetindex.llm.client import _ManagedLlmClient
+
+    class _Boom:
+        def create(self, **_kwargs):
+            raise exc
+
+    return _ManagedLlmClient(
+        types.SimpleNamespace(completions=_Boom()).completions, object(), "gpt-4.1"
+    )
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        pytest.param(lambda c: c("system", "user"), id="text"),
+        pytest.param(
+            lambda c: c.structured_json("s", "u", name="n", schema={"type": "object"}),
+            id="structured",
+        ),
+        pytest.param(lambda c: c.describe_image("s", "QUJD"), id="vision"),
+    ],
+)
+def test_every_call_shape_reports_a_tls_failure_as_such(call, monkeypatch):
+    """Text, structured and vision all reach the gateway; all three must name it."""
+    from datasheetindex.llm.client import LlmTlsVerificationError
+
+    monkeypatch.setenv("LITELLM_BASE_URL", "https://gateway.example/v1")
+    with pytest.raises(LlmTlsVerificationError) as excinfo:
+        call(_client_raising(_cert_error()))
+
+    message = str(excinfo.value)
+    # The message has to carry the whole remedy: which endpoint failed, the
+    # preferred fix, and the escape hatch. A named type with a bare "TLS error"
+    # would move the problem rather than solve it.
+    assert "gateway.example" in message
+    assert "LITELLM_TLS_VERIFY" in message
+    assert "trust store" in message
+
+
+def test_the_original_transport_error_is_kept_as_the_cause(monkeypatch):
+    """Nothing is hidden: the raw chain stays reachable for a traceback."""
+    import ssl
+
+    from datasheetindex.llm.client import LlmTlsVerificationError
+
+    monkeypatch.setenv("LITELLM_BASE_URL", "https://gateway.example/v1")
+    with pytest.raises(LlmTlsVerificationError) as excinfo:
+        _client_raising(_cert_error())("s", "u")
+
+    from datasheetindex.llm.client import _tls_verification_failure
+
+    original = excinfo.value.__cause__
+    assert isinstance(original, RuntimeError)
+    # The ssl error is still reachable from the raised error, not just from the
+    # one it wrapped -- a traceback shows the whole chain.
+    assert isinstance(
+        _tls_verification_failure(excinfo.value), ssl.SSLCertVerificationError
+    )
+
+
+def test_a_non_tls_failure_is_left_exactly_as_it_was(monkeypatch):
+    """The narrowing must not swallow or reshape any other error."""
+    monkeypatch.setenv("LITELLM_BASE_URL", "https://gateway.example/v1")
+    boom = ValueError("something else entirely")
+    with pytest.raises(ValueError, match="something else entirely"):
+        _client_raising(boom)("s", "u")
+
+
+def test_the_message_names_the_variable_when_the_url_is_unset(monkeypatch):
+    """A client built from an explicit argument may leave the env var unset."""
+    from datasheetindex.llm.client import LlmTlsVerificationError
+
+    monkeypatch.delenv("LITELLM_BASE_URL", raising=False)
+    with pytest.raises(LlmTlsVerificationError, match="LITELLM_BASE_URL"):
+        _client_raising(_cert_error())("s", "u")

@@ -1581,6 +1581,46 @@ def test_a_raising_fallback_marks_enrichment_incomplete(tmp_path, monkeypatch):
     assert artifacts.json_path.exists()
 
 
+def test_a_tls_failure_fails_the_build_rather_than_becoming_a_note(
+    tmp_path, monkeypatch
+):
+    """The one fallback failure worth stopping the build for.
+
+    Every other failure degrades to ``toc_fallback_raised`` and a usable
+    artifact, which is right: they are transient, and a native ToC is better
+    than no index. A certificate the trust store rejects is neither transient
+    nor invisible-by-necessity -- it recurs on every build, is fixed in one
+    variable, and its note would sit unread inside an artifact that looks fine.
+    Raising is what turns a missed ``LITELLM_TLS_VERIFY`` migration into
+    something the operator finds out about on the first build.
+    """
+    from datasheetindex.llm.client import LlmTlsVerificationError
+
+    pdf_path = _simple_pdf(tmp_path, name="weak.pdf", pages=3, with_toc=False)
+
+    def dummy_callable(_system, _user):
+        return "unused"
+
+    def tls_failure(_text, _pages, _callable):
+        raise LlmTlsVerificationError("certificate verify failed")
+
+    monkeypatch.setattr(
+        DatasheetIndex, "_try_create_default_llm_client", lambda _self: dummy_callable
+    )
+    monkeypatch.setattr(
+        "datasheetindex.llm.toc_fallback.generate_toc_from_text", tls_failure
+    )
+
+    idx = DatasheetIndex(str(pdf_path))
+    try:
+        # The message is pinned in tests/test_llm_client.py; what matters here
+        # is that build() does not convert it into an enrichment note.
+        with pytest.raises(LlmTlsVerificationError):
+            idx.build(output_dir=str(tmp_path / "out"))
+    finally:
+        idx.close()
+
+
 def test_a_rejected_fallback_candidate_is_complete(tmp_path, monkeypatch):
     """except versus else: a candidate declined on the merits is a decision.
 

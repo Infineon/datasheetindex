@@ -10,7 +10,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from datasheetindex.core.structure import build_tree
-from datasheetindex.llm.client import get_structured_output_client
+from datasheetindex.llm.client import (
+    LlmTlsVerificationError,
+    get_structured_output_client,
+)
 from datasheetindex.llm.untrusted import DATA_ONLY_INSTRUCTION, wrap_document_text
 from datasheetindex.models import TocNode
 
@@ -229,6 +232,14 @@ def _collect_entries(
 
         try:
             entries = extractor.run(extractor.system_prompt, user_msg)
+        except LlmTlsVerificationError:
+            # Not degradable. Skipping the chunk returns [] on the first one,
+            # which reaches the caller as a document with no outline -- the same
+            # result as a PDF that genuinely has none. A certificate the trust
+            # store rejects will not start verifying on the next chunk or the
+            # next build, and the operator can fix it in one variable, so this
+            # is the one failure here worth stopping for.
+            raise
         except Exception:
             logger.warning(
                 "%s ToC extraction failed on chunk %d/%d; skipping it",
