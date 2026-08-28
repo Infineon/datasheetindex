@@ -1008,7 +1008,8 @@ def test_create_llm_client_integration():
 # A gateway whose certificate does not verify is the one LLM failure the
 # transport describes uselessly: openai raises `APIConnectionError("Connection
 # error.")` and the `ssl.SSLCertVerificationError` naming the real cause sits
-# three links down the `__cause__` chain (openai -> httpx2 -> httpcore2 -> ssl,
+# three links down the exception chain (openai -> httpx2 -> httpcore2 -> ssl,
+# and NOT three links of `__cause__`: the last hop is `__context__` only,
 # measured against a self-signed local server). Every caller of this client
 # wraps its calls in a blanket `except Exception` that logs a warning, so
 # without a distinguishable type the symptom is a silently empty ToC -- exactly

@@ -113,8 +113,12 @@ class LlmTlsVerificationError(RuntimeError):
     Raised in place of the transport's own error, which describes this failure
     uselessly: openai reports ``APIConnectionError("Connection error.")`` and
     the ``ssl.SSLCertVerificationError`` naming the real cause sits three links
-    down the ``__cause__`` chain (openai -> httpx2 -> httpcore2 -> ssl,
-    measured against a self-signed local server).
+    down the exception chain (openai -> httpx2 -> httpcore2 -> ssl, measured
+    against a self-signed local server). It is **not** three links of
+    ``__cause__``: httpcore2 re-raises ``from None``, so the last hop is
+    reachable only through ``__context__``. Do not shorten this to "the cause
+    chain" -- that misreading is what produced a guard that detected nothing,
+    and ``_tls_verification_failure`` carries the measurement.
 
     A *distinguishable type* is the point, not the nicer message. Every caller
     of this client wraps its calls in a blanket ``except Exception`` that logs a
@@ -168,7 +172,11 @@ def _tls_verification_failure(
         # ``from None`` while handling a certificate failure is still classified
         # as one -- a shape no library in this stack produces, and one where an
         # ``ssl.SSLCertVerificationError`` did genuinely occur anyway.
-        current = current.__cause__ or current.__context__
+        # Identity, not truthiness: an exception type that subclasses an empty
+        # collection is falsy, and `or` would skip a real __cause__ branch.
+        current = (
+            current.__cause__ if current.__cause__ is not None else current.__context__
+        )
     return None
 
 
