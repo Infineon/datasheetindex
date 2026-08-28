@@ -1017,15 +1017,39 @@ def test_create_llm_client_integration():
 
 
 def _cert_error(msg="certificate verify failed: self-signed certificate"):
-    """Rebuild the real chain openai hands us on a verification failure."""
+    """Rebuild the chain openai hands us, with the shape it really has.
+
+    Built by *raising*, not by assigning ``__cause__``, because the difference
+    is the whole game. ``httpcore2``'s connection pool re-raises with ``raise
+    exc from None``, which clears ``__cause__`` and sets ``__suppress_context__``
+    -- so the ``ssl.SSLCertVerificationError`` is reachable only through the
+    ``__context__`` of a link that claims its context is suppressed. Measured
+    against a real self-signed server through ``httpx2.Client(verify=True)``:
+
+        httpx2.ConnectError     cause=ConnectError  suppress=True
+        httpcore2.ConnectError  cause=None          suppress=True
+          context=ssl.SSLCertVerificationError
+
+    A fixture that assigns ``__cause__`` leaves ``__suppress_context__`` false at
+    every level and so passes against walks that fail on the real stack -- which
+    is exactly how a chain-walk change shipped that detected nothing at all.
+    """
     import ssl
 
-    root = ssl.SSLCertVerificationError(f"[SSL: CERTIFICATE_VERIFY_FAILED] {msg}")
-    transport = ConnectionError("[SSL: CERTIFICATE_VERIFY_FAILED] " + msg)
-    transport.__cause__ = root
-    api = RuntimeError("Connection error.")
-    api.__cause__ = transport
-    return api
+    try:
+        try:
+            raise ssl.SSLCertVerificationError(
+                f"[SSL: CERTIFICATE_VERIFY_FAILED] {msg}"
+            )
+        except ssl.SSLCertVerificationError:
+            # The pool's re-raise: severs __cause__, leaves the ssl error on
+            # __context__ only.
+            raise ConnectionError("[SSL: CERTIFICATE_VERIFY_FAILED] " + msg) from None
+    except ConnectionError as transport:
+        try:
+            raise RuntimeError("Connection error.") from transport
+        except RuntimeError as api:
+            return api
 
 
 def test_tls_failure_is_found_through_the_whole_cause_chain():
@@ -1056,24 +1080,28 @@ def test_a_cyclic_cause_chain_terminates():
     assert _tls_verification_failure(a) is None
 
 
-def test_a_severed_chain_is_not_followed_past_the_severing():
-    """``raise X from None`` cuts the chain on purpose; the walk must respect it.
+def test_the_shape_httpcore2_actually_raises_is_detected():
+    """The regression test for the walk, pinned to the real chain shape.
 
-    Otherwise an unrelated error raised while handling a certificate failure is
-    classified as one -- and that classification is neither retryable nor
-    degradable, so the build would abort quoting a remedy that cannot fix it.
+    ``httpcore2`` re-raises ``from None``, so honouring ``__suppress_context__``
+    stops the walk at the one link that holds the certificate error and the
+    feature silently detects nothing. This asserts the production shape rather
+    than a hand-assembled one; the fixture's docstring records the measurement.
     """
     import ssl
 
     from datasheetindex.llm.client import _tls_verification_failure
 
-    try:
-        try:
-            raise ssl.SSLCertVerificationError("original")
-        except ssl.SSLCertVerificationError:
-            raise ValueError("unrelated, and the chain is severed") from None
-    except ValueError as exc:
-        assert _tls_verification_failure(exc) is None
+    chain = _cert_error()
+    # Guard the fixture itself: if it stops reproducing the severed link, this
+    # test would keep passing while covering nothing.
+    severed = chain.__cause__
+    assert severed is not None
+    assert severed.__cause__ is None
+    assert severed.__suppress_context__ is True
+    assert isinstance(severed.__context__, ssl.SSLCertVerificationError)
+
+    assert isinstance(_tls_verification_failure(chain), ssl.SSLCertVerificationError)
 
 
 def test_an_ordinary_failure_is_not_mistaken_for_a_tls_one():

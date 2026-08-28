@@ -397,7 +397,10 @@ outline. **Figure captioning is deliberately NOT carved out.** Captioning runs
 at step 6b and the artifacts are written at step 8, so raising there would
 abort the build and write nothing at all -- for a document whose index, and
 possibly whose ToC, is otherwise complete. `figure_caption_failed` therefore
-still absorbs a TLS failure; only the logged message gets better.
+still absorbs a TLS failure; only the logged message gets better. Summaries are a
+third case and a pre-existing one: `add_summaries` has no exception handler at
+all, so any error there propagates out of `build()` -- unchanged here, and only
+reachable with `include_summaries=True`.
 
 #### Decisions already settled by measurement
 

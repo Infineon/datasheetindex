@@ -122,7 +122,10 @@ class LlmTlsVerificationError(RuntimeError):
     first chunk fails, which reaches the caller as an index with **no ToC
     entries**, indistinguishable from a document that genuinely has no outline.
     So the one LLM failure an operator can actually fix was also the least
-    visible one. The three degrading sites now let this type through.
+    visible one. Two degrading sites now let this type through -- the ToC
+    fallback's chunk loop and ``index.build``'s fallback handler. Figure
+    captioning deliberately does not: it runs before the artifacts are
+    written, so raising there destroys an otherwise-complete index.
 
     Scoped deliberately to *certificate verification*, not to connection errors
     at large. An unreachable host, a DNS failure or a refused connection are
@@ -148,17 +151,24 @@ def _tls_verification_failure(
         seen.add(id(current))
         if isinstance(current, ssl.SSLCertVerificationError):
             return current
-        if current.__cause__ is not None:
-            current = current.__cause__
-        elif current.__suppress_context__:
-            # ``raise X from None`` severs the chain deliberately. Following
-            # ``__context__`` past that would classify an unrelated error as a
-            # certificate failure -- which is neither retryable nor degradable
-            # at any of the three sites, so the build would abort with a remedy
-            # that cannot fix it. This is how ``traceback`` walks a chain too.
-            return None
-        else:
-            current = current.__context__
+        # ``__context__`` is followed even when ``__suppress_context__`` is set,
+        # and that is load-bearing rather than sloppy. ``httpcore2``'s connection
+        # pool re-raises every exception as ``raise exc from None``, which clears
+        # ``__cause__`` and sets ``__suppress_context__`` -- so on the real stack
+        # the ``ssl.SSLCertVerificationError`` hangs off ``__context__`` of a
+        # link that claims its context is suppressed:
+        #
+        #   httpx2.ConnectError     cause=ConnectError  suppress=True
+        #   httpcore2.ConnectError  cause=None          suppress=True
+        #     context=ssl.SSLCertVerificationError   <-- only reachable here
+        #
+        # Honouring the flag was tried and reverted: it stops the walk at
+        # exactly that link, so nothing is ever detected and the whole feature
+        # silently does nothing. The cost is that an unrelated error raised
+        # ``from None`` while handling a certificate failure is still classified
+        # as one -- a shape no library in this stack produces, and one where an
+        # ``ssl.SSLCertVerificationError`` did genuinely occur anyway.
+        current = current.__cause__ or current.__context__
     return None
 
 
