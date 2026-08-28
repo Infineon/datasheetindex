@@ -50,9 +50,10 @@ _EMPTY_SEARCH_BLOCKED_CAPTIONS_NOTE = (
     "No text-layer match. This document contains raster figures whose contents "
     "are pixels, not text, so a term inside one is unreachable from here. "
     "Captioning is blocked on this build (see 'figure_captions_blocked'), so "
-    "the 'figures' digest carries no captions to steer by: use its per-page "
-    "raster counts to pick pages and read them with inspect_page before "
-    "concluding the term is absent."
+    "the 'figures' digest carries no captions to steer by: read the pages its "
+    "'pages' list names with inspect_page before concluding the term is "
+    "absent. That list is capped, so on a figure-heavy document the full "
+    "figures array in the ToC JSON at json_path is the complete set."
 )
 
 

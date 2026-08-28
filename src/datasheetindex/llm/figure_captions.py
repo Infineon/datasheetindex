@@ -305,9 +305,16 @@ def caption_figures_in_place(
             continue
         rendered.append((group, image_base64))
 
-    # Collected across threads: `list.append` is atomic under the GIL, and only
-    # the first entry is ever read. A set would work equally well; a list keeps
-    # the first failure rather than an arbitrary one.
+    # Collected across threads: `list.append` is atomic under the GIL, and the
+    # pool is joined before this is read, so the happens-before is sound.
+    #
+    # The ORDER is completion order, not input order, so `permanent[0]` below
+    # is an arbitrary failure rather than the first one dispatched. That is
+    # accepted, not overlooked: the branch that reads it fires only when every
+    # attempt was rejected, and a gateway rejecting every call yields N copies
+    # of one cause. If the causes could ever differ -- a 401 racing a
+    # certificate rejection -- which one the operator is shown would become
+    # scheduling-dependent, and that is when this should start sorting.
     permanent: list[BaseException] = []
 
     # Dispatch concurrently: network I/O, safe to overlap.

@@ -976,3 +976,19 @@ def test_zero_hit_note_does_not_steer_by_captions_that_cannot_exist():
     # just stops the agent.
     assert "inspect_page" in _EMPTY_SEARCH_BLOCKED_CAPTIONS_NOTE
     assert "figure_captions_blocked" in _EMPTY_SEARCH_BLOCKED_CAPTIONS_NOTE
+    # It must only name keys the digest rows actually carry. Rows are
+    # {page, figures, caption}; `raster` is a document-level total only, so an
+    # earlier draft telling the agent to rank by "per-page raster counts" sent
+    # it to a field that does not exist.
+    from datasheetindex.tools.bound import _figure_digest
+
+    digest = _figure_digest(
+        [{"page": 2, "kind": "raster", "caption": None, "page_area_pct": 9.0}]
+    )
+    pages = digest["pages"]
+    assert isinstance(pages, list)
+    row = pages[0]
+    assert isinstance(row, dict)
+    assert set(row) == {"page", "figures", "caption"}
+    assert "raster count" not in _EMPTY_SEARCH_BLOCKED_CAPTIONS_NOTE
+    assert "'pages'" in _EMPTY_SEARCH_BLOCKED_CAPTIONS_NOTE
