@@ -389,12 +389,15 @@ def caption_figures_in_place(
         # is only worth paying attention to because the operator could not
         # previously tell what to fix: the one actionable line was buried in
         # each per-figure traceback.
+        attempted = len(rendered)
         logger.error(
-            "Figure captioning is misconfigured, not merely failing: all %d "
-            "attempted captions were rejected for a reason that will not change "
-            "on retry. Until it is fixed, this document is rebuilt from scratch "
-            "on every request. Cause: %s",
-            len(rendered),
+            "Figure captioning is misconfigured, not merely failing: %s "
+            "rejected for a reason that will not change on retry. Until it is "
+            "fixed, this document is rebuilt from scratch on every request. "
+            "Cause: %s",
+            "the only attempted caption was"
+            if attempted == 1
+            else f"all {attempted} attempted captions were",
             permanent[0],
         )
     return CaptionOutcome(

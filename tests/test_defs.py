@@ -856,9 +856,14 @@ def test_tool_descriptions_stay_within_a_budget():
     Raised from 1500 for the ``regenerate_toc`` nudge: the tool gained a
     parameter that only helps if the description tells the agent when to
     reach for it.
+
+    Raised from 1800 in 0.36.0 for ``figure_captions_blocked``: the manifest
+    gained a key, and the whole point of publishing it is that the agent stops
+    asking for captions that cannot arrive -- which it can only do if the
+    description says so. Same argument as ``toc_source`` above.
     """
     budgets = {
-        "build_datasheet": 1800,
+        "build_datasheet": 2150,
         "get_section_text": 800,
         "search_text": 700,
         "inspect_page": 400,
@@ -954,3 +959,20 @@ def test_build_datasheet_handler_forwards_regenerate_toc(
     # happily and return a manifest here.
     assert escalated["is_error"] is True
     assert "regenerate_toc" in escalated["content"][0]["text"]
+
+
+def test_zero_hit_note_does_not_steer_by_captions_that_cannot_exist():
+    """The standing note tells the agent to read a caption. On a blocked build
+    every caption is null and no rebuild will change that, so that advice sends
+    it to look at nothing. The remedy survives; only the route changes."""
+    from datasheetindex.tools.defs import (
+        _EMPTY_SEARCH_BLOCKED_CAPTIONS_NOTE,
+        _EMPTY_SEARCH_RASTER_NOTE,
+    )
+
+    assert "whose caption" in _EMPTY_SEARCH_RASTER_NOTE
+    assert "whose caption" not in _EMPTY_SEARCH_BLOCKED_CAPTIONS_NOTE
+    # Both must still name inspect_page: a limitation stated without a remedy
+    # just stops the agent.
+    assert "inspect_page" in _EMPTY_SEARCH_BLOCKED_CAPTIONS_NOTE
+    assert "figure_captions_blocked" in _EMPTY_SEARCH_BLOCKED_CAPTIONS_NOTE

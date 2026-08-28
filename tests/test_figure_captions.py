@@ -714,11 +714,24 @@ def test_one_permanent_failure_among_successes_is_not_blocked(caplog):
     import logging
 
     class _OneBadCall:
-        status = 0
+        """Rejects the first dispatched call and serves the rest.
+
+        The counter is incremented and read under one lock, for the reason
+        ``RecordingVision`` records above: dispatch is concurrent, so an
+        unlocked ``+= 1`` followed by a separate read lets two threads both
+        see 1 (two rejections) or both see 2 (none), and the test then fails
+        or -- worse -- passes vacuously with nothing rejected at all.
+        """
+
+        def __init__(self):
+            self._lock = threading.Lock()
+            self._calls = 0
 
         def describe_image(self, *_args, **_kwargs):
-            self.status += 1
-            if self.status == 1:
+            with self._lock:
+                self._calls += 1
+                index = self._calls
+            if index == 1:
                 raise _forbidden()
             return "a plot of something"
 
@@ -745,20 +758,29 @@ def _forbidden() -> Exception:
     return _GatewayStatusError("forbidden")
 
 
-def test_a_document_with_nothing_to_caption_is_not_blocked():
-    """Zero attempted calls must not satisfy "every attempt was rejected"."""
+def test_an_all_blank_document_is_not_blocked():
+    """The reachable empty-``rendered`` path, and the one the guard is for.
+
+    A document with *no figures* returns early at ``if not eligible`` and never
+    evaluates ``blocked`` at all -- so a test built on one pins the dataclass
+    default, not the guard. An all-blank document is the case that reaches the
+    comparison with ``rendered`` empty, where ``len(permanent) == len(rendered)``
+    is vacuously true and ``permanent[0]`` would raise IndexError.
+    """
 
     class _NeverCalled:
         def describe_image(self, *_args, **_kwargs):
-            raise AssertionError("no figure should have been dispatched")
+            raise AssertionError("a blank region must not be dispatched")
 
-    doc = pymupdf.open()
-    doc.new_page(width=595, height=842)
+    doc = _doc_with_single_raster(_paint_blank)
+    figures = _figures(doc)
+    assert figures, "the fixture must produce an eligible region to be meaningful"
     try:
         outcome = caption_figures_in_place(
-            doc, [], vision_client=_NeverCalled(), max_figure_captions=20
+            doc, figures, vision_client=_NeverCalled(), max_figure_captions=20
         )
     finally:
         doc.close()
 
+    assert outcome.blank == 1
     assert outcome.blocked is False

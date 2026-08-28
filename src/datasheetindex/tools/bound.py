@@ -972,6 +972,16 @@ class DatasheetTools:
                     match["breadcrumb"] = breadcrumb
         return matches
 
+    def captions_blocked(self) -> bool:
+        """True when this build's captioning failed permanently, for every figure.
+
+        Read by the zero-hit ``search_text`` note, whose standing advice is to
+        steer by a caption -- which on such a build does not exist and cannot
+        arrive. Absent on a healthy artifact and on anything built before
+        0.36.0, so ``.get`` rather than ``[]``.
+        """
+        return bool(self._require_artifacts().json_data.get("figure_captions_blocked"))
+
     def has_raster_figures(self) -> bool:
         """True when the built artifacts index at least one raster region.
 
