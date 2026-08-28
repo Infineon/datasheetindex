@@ -1188,3 +1188,88 @@ def test_the_message_names_the_variable_when_the_url_is_unset(monkeypatch):
     monkeypatch.delenv("LITELLM_BASE_URL", raising=False)
     with pytest.raises(LlmTlsVerificationError, match="LITELLM_BASE_URL"):
         _client_raising(_cert_error())("s", "u")
+
+
+# --- Telling a permanent misconfiguration from a bad afternoon ----------------
+
+
+def _status_error(code: int) -> Exception:
+    """An exception carrying ``status_code``, as the openai SDK's really do.
+
+    A bare namespace would not do: the classifier walks the exception chain
+    first, so its argument has to be a real exception -- which every caller
+    passes, since it comes straight out of an ``except`` clause.
+    """
+
+    class _GatewayStatusError(Exception):
+        status_code = code
+
+    return _GatewayStatusError(f"HTTP {code}")
+
+
+def _bare_tls() -> Exception:
+    """An LlmTlsVerificationError raised directly, with no cause chain."""
+    from datasheetindex.llm.client import LlmTlsVerificationError
+
+    return LlmTlsVerificationError("add the CA to the trust store")
+
+
+def _converted_tls():
+    """The error the caption path actually sees: converted, chain intact."""
+    from datasheetindex.llm.client import (
+        LlmTlsVerificationError,
+        _raise_if_tls_verification_failed,
+    )
+
+    try:
+        _raise_if_tls_verification_failed(_cert_error())
+    except LlmTlsVerificationError as exc:
+        return exc
+    raise AssertionError("the fixture chain was not classified as a TLS failure")
+
+
+@pytest.mark.parametrize(
+    ("exc", "expected"),
+    [
+        pytest.param(_cert_error(), True, id="tls-raw-transport-chain"),
+        pytest.param(
+            _converted_tls(),
+            True,
+            id="tls-converted",
+        ),
+        # No cause chain at all. The type is exported from the package root, so
+        # raising one bare is legitimate -- and a chain walk alone answers False
+        # here, which is exactly how this case was missed the first time.
+        pytest.param(
+            _bare_tls(),
+            True,
+            id="tls-bare",
+        ),
+        pytest.param(_status_error(401), True, id="unauthorized"),
+        pytest.param(_status_error(403), True, id="forbidden"),
+        # Everything below is a bad afternoon, not a bad config. Misclassifying
+        # one of these as permanent would tell an operator to go fix a gateway
+        # that is already fine.
+        pytest.param(_status_error(429), False, id="rate-limited"),
+        pytest.param(_status_error(500), False, id="server-error"),
+        pytest.param(_status_error(404), False, id="not-found-is-ambiguous"),
+        pytest.param(TimeoutError("timed out"), False, id="timeout"),
+        pytest.param(RuntimeError("Connection error."), False, id="bare-connection"),
+    ],
+)
+def test_permanent_failures_are_told_apart_from_transient_ones(exc, expected):
+    """Only a misconfiguration an operator can fix counts as permanent.
+
+    Duck-typed on ``status_code`` exactly as ``_is_retryable`` is, so the check
+    needs no ``openai`` import -- the SDK sets that attribute on its status
+    errors (``AuthenticationError`` 401, ``PermissionDeniedError`` 403).
+
+    404 is deliberately absent. It reads like "the model does not exist", but a
+    gateway also returns it for a route that is temporarily unregistered, and
+    the wrong-model case already self-heals: ``DATASHEETINDEX_VISION_MODEL`` is
+    in the artifact-reuse key, so correcting the name invalidates the artifact
+    by itself.
+    """
+    from datasheetindex.llm.client import is_permanent_llm_failure
+
+    assert is_permanent_llm_failure(exc) is expected

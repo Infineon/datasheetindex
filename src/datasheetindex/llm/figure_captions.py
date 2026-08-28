@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, cast
 
 import pymupdf
 
+from datasheetindex.llm.client import is_permanent_llm_failure
 from datasheetindex.tools.vision import inspect_page
 
 if TYPE_CHECKING:
@@ -227,6 +228,17 @@ class CaptionOutcome:
     failed: bool
     blank: int = 0
     shared: int = 0
+    #: Every caption failed for a reason that will not change on retry -- a
+    #: rejected certificate, or credentials the gateway refuses (401/403).
+    #:
+    #: A *narrowing* of ``failed``, not a replacement: ``failed`` is still set,
+    #: so reuse behaves exactly as before and a misconfigured build is never
+    #: cached as complete. This exists so the failure can be REPORTED
+    #: differently -- once, naming the cause -- because the expensive part of
+    #: this state is how long it lasts, not what one build of it costs.
+    #: Deliberately conservative: anything unrecognised stays plain ``failed``,
+    #: since telling an operator to fix a healthy gateway is the worse error.
+    blocked: bool = False
 
 
 def caption_figures_in_place(
@@ -290,13 +302,20 @@ def caption_figures_in_place(
             continue
         rendered.append((group, image_base64))
 
+    # Collected across threads: `list.append` is atomic under the GIL, and only
+    # the first entry is ever read. A set would work equally well; a list keeps
+    # the first failure rather than an arbitrary one.
+    permanent: list[BaseException] = []
+
     # Dispatch concurrently: network I/O, safe to overlap.
     def describe(payload: tuple[list[dict[str, object]], str]) -> str | None:
         entry = payload[0][0]
         image_base64 = payload[1]
         try:
             reply = vision_client.describe_image(CAPTION_SYSTEM_PROMPT, image_base64)
-        except Exception:
+        except Exception as exc:
+            if is_permanent_llm_failure(exc):
+                permanent.append(exc)
             # Deliberately NOT carved out for LlmTlsVerificationError, unlike
             # the ToC fallback. Captioning runs at step 6b and the artifacts are
             # written at step 8, so raising here would abort the build and write
@@ -347,4 +366,24 @@ def caption_figures_in_place(
         captioned += 1
         shared += len(group) - 1
 
-    return CaptionOutcome(captioned, 0, excluded_above_max, failed, blank, shared)
+    if permanent:
+        # ERROR, once, naming the cause -- not one anonymous warning per figure.
+        # Nothing else changes: `failed` still marks the artifact incomplete, so
+        # reuse behaves exactly as before. What this fixes is the *duration* of
+        # the breakage. While it lasts, `figure_caption_failed` blocks artifact
+        # reuse, so every build_datasheet call re-scans the whole PDF (86.5s
+        # measured on the 134-page PSoC 6) to fail the same way again. That cost
+        # is only worth paying attention to because the operator could not
+        # previously tell what to fix: the one actionable line was buried in
+        # each per-figure traceback.
+        logger.error(
+            "Figure captioning is misconfigured, not merely failing: every one of "
+            "the %d attempted captions was rejected for a reason that will not "
+            "change on retry. Until it is fixed, this document is rebuilt from "
+            "scratch on every request. Cause: %s",
+            len(permanent),
+            permanent[0],
+        )
+    return CaptionOutcome(
+        captioned, 0, excluded_above_max, failed, blank, shared, bool(permanent)
+    )

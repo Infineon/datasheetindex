@@ -843,6 +843,13 @@ class DatasheetIndex:
                     "above_max": caption_outcome.excluded_above_max,
                     "max_figure_captions": effective_cap,
                 },
+                # Published for the same reason as the two keys above: "absent"
+                # and "absent for a reason" are different facts, and only the
+                # builder knows which one this is. Without it an agent cannot
+                # tell a document with nothing captionable from a deployment
+                # whose gateway rejects every caption call, and would keep
+                # asking for captions that can never arrive.
+                "figure_captions_blocked": caption_outcome.blocked,
             }
 
             # 8. Write output files
