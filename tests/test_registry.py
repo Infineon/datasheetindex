@@ -896,3 +896,39 @@ def test_extract_table_markdown_passes_layout_kwargs_only_on_the_layout_branch(
         assert seen["header"] is False and seen["footer"] is False, seen
     # The keywords the classic renderer does accept are passed either way.
     assert seen["pages"] == [0] and seen["show_progress"] is False, seen
+
+
+def test_manifest_surfaces_blocked_captioning(monkeypatch, tmp_path):
+    """The digest reports `captioned: 0` but never why -- so say why.
+
+    An MCP or Agent-SDK agent is handed `get_artifact_manifest` and nothing
+    else. Without this it sees {raster: N, captioned: 0} behind a rejected
+    certificate and cannot tell it from a document with nothing captionable,
+    so it keeps asking for captions that can never arrive. Same wall the
+    0.25.0 figures digest was added to climb, and the same fix.
+    """
+    from datasheetindex.models import DatasheetArtifacts
+    from datasheetindex.tools.bound import DatasheetTools
+
+    tools = DatasheetTools.__new__(DatasheetTools)
+    artifacts = DatasheetArtifacts(
+        json_path=tmp_path / "d.json",
+        text_path=tmp_path / "d.txt",
+        json_data={
+            "total_pages": 3,
+            "toc": [{"title": "1 Overview", "start_page": 1}],
+            "toc_quality": {"score": 0.9},
+            "figures": [],
+            "figure_captions_blocked": True,
+        },
+        toc_source="pdf_outline",
+    )
+    tools._artifacts = artifacts
+
+    manifest = DatasheetTools.get_artifact_manifest(tools)
+    assert manifest["figure_captions_blocked"] is True
+
+    # Absent, not false, when captioning is fine: the key costs tokens on every
+    # call and says nothing on a healthy build.
+    artifacts.json_data["figure_captions_blocked"] = False
+    assert "figure_captions_blocked" not in DatasheetTools.get_artifact_manifest(tools)

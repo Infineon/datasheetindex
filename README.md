@@ -417,7 +417,10 @@ vision-capable client is available -- supplied explicitly, or self-created
 the same way the ToC fallback is -- every raster region above the area
 threshold gets a short VLM description (`caption_source: "llm"`), largest
 regions first, up to the cap; `figure_captions_excluded` discloses what the
-cap dropped. Placements sharing an `xref` are one picture: the largest is
+cap dropped, and `figure_captions_blocked` says whether captioning failed
+for a reason that will not change on retry -- a rejected certificate, or
+credentials the gateway refuses -- so "no captions" can be told apart from
+"nothing to caption". Placements sharing an `xref` are one picture: the largest is
 described, every placement receives the answer, and the cap counts pictures,
 not placements. A header logo repeated on four pages is therefore one call
 with four identical captions, not four calls -- measured at 33% of the calls

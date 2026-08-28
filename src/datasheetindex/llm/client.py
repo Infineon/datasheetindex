@@ -254,9 +254,11 @@ def is_permanent_llm_failure(exc: BaseException) -> bool:
     it sends an operator to fix a gateway that is already fine, so anything
     unrecognised is treated as transient.
 
-    Duck-typed on ``status_code`` exactly as ``_is_retryable`` is -- the openai
-    SDK sets it on its status errors -- so this stays importable with no
-    ``[llm]`` extra installed.
+    Duck-typed on ``status_code`` -- the openai SDK sets it on its status
+    errors -- so this stays importable with no ``[llm]`` extra installed.
+    ``_is_retryable`` duck-types the same attribute but also falls back to
+    ``.code`` and to a message substring; this one deliberately does not, since
+    an unrecognised shape must stay transient rather than be guessed permanent.
     """
     # Both forms, and both are needed. The type alone misses a raw transport
     # chain from any future path that skipped the conversion; the chain walk

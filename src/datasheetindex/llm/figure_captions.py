@@ -228,8 +228,11 @@ class CaptionOutcome:
     failed: bool
     blank: int = 0
     shared: int = 0
-    #: Every caption failed for a reason that will not change on retry -- a
-    #: rejected certificate, or credentials the gateway refuses (401/403).
+    #: **Every** attempted caption failed for a reason that will not change on
+    #: retry -- a rejected certificate, or credentials the gateway refuses
+    #: (401/403). Totality is the whole meaning: one rejected call among
+    #: successes is a blip, and a document that carries real captions must
+    #: never be published as blocked.
     #:
     #: A *narrowing* of ``failed``, not a replacement: ``failed`` is still set,
     #: so reuse behaves exactly as before and a misconfigured build is never
@@ -366,8 +369,18 @@ def caption_figures_in_place(
         captioned += 1
         shared += len(group) - 1
 
-    if permanent:
-        # ERROR, once, naming the cause -- not one anonymous warning per figure.
+    # Totality, not presence. One rejected call among successes is a blip -- a
+    # 401 during a key rotation, a 403 on one oversized image -- and claiming
+    # the gateway is misconfigured there would send an operator to fix
+    # something that just served the other captions, as well as publishing
+    # `figure_captions_blocked` on a document that carries real ones. The
+    # `rendered` guard matters on its own: with no figures both lists are
+    # empty and `len(permanent) == len(rendered)` is vacuously true.
+    blocked = bool(rendered) and len(permanent) == len(rendered)
+    if blocked:
+        # ERROR, once, naming the cause -- alongside the per-figure warnings
+        # above, which stay: they are the only signal on a PARTIAL permanent
+        # failure, which this branch deliberately does not fire for.
         # Nothing else changes: `failed` still marks the artifact incomplete, so
         # reuse behaves exactly as before. What this fixes is the *duration* of
         # the breakage. While it lasts, `figure_caption_failed` blocks artifact
@@ -377,13 +390,13 @@ def caption_figures_in_place(
         # previously tell what to fix: the one actionable line was buried in
         # each per-figure traceback.
         logger.error(
-            "Figure captioning is misconfigured, not merely failing: every one of "
-            "the %d attempted captions was rejected for a reason that will not "
-            "change on retry. Until it is fixed, this document is rebuilt from "
-            "scratch on every request. Cause: %s",
-            len(permanent),
+            "Figure captioning is misconfigured, not merely failing: all %d "
+            "attempted captions were rejected for a reason that will not change "
+            "on retry. Until it is fixed, this document is rebuilt from scratch "
+            "on every request. Cause: %s",
+            len(rendered),
             permanent[0],
         )
     return CaptionOutcome(
-        captioned, 0, excluded_above_max, failed, blank, shared, bool(permanent)
+        captioned, 0, excluded_above_max, failed, blank, shared, blocked
     )

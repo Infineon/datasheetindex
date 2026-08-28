@@ -884,6 +884,14 @@ class DatasheetTools:
             "toc": artifacts.json_data.get("toc"),
             "figures": _figure_digest(artifacts.json_data.get("figures")),
         }
+        # Only published when true, and only then does it cost tokens. The
+        # digest above reports `raster` and `captioned` but never *why*
+        # `captioned` is 0, so an agent behind a rejected certificate sees
+        # {raster: 12, captioned: 0} and cannot tell it from a document with
+        # nothing captionable -- and keeps asking for captions that can never
+        # arrive. Same wall the 0.25.0 figures digest was added to climb.
+        if artifacts.json_data.get("figure_captions_blocked"):
+            manifest["figure_captions_blocked"] = True
         if not manifest["toc"]:
             manifest["hint"] = _NO_TOC_HINT
         return manifest

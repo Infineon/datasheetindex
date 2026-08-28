@@ -700,3 +700,65 @@ def test_an_ordinary_failure_is_not_reported_as_a_misconfiguration(caplog):
     assert outcome.failed is True
     assert outcome.blocked is False
     assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+
+def test_one_permanent_failure_among_successes_is_not_blocked(caplog):
+    """``blocked`` means no caption CAN arrive, not that one call was rejected.
+
+    A 401 during a key rotation, or a 403 on one oversized image, leaves the
+    other figures captioned. Publishing ``figure_captions_blocked: true`` on a
+    document that carries real captions is the exact confusion the key was
+    added to remove, inverted -- and the ERROR would send an operator to fix a
+    gateway that just served three captions.
+    """
+    import logging
+
+    class _OneBadCall:
+        status = 0
+
+        def describe_image(self, *_args, **_kwargs):
+            self.status += 1
+            if self.status == 1:
+                raise _forbidden()
+            return "a plot of something"
+
+    doc = _doc_with_images(4)
+    figures = _figures(doc)
+    try:
+        with caplog.at_level(logging.DEBUG):
+            outcome = caption_figures_in_place(
+                doc, figures, vision_client=_OneBadCall(), max_figure_captions=20
+            )
+    finally:
+        doc.close()
+
+    assert outcome.captioned == 3
+    assert outcome.failed is True
+    assert outcome.blocked is False
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+
+def _forbidden() -> Exception:
+    class _GatewayStatusError(Exception):
+        status_code = 403
+
+    return _GatewayStatusError("forbidden")
+
+
+def test_a_document_with_nothing_to_caption_is_not_blocked():
+    """Zero attempted calls must not satisfy "every attempt was rejected"."""
+
+    class _NeverCalled:
+        def describe_image(self, *_args, **_kwargs):
+            raise AssertionError("no figure should have been dispatched")
+
+    doc = pymupdf.open()
+    doc.new_page(width=595, height=842)
+    try:
+        outcome = caption_figures_in_place(
+            doc, [], vision_client=_NeverCalled(), max_figure_captions=20
+        )
+    finally:
+        doc.close()
+
+    assert outcome.blocked is False
