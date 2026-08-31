@@ -360,6 +360,14 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                 "that name no section. Read it before planning: if the entries "
                 "do not identify sections, call build_datasheet again with "
                 "regenerate_toc=true to rebuild the outline from the body text."
+                "\n\n"
+                "Before answering about a SPECIFIC part number, check whether "
+                "the datasheet covers a product family. About half do, and "
+                "their body text describes the family, so a features or "
+                "peripheral section can name something a given part lacks -- "
+                "confirm in the ordering/selection table. 'multi_variant' "
+                "(absent unless detected) names the family; its absence is not "
+                "evidence of a single-part document."
             ),
             input_schema={
                 "type": "object",
@@ -453,7 +461,12 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                 "always hold all of its content. The '===' wrapper is what marks "
                 "the line as the tool's own signal rather than a literal 'NOTE:' "
                 "in the datasheet's body text. Absence of a note means none was "
-                "detected; it is not a guarantee of completeness."
+                "detected; it is not a guarantee of completeness.\n\n"
+                "A NOTE naming a product family means this text may describe "
+                "the family, not the part you were asked about: confirm the "
+                "value in the ordering/selection table. That note needs the "
+                "family detected, so stay cautious on a per-part question "
+                "even without one."
             ),
             input_schema={
                 "type": "object",

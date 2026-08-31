@@ -118,11 +118,19 @@ def generate_toc_from_text(
     text_content: str,
     total_pages: int,
     llm_callable: LlmCallable,
+    *,
+    multi_variant: bool = False,
 ) -> list[TocNode]:
     """Generate a ToC tree from raw page-marked text using an LLM.
 
     Splits text into chunks on ``--- PAGE N ---`` boundaries, sends each
     chunk to the LLM, and assembles the results into a ``TocNode`` tree.
+
+    ``multi_variant`` is passed through to ``build_tree``. It has to be: this
+    function *replaces* the tree the caller built, so without it an accepted
+    fallback candidate silently reverts the ordering-section suppression --
+    and it does so on exactly the documents this fallback exists for, plus on
+    every explicit ``regenerate_toc=true``.
     """
     chunks = _split_into_chunks(text_content, CHUNK_SIZE)
     if not chunks:
@@ -156,7 +164,7 @@ def generate_toc_from_text(
 
     # Convert flat entries to TocNode tree via the shared builder
     raw_toc = [[e["level"], e["title"], e["start_page"]] for e in all_entries]
-    return build_tree(raw_toc, total_pages)
+    return build_tree(raw_toc, total_pages, multi_variant=multi_variant)
 
 
 @dataclass(frozen=True)

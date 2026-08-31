@@ -1179,6 +1179,38 @@ A single PDF covers multiple product variants (e.g., TPS651/652/653, AD7606/7606
 
 The agent handles all five patterns through reasoning — it knows which product the user asked about and filters accordingly. For variant column tables, `inspect_page` is particularly useful since column alignment is often lost in raw text extraction.
 
+**What the library does to help, as of 0.37.0.** Reasoning only starts if the agent
+realizes the document covers a family, and the observed failure is that it does not:
+asked whether one part had a peripheral, an agent answered from a family-level
+features section while the ordering table said no for that part. Worse, the library
+was steering it that way — `boilerplate_category: "ordering"` marks a section as
+*deprioritized*, and on a family datasheet that is the one authoritative section.
+
+Four deterministic layers now address this, and the split between them is deliberate:
+
+1. **The `ordering` category is suppressed** when a family is detected (`core/boilerplate.py`), and only that category. This removes a mis-steer rather than adding a reminder, and leaves the ~48% single-part documents untouched, where ordering really is boilerplate.
+2. **`multi_variant` is published** in the ToC JSON and in `get_artifact_manifest`, present only when detected, carrying the family text and the rule that matched.
+3. **`get_section_text` emits a read-time `=== NOTE ===`** naming the family and pointing at the ordering section — suppressed inside that section, where it would point at the current page. The build-time field alone is not enough: in the observed failure the agent already held the ToC, the ordering section and page 1, and still went wrong many turns later, at read time. The note is phrased as an instruction ("Do NOT report a per-part answer from the text below ... Before answering, read X"), which is measured rather than stylistic: against a live agent, n=10 per variant, a descriptive phrasing answered 1/10 and this one 10/10 (Fisher exact p < 0.001).
+4. **A standing caution** in the `build_datasheet` and `get_section_text` descriptions, phrased for every datasheet, because it is the floor for families the detector misses.
+
+Detection is **title-only**, and that is measured rather than assumed — precision
+1.00, recall 0.85 against hand-labelled ground truth over a 25-document corpus, at a
+52% base rate. Precision is the property that matters: a false positive costs noise,
+a false negative costs a confident wrong answer. Two alternatives were measured and
+rejected. Page-1 **body** text recovers 2 real families out of 57 misses while
+dropping precision to ~0.41, because package order codes (`TXB0104RGY`), companion
+parts (`CC1190`) and tokens that are not part numbers at all (`RGB888`, `PT100`, pin
+names) are indistinguishable from feature variants without vendor-specific grammars;
+the title wins because a vendor *curates* it, writing `ADS111x` only when the
+document really covers a family. A **library-side LLM call** would classify all of
+them correctly and is still rejected: it puts nondeterminism inside a cached
+artifact, it makes a correctness caveat depend on the optional `[llm]` extra, and
+the judgment needs the *question* — "is `TXB0104RGY` a variant?" is unanswerable in
+the abstract and trivial once you know the user asked about a specific part. The
+agent holds the question; the library does not. This is the same boundary that keeps
+ToC-quality judgment on the agent's side, and it is the opposite of figure
+captioning, where the LLM generates content the agent cannot otherwise obtain.
+
 ---
 
 ## Implementation
@@ -1863,6 +1895,8 @@ datasheetindex/
 │   ├── figures.py         # raster_regions: exact raster placements, clipped
 │   │                      #   to the page and normalized for inspect_page
 │   ├── preamble.py        # Page-marked front matter + per-page signals
+│   ├── variants.py        # Multi-variant detection from the title block
+│   │                      #   (does this PDF cover a product family?)
 │   └── quality.py         # Page-level quality scoring
 │                          #   (text density, extraction confidence)
 ├── tools/

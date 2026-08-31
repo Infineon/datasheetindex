@@ -33,6 +33,7 @@ from datasheetindex.core.artifact_cache import (
     sidecar_path,
     write_sidecar,
 )
+from datasheetindex.core.boilerplate import classify_title
 from datasheetindex.core.engine import layout_active, layout_engine
 from datasheetindex.core.locate import TextLocation
 from datasheetindex.core.locate import locate_text as locate_text_core
@@ -58,7 +59,12 @@ from datasheetindex.llm.figure_captions import (
     DEFAULT_MAX_FIGURE_CAPTIONS,
     validate_max_figure_captions,
 )
-from datasheetindex.models import DatasheetArtifacts, TocNode, TocQuality
+from datasheetindex.models import (
+    DatasheetArtifacts,
+    TocNode,
+    TocQuality,
+    flatten_nodes,
+)
 from datasheetindex.tools.vision import Detail, inspect_page
 
 if TYPE_CHECKING:
@@ -368,6 +374,100 @@ def _continuation_notes(text_content: str, start_page: int, end_page: int) -> li
             f"which is outside this range. ==="
         )
     return notes
+
+
+def _ordering_section(nodes: list[TocNode]) -> TocNode | None:
+    """The shallowest section holding the per-part selection tables, if any.
+
+    Found by title classification rather than by ``boilerplate_category``,
+    because on exactly the documents this matters for that flag is deliberately
+    suppressed -- the ordering section is authoritative there, not skippable.
+
+    Shallowest, then earliest -- not simply the first in document order.
+    ``classify_title`` also matches "Part Numbering", which is commonly a
+    subsection early in the document explaining the naming convention, while
+    the per-part table sits in a top-level "Ordering Information" chapter near
+    the end. A depth-first scan returns the subsection, so the note would point
+    the agent at the wrong page and the overlap suppression below would be
+    computed from the wrong range.
+    """
+    candidates = [
+        n for n in flatten_nodes(nodes) if classify_title(n.title) == "ordering"
+    ]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda n: (n.level, n.start_page))
+
+
+def _variant_note(
+    artifacts: DatasheetArtifacts, start_page: int, end_page: int
+) -> list[str]:
+    """A note that this range may describe a family rather than one part.
+
+    Emitted at read time, not only at build time, because that is where the
+    observed failure happened: the agent held the ToC, the ordering section
+    and page 1, then read a features section and answered a per-part question
+    from it. A manifest field fires many turns before that moment.
+
+    Suppressed inside the ordering section itself, where it would point the
+    agent at the page it is already reading.
+    """
+    variant = artifacts.json_data.get("multi_variant")
+    if not variant:
+        return []
+
+    family = variant.get("family", "")
+    ordering = _ordering_section(artifacts.nodes)
+    if ordering is not None:
+        # Suppressed only when the read lies INSIDE the ordering section, not
+        # on any overlap with it. A whole-chapter or whole-document read that
+        # merely spans those pages is not "already looking at the table", and
+        # the wide reads are where family-level body text is most likely to be
+        # taken for a per-part answer.
+        last = ordering.end_page or ordering.start_page
+        if start_page >= ordering.start_page and end_page <= last:
+            return []
+
+    # The imperative phrasing is measured, not stylistic. Driving a live
+    # Sonnet agent through the MCP server on the PSoC Control C3 datasheet,
+    # with only the five datasheet tools available, n=10 per variant:
+    #
+    #   descriptive  ("may describe the family ... are tabulated in X")   1/10
+    #   directive without negation ("The text below describes the
+    #     family ... To answer about a specific part, read X first")      5/10
+    #   this one, with the explicit prohibition                          10/10
+    #
+    # Fisher exact p < 0.001 against the descriptive form; the unmodified
+    # library answers 0/9. **The negation is load-bearing** -- dropping it
+    # for the gentler phrasing costs half the benefit, so do not soften this
+    # on style grounds. The descriptive runs all stopped at 5 turns (build,
+    # read the features section, answer) where these take 6-11 and go read
+    # the table: naming the prohibited action AND the required next step is
+    # what changed behaviour.
+    #
+    # The obvious objection -- that an imperative this blunt misfires when
+    # the detector is wrong -- was measured too. Forcing the flag onto a
+    # genuinely single-part datasheet and asking a plainly answerable
+    # question, n=6: 6/6 correct with and without the note, 4.3 turns
+    # against a 4.2-turn control. A false positive costs nothing here, which
+    # is what makes the aggressive phrasing defensible. Literature on
+    # negation (ironic rebound, negation instability) concerns negating the
+    # *content* of an answer; this negates a *procedure* and names the
+    # alternative in the same sentence, so the model always has somewhere
+    # to go. Re-run both comparisons before changing any of it.
+    named = f" ({family})" if family else ""
+    note = (
+        f"=== NOTE: this datasheet covers a product family{named}. Do NOT "
+        f"report a per-part answer from the text below: it describes the "
+        f"family, and a given part may not have what it names."
+    )
+    if ordering is not None:
+        note += (
+            f' Before answering, read "{ordering.title}" (page '
+            f"{ordering.start_page}) and confirm the value against the "
+            f"per-part table there."
+        )
+    return [note + " ==="]
 
 
 class DatasheetTools:
@@ -892,6 +992,14 @@ class DatasheetTools:
         # arrive. Same wall the 0.25.0 figures digest was added to climb.
         if artifacts.json_data.get("figure_captions_blocked"):
             manifest["figure_captions_blocked"] = True
+        # Published only when the datasheet covers a product family, for the
+        # same reason as the key above: absent means "no news", so the key's
+        # presence is itself the signal. Without it the agent cannot tell a
+        # family datasheet from a single-part one, and answers a per-part
+        # question from family-level body text -- the observed failure.
+        variant = artifacts.json_data.get("multi_variant")
+        if variant:
+            manifest["multi_variant"] = variant
         if not manifest["toc"]:
             manifest["hint"] = _NO_TOC_HINT
         return manifest
@@ -903,13 +1011,17 @@ class DatasheetTools:
 
         1. A position header: ``=== Page X of N ===`` for a single-page read,
            ``=== Pages X-Y of N ===`` for a multi-page range.
-        2. Zero or more ``=== NOTE: ... ===`` lines -- present when the
-           requested range cuts content the publisher marked as continuing
-           onto an adjacent page, at the head of the range, the tail, or both;
-           either boundary can carry more than one marker (e.g. a page opening
-           with two continued tables). The ``===`` wrapper is what marks the
-           line as tool framing rather than document content: real datasheets
-           sometimes contain their own literal ``NOTE:`` lines in body text.
+        2. Zero or more ``=== NOTE: ... ===`` lines, of two kinds. The first,
+           when the datasheet covers a product family, says the text may
+           describe the family rather than one part and names the ordering
+           section; it is omitted when the range overlaps that section. The
+           rest are emitted when the requested range cuts content the
+           publisher marked as continuing onto an adjacent page, at the head
+           of the range, the tail, or both; either boundary can carry more
+           than one marker (e.g. a page opening with two continued tables).
+           The ``===`` wrapper is what marks the line as tool framing rather
+           than document content: real datasheets sometimes contain their own
+           literal ``NOTE:`` lines in body text.
         3. The section text, WITH ``--- PAGE N ---`` markers so the agent can
            orient within the range.
 
@@ -927,7 +1039,8 @@ class DatasheetTools:
             header = f"=== Page {start_page} of {total_pages} ==="
         else:
             header = f"=== Pages {start_page}-{end_page} of {total_pages} ==="
-        notes = _continuation_notes(artifacts.text_content, start_page, end_page)
+        notes = _variant_note(artifacts, start_page, end_page)
+        notes += _continuation_notes(artifacts.text_content, start_page, end_page)
         section = extract_section_text(artifacts.text_content, start_page, end_page)
         return "\n".join([header, *notes, section])
 

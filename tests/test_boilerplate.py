@@ -201,3 +201,71 @@ def test_flag_boilerplate_empty_title_does_not_propagate():
     assert parent.boilerplate_category == ""
     assert child_a.boilerplate_category == ""
     assert child_b.boilerplate_category == "legal"
+
+
+class TestOrderingOnMultiVariantDatasheets:
+    """The ordering section is authoritative when the document covers a family.
+
+    ``boilerplate_category`` exists to tell an agent what to *deprioritize*.
+    On a multi-variant datasheet the per-part table lives in the ordering
+    section, so flagging it steers the agent away from the only section that
+    can answer a per-part question -- the observed failure this guards.
+    """
+
+    def test_ordering_is_flagged_on_a_single_part_datasheet(self):
+        nodes = [TocNode(title="Ordering Information", level=1, start_page=9)]
+        flag_boilerplate(nodes, multi_variant=False)
+        assert nodes[0].boilerplate_category == "ordering"
+
+    def test_ordering_is_not_flagged_on_a_multi_variant_datasheet(self):
+        nodes = [TocNode(title="Ordering Information", level=1, start_page=69)]
+        flag_boilerplate(nodes, multi_variant=True)
+        assert nodes[0].boilerplate_category == ""
+
+    def test_other_categories_still_flagged_on_a_multi_variant_datasheet(self):
+        """Only `ordering` is authoritative. Legal text is boilerplate either way."""
+        nodes = [
+            TocNode(title="Disclaimer", level=1, start_page=70),
+            TocNode(title="Revision History", level=1, start_page=71),
+        ]
+        flag_boilerplate(nodes, multi_variant=True)
+        assert nodes[0].boilerplate_category == "legal"
+        assert nodes[1].boilerplate_category == "revision"
+
+    def test_children_do_not_inherit_a_suppressed_ordering_flag(self):
+        """Suppression must reach subsections, which is where the tables are."""
+        nodes = [
+            TocNode(
+                title="Ordering Information",
+                level=1,
+                start_page=69,
+                nodes=[TocNode(title="Part Number Matrix", level=2, start_page=70)],
+            )
+        ]
+        flag_boilerplate(nodes, multi_variant=True)
+        assert nodes[0].nodes[0].boilerplate_category == ""
+
+    def test_default_preserves_existing_behaviour(self):
+        """Callers that pass no flag must be unaffected."""
+        nodes = [TocNode(title="Ordering Information", level=1, start_page=9)]
+        flag_boilerplate(nodes)
+        assert nodes[0].boilerplate_category == "ordering"
+
+
+def test_suppressed_ordering_does_not_inherit_its_parent_category():
+    """Suppression must not fall through to the parent's category.
+
+    Clearing the node's own classification and then letting it inherit puts
+    the flag straight back on, re-creating the exact mis-steer the
+    suppression exists to remove -- just with a different category name.
+    """
+    nodes = [
+        TocNode(
+            title="Appendix A: Revision History",
+            level=1,
+            start_page=60,
+            nodes=[TocNode(title="Ordering Information", level=2, start_page=61)],
+        )
+    ]
+    flag_boilerplate(nodes, multi_variant=True)
+    assert nodes[0].nodes[0].boilerplate_category == ""

@@ -65,7 +65,9 @@ def extract_toc(doc: pymupdf.Document) -> list[list]:
     return doc.get_toc()
 
 
-def build_tree(raw_toc: list[list], total_pages: int) -> list[TocNode]:
+def build_tree(
+    raw_toc: list[list], total_pages: int, *, multi_variant: bool = False
+) -> list[TocNode]:
     """Build a hierarchical tree of TocNode from raw ToC entries.
 
     Uses a stack to track the current nesting path. Each raw entry is
@@ -75,6 +77,9 @@ def build_tree(raw_toc: list[list], total_pages: int) -> list[TocNode]:
     and named in a WARNING, rather than taking the build down with it. A
     malformed entry -- too short, or a level below 1 -- still raises: that is a
     caller error, while an out-of-range page is a property of the PDF.
+
+    ``multi_variant`` is passed through to ``flag_boilerplate``, which uses it
+    to keep the ordering section unflagged on family datasheets.
     """
     if not raw_toc:
         return []
@@ -124,7 +129,7 @@ def build_tree(raw_toc: list[list], total_pages: int) -> list[TocNode]:
     compute_end_pages(root_nodes, total_pages)
     assign_node_ids(root_nodes)
     assign_breadcrumbs(root_nodes)
-    flag_boilerplate(root_nodes)
+    flag_boilerplate(root_nodes, multi_variant=multi_variant)
     return root_nodes
 
 

@@ -234,15 +234,33 @@ def test_url_source_retries_on_ssl_error(monkeypatch):
 
 
 class _FakeBuildDoc:
-    def __init__(self, pages: int = 3):
+    """Stand-in for a pymupdf.Document in build tests.
+
+    ``metadata`` and ``__getitem__`` are here because the build reads the
+    title block on page 1 to decide whether the datasheet covers a product
+    family. A fake without them would take the advisory guard in
+    ``core/variants.py`` instead of the real path, and pass for the wrong
+    reason.
+    """
+
+    def __init__(self, pages: int = 3, title: str = ""):
         self._pages = pages
         self.closed = False
+        self.metadata = {"title": title}
 
     def __len__(self):
         return self._pages
 
+    def __getitem__(self, _index):
+        return _FakeBuildPage()
+
     def close(self):
         self.closed = True
+
+
+class _FakeBuildPage:
+    def get_text(self, _kind):
+        return {"blocks": []}
 
 
 def test_build_auto_llm_fallback_when_quality_low(monkeypatch, tmp_path):
@@ -276,7 +294,7 @@ def test_build_auto_llm_fallback_when_quality_low(monkeypatch, tmp_path):
         llm_models.append(model)
         return fake_llm
 
-    def fake_toc_from_text(_text: str, _total_pages: int, llm_callable):
+    def fake_toc_from_text(_text: str, _total_pages: int, llm_callable, **_kw):
         fallback_calls.append(llm_callable)
         return [
             TocNode(
@@ -312,7 +330,9 @@ def test_build_auto_llm_fallback_when_quality_low(monkeypatch, tmp_path):
         ),
     )
     monkeypatch.setattr("datasheetindex.index.extract_toc", lambda _doc: [])
-    monkeypatch.setattr("datasheetindex.index.build_tree", lambda _raw, _pages: [])
+    monkeypatch.setattr(
+        "datasheetindex.index.build_tree", lambda _raw, _pages, **_kw: []
+    )
     monkeypatch.setattr(
         "datasheetindex.index.enrich_with_table_counts",
         lambda _nodes, _doc, **_kw: _nodes,
@@ -400,7 +420,7 @@ def test_build_auto_llm_fallback_keeps_original_when_candidate_too_thin(
         llm_models.append(model)
         return fake_llm
 
-    def fake_toc_from_text(_text: str, _total_pages: int, llm_callable):
+    def fake_toc_from_text(_text: str, _total_pages: int, llm_callable, **_kw):
         fallback_calls.append(llm_callable)
         return [
             TocNode(
@@ -440,7 +460,7 @@ def test_build_auto_llm_fallback_keeps_original_when_candidate_too_thin(
     )
     monkeypatch.setattr(
         "datasheetindex.index.build_tree",
-        lambda _raw, _pages: [
+        lambda _raw, _pages, **_kw: [
             TocNode(
                 title="Original",
                 level=1,
@@ -735,7 +755,9 @@ def test_build_auto_llm_fallback_graceful_without_credentials(monkeypatch, tmp_p
         ),
     )
     monkeypatch.setattr("datasheetindex.index.extract_toc", lambda _doc: [])
-    monkeypatch.setattr("datasheetindex.index.build_tree", lambda _raw, _pages: [])
+    monkeypatch.setattr(
+        "datasheetindex.index.build_tree", lambda _raw, _pages, **_kw: []
+    )
     monkeypatch.setattr(
         "datasheetindex.index.enrich_with_table_counts",
         lambda _nodes, _doc, **_kw: _nodes,
@@ -804,7 +826,7 @@ def test_build_llm_fallback_graceful_on_api_error(monkeypatch, tmp_path):
     def fake_client(model: str | None = None):
         return fake_llm
 
-    def fake_toc_from_text(_text, _total_pages, _llm_callable):
+    def fake_toc_from_text(_text, _total_pages, _llm_callable, **_kw):
         raise RuntimeError("429 Too Many Requests")
 
     monkeypatch.setattr("datasheetindex.index.pymupdf.open", fake_open)
@@ -831,7 +853,9 @@ def test_build_llm_fallback_graceful_on_api_error(monkeypatch, tmp_path):
         ),
     )
     monkeypatch.setattr("datasheetindex.index.extract_toc", lambda _doc: [])
-    monkeypatch.setattr("datasheetindex.index.build_tree", lambda _raw, _pages: [])
+    monkeypatch.setattr(
+        "datasheetindex.index.build_tree", lambda _raw, _pages, **_kw: []
+    )
     monkeypatch.setattr(
         "datasheetindex.index.enrich_with_table_counts",
         lambda _nodes, _doc, **_kw: _nodes,
@@ -899,7 +923,9 @@ def test_build_output_stem_override(monkeypatch, tmp_path):
         ),
     )
     monkeypatch.setattr("datasheetindex.index.extract_toc", lambda _doc: [])
-    monkeypatch.setattr("datasheetindex.index.build_tree", lambda _raw, _pages: [])
+    monkeypatch.setattr(
+        "datasheetindex.index.build_tree", lambda _raw, _pages, **_kw: []
+    )
     monkeypatch.setattr(
         "datasheetindex.index.enrich_with_table_counts",
         lambda _nodes, _doc, **_kw: _nodes,
@@ -1002,7 +1028,9 @@ def test_build_with_none_output_dir_writes_to_resolver_default(monkeypatch, tmp_
         ),
     )
     monkeypatch.setattr("datasheetindex.index.extract_toc", lambda _doc: [])
-    monkeypatch.setattr("datasheetindex.index.build_tree", lambda _raw, _pages: [])
+    monkeypatch.setattr(
+        "datasheetindex.index.build_tree", lambda _raw, _pages, **_kw: []
+    )
     monkeypatch.setattr(
         "datasheetindex.index.enrich_with_table_counts",
         lambda _nodes, _doc, **_kw: _nodes,
@@ -1066,7 +1094,9 @@ def test_build_with_blank_output_dir_falls_through_to_resolver(monkeypatch, tmp_
         ),
     )
     monkeypatch.setattr("datasheetindex.index.extract_toc", lambda _doc: [])
-    monkeypatch.setattr("datasheetindex.index.build_tree", lambda _raw, _pages: [])
+    monkeypatch.setattr(
+        "datasheetindex.index.build_tree", lambda _raw, _pages, **_kw: []
+    )
     monkeypatch.setattr(
         "datasheetindex.index.enrich_with_table_counts",
         lambda _nodes, _doc, **_kw: _nodes,
@@ -1558,7 +1588,7 @@ def test_a_raising_fallback_marks_enrichment_incomplete(tmp_path, monkeypatch):
     def dummy_callable(_system, _user):
         return "unused"
 
-    def raising_fallback(_text, _pages, _callable):
+    def raising_fallback(_text, _pages, _callable, **_kw):
         raise RuntimeError("gateway timeout")
 
     monkeypatch.setattr(
@@ -1601,7 +1631,7 @@ def test_a_tls_failure_fails_the_build_rather_than_becoming_a_note(
     def dummy_callable(_system, _user):
         return "unused"
 
-    def tls_failure(_text, _pages, _callable):
+    def tls_failure(_text, _pages, _callable, **_kw):
         raise LlmTlsVerificationError("certificate verify failed")
 
     monkeypatch.setattr(
@@ -1643,7 +1673,7 @@ def test_a_rejected_fallback_candidate_is_complete(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "datasheetindex.llm.toc_fallback.generate_toc_from_text",
-        lambda _text, _pages, _callable: [
+        lambda _text, _pages, _callable, **_kw: [
             TocNode(
                 title="Candidate", level=1, start_page=1, end_page=3, node_id="0001"
             )

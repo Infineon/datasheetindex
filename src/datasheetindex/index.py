@@ -36,6 +36,7 @@ from datasheetindex.core.structure import (
     extract_toc,
 )
 from datasheetindex.core.textfile import scan_pages
+from datasheetindex.core.variants import detect_variants, title_text
 from datasheetindex.llm.client import (
     LlmTlsVerificationError,
     close_llm_client,
@@ -624,9 +625,22 @@ class DatasheetIndex:
         front_matter = build_front_matter(doc)
         preamble = front_matter.text
 
-        # 3. Extract ToC, build tree, enrich with table counts
+        # 3a. Detect whether this datasheet covers a product family. Read
+        # before the tree is built, because it decides whether the ordering
+        # section is boilerplate to skip or the authoritative per-part table.
+        variant_signal = detect_variants(title_text(doc))
+        if variant_signal is not None:
+            logger.info(
+                "Multi-variant datasheet detected (%s): %s",
+                variant_signal.rule,
+                variant_signal.family,
+            )
+
+        # 3b. Extract ToC, build tree, enrich with table counts
         raw_toc = extract_toc(doc)
-        nodes = build_tree(raw_toc, total_pages)
+        nodes = build_tree(
+            raw_toc, total_pages, multi_variant=variant_signal is not None
+        )
         # Provenance, tracked from here because the fallback branch below is
         # the only thing that can change the answer. Normalized once more just
         # before serialization, where an empty tree settles it regardless.
@@ -739,7 +753,10 @@ class DatasheetIndex:
                     from datasheetindex.llm.toc_fallback import generate_toc_from_text
 
                     candidate_nodes = generate_toc_from_text(
-                        text_content, total_pages, active_llm_callable
+                        text_content,
+                        total_pages,
+                        active_llm_callable,
+                        multi_variant=variant_signal is not None,
                     )
                     enrich_with_table_counts(
                         candidate_nodes,
@@ -851,6 +868,15 @@ class DatasheetIndex:
                 # asking for captions that can never arrive.
                 "figure_captions_blocked": caption_outcome.blocked,
             }
+            # Present only when detected. A key that appears only when it
+            # carries news is one an agent cannot read past without noticing,
+            # and it keeps the artifact byte-identical on the ~48% of
+            # datasheets that cover a single part.
+            if variant_signal is not None:
+                json_data["multi_variant"] = {
+                    "family": variant_signal.family,
+                    "rule": variant_signal.rule,
+                }
 
             # 8. Write output files
             out = Path(output_dir)

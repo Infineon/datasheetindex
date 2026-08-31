@@ -259,7 +259,7 @@ def spy_on_toc_fallback(monkeypatch, nodes):
 
     calls: list[int] = []
 
-    def spy(_text, total_pages, _client):
+    def spy(_text, total_pages, _client, **_kw):
         calls.append(total_pages)
         return list(nodes)
 
