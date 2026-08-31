@@ -419,10 +419,13 @@ def _variant_note(
     family = variant.get("family", "")
     ordering = _ordering_section(artifacts.nodes)
     if ordering is not None:
-        overlaps = start_page <= (ordering.end_page or ordering.start_page) and (
-            end_page >= ordering.start_page
-        )
-        if overlaps:
+        # Suppressed only when the read lies INSIDE the ordering section, not
+        # on any overlap with it. A whole-chapter or whole-document read that
+        # merely spans those pages is not "already looking at the table", and
+        # the wide reads are where family-level body text is most likely to be
+        # taken for a per-part answer.
+        last = ordering.end_page or ordering.start_page
+        if start_page >= ordering.start_page and end_page <= last:
             return []
 
     named = f" ({family})" if family else ""

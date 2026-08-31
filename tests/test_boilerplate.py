@@ -250,3 +250,22 @@ class TestOrderingOnMultiVariantDatasheets:
         nodes = [TocNode(title="Ordering Information", level=1, start_page=9)]
         flag_boilerplate(nodes)
         assert nodes[0].boilerplate_category == "ordering"
+
+
+def test_suppressed_ordering_does_not_inherit_its_parent_category():
+    """Suppression must not fall through to the parent's category.
+
+    Clearing the node's own classification and then letting it inherit puts
+    the flag straight back on, re-creating the exact mis-steer the
+    suppression exists to remove -- just with a different category name.
+    """
+    nodes = [
+        TocNode(
+            title="Appendix A: Revision History",
+            level=1,
+            start_page=60,
+            nodes=[TocNode(title="Ordering Information", level=2, start_page=61)],
+        )
+    ]
+    flag_boilerplate(nodes, multi_variant=True)
+    assert nodes[0].nodes[0].boilerplate_category == ""

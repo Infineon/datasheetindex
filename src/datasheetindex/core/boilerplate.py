@@ -198,9 +198,17 @@ def _flag_recursive(
     for node in nodes:
         own = classify_title(node.title)
         if own == "ordering" and multi_variant:
-            # Suppressed before inheritance, so subsections holding the actual
-            # per-part tables do not pick the category up from this node.
-            own = ""
+            # Suppressed outright, never merely cleared. Falling through to
+            # the inheritance branch would let an ordering section nested
+            # under a classified parent -- an appendix, a revision chapter --
+            # pick that parent's category up instead, putting the flag back on
+            # under a different name and re-creating the mis-steer. The empty
+            # category also propagates to its own subsections, which is where
+            # the per-part tables actually live.
+            node.boilerplate_category = ""
+            if node.nodes:
+                _flag_recursive(node.nodes, "", multi_variant=multi_variant)
+            continue
         if own:
             node.boilerplate_category = own
         elif parent_category:

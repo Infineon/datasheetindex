@@ -529,3 +529,128 @@ class TestLlmFallbackKeepsTheSuppression:
         )
         ordering = next(n for n in nodes if "Ordering" in n.title)
         assert ordering.boilerplate_category == ""
+
+
+class TestWildcardIsAPartNumberWildcard:
+    """`x` marks a varying character in a part number, not any letter x.
+
+    The rule is that a wildcard token is written in vendor part-number casing
+    -- uppercase and digits -- with a lowercase `x` standing in for what
+    varies. Ordinary words fail that test, which is what keeps a core name or
+    a lowercase filename out.
+    """
+
+    def test_an_arm_core_name_is_not_a_family(self):
+        assert detect_variants("STM32L476 Arm Cortex-M4 32-bit MCU") is None
+
+    def test_a_wide_core_name_is_not_a_family(self):
+        assert detect_variants("XMC7100 Arm Cortex-M33 microcontroller") is None
+
+    def test_a_lowercase_filename_is_not_a_family(self):
+        assert detect_variants("max31855.pdf") is None
+
+    def test_every_corpus_wildcard_still_fires(self):
+        for title in (
+            "ADS111x Ultra-Small ADC",
+            "MSP430F552x, MSP430F551x Mixed-Signal Microcontrollers",
+            "OPAx340 Rail-to-Rail Operational Amplifier",
+            "SNx4HC595 8-Bit Shift Registers",
+            "xx555 Precision Timers",
+            "TLV906xS Operational Amplifiers",
+            "PSC3P5xD, PSC3M5xD 32-bit Arm Cortex-M33",
+        ):
+            assert detect_variants(title) is not None, title
+
+
+class TestPairRulesIgnoreCase:
+    """An ALL-CAPS cover plus a mixed-case metadata title is one document.
+
+    `title_text` concatenates both sources deliberately, so the same token
+    routinely appears twice in different casing. Read case-sensitively, the
+    two copies look like two parts.
+    """
+
+    def test_the_same_token_in_two_casings_is_not_a_family(self):
+        title = "SN74HC595 8-Bit Shift Register SN74HC595 8-BIT SHIFT REGISTER"
+        assert detect_variants(title) is None
+
+    def test_a_bit_width_in_two_casings_is_not_a_family(self):
+        assert detect_variants("ADC121S 12-Bit ADC 12-BIT, 50 kSPS") is None
+
+
+class TestSeriesRuleNeedsAdjacency:
+    """ "Series" must qualify the leading part token, not appear anywhere."""
+
+    def test_a_package_code_before_series_is_not_a_family(self):
+        assert detect_variants("MAX4173 Low-Cost SOT23 Series Current Monitor") is None
+
+    def test_the_leading_part_token_still_fires(self):
+        signal = detect_variants("ESP32 Series Datasheet")
+        assert signal is not None
+        assert signal.family == "ESP32"
+
+    def test_a_hyphenated_leading_part_token_still_fires(self):
+        assert detect_variants("ESP32-C3 Series Datasheet") is not None
+
+
+class TestFamilyNamesEveryMatchedPart:
+    """The note is the agent's only view of who the family covers."""
+
+    def test_a_long_explicit_list_is_not_truncated_to_two(self):
+        signal = detect_variants(
+            "1N4001, 1N4002, 1N4003, 1N4004, 1N4005, 1N4006, 1N4007 Rectifier"
+        )
+        assert signal is not None
+        # An agent asked about 1N4007 must not read a caution that names only
+        # 1N4001 and 1N4002 and conclude its part is out of scope.
+        assert "1N4007" in signal.family
+
+
+class TestNoteSuppressionIsNarrow:
+    """Suppression exists so the note does not point at the page being read.
+
+    A range that merely *touches* the ordering section is not that case, and
+    stripping the caution from wide reads removes it from exactly the reads
+    where family-level body text is most likely to be misread.
+    """
+
+    def _tools(self, pages=120):
+        from datasheetindex.models import DatasheetArtifacts
+        from datasheetindex.tools.bound import DatasheetTools
+
+        text = "\n".join(f"--- PAGE {n} ---\nBody {n}." for n in range(1, pages + 1))
+        tools = DatasheetTools.__new__(DatasheetTools)
+        tools._artifacts = DatasheetArtifacts(
+            json_data={
+                "total_pages": pages,
+                "toc": [],
+                "figures": [],
+                "multi_variant": {"family": "ADS111x", "rule": "wildcard"},
+            },
+            text_content=text,
+            nodes=[
+                TocNode(title="4 Features", level=1, start_page=10, end_page=68),
+                TocNode(
+                    title="8 Ordering information", level=1, start_page=69, end_page=71
+                ),
+            ],
+        )
+        return tools
+
+    def test_a_wide_read_spanning_the_section_keeps_the_note(self):
+        from datasheetindex.tools.bound import DatasheetTools
+
+        out = DatasheetTools.get_section_text(self._tools(), 60, 90)
+        assert "product family" in out
+
+    def test_a_read_inside_the_section_is_still_suppressed(self):
+        from datasheetindex.tools.bound import DatasheetTools
+
+        out = DatasheetTools.get_section_text(self._tools(), 69, 71)
+        assert "product family" not in out
+
+    def test_a_single_page_inside_the_section_is_suppressed(self):
+        from datasheetindex.tools.bound import DatasheetTools
+
+        out = DatasheetTools.get_section_text(self._tools(), 70, 70)
+        assert "product family" not in out

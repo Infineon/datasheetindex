@@ -74,10 +74,16 @@ _SLASH_LIST = re.compile(
 
 # "ADS111x", "MSP430F552x": a lowercase x standing in for the varying digit.
 # Vendors use this in a title only to denote a family.
+#
+# The pattern alone is far too broad -- it matches any token holding a digit
+# and a letter x, so "Cortex-M4" and the lowercase filename "max31855" both
+# satisfy it. `_is_wildcard_token` applies the missing half of the rule.
 _WILDCARD = re.compile(
     r"\b(?=[A-Za-z0-9\-]*[0-9])[A-Za-z][A-Za-z0-9\-]*x[A-Za-z0-9\-]*\b"
 )
 
+# "ESP32 Series". Anchored to the token it qualifies by `_series_family` --
+# unanchored, "SOT23 Series Current Monitor" names a package as the family.
 _SERIES = re.compile(r"\b(series|family)\b", re.IGNORECASE)
 
 # The agent is shown ``family`` verbatim inside a note, so it is bounded.
@@ -116,6 +122,43 @@ def _bounded(parts: list[str]) -> str:
 _MIN_PAIR_TOKEN_CHARS = 5
 
 
+def _is_wildcard_token(token: str) -> bool:
+    """Whether ``token`` is a part number with ``x`` marking what varies.
+
+    A wildcard token is written in vendor part-number casing -- uppercase
+    letters and digits -- with a lowercase ``x`` substituted for the varying
+    character: ``ADS111x``, ``OPAx340``, ``SNx4HC595``, ``TLV906xS``,
+    ``xx555``, ``PSC3P5xD``. So every lowercase character in it must be an
+    ``x``.
+
+    Ordinary words fail that test, which is the point: "Cortex-M4" and
+    "32-bit" hold an x or a digit but also other lowercase letters, and the
+    lowercase filename "max31855" fails for the same reason. Without this an
+    Arm MCU datasheet naming its core in the title -- extremely common -- is
+    published as a family called "Cortex-M4".
+    """
+    return "x" in token and all(c == "x" or not c.islower() for c in token)
+
+
+def _series_family(title: str, tokens: list[str]) -> str | None:
+    """The family named by an "X Series" phrase, if the title carries one.
+
+    The keyword must directly qualify the title's **first** part-shaped token.
+    Unanchored, the rule reads "MAX4173 Low-Cost SOT23 Series Current Monitor"
+    as a family named after a package code -- exactly the class of token this
+    module must never mistake for a variant.
+    """
+    if not tokens:
+        return None
+    lead = tokens[0]
+    head, _, after = title.partition(lead)
+    if head.strip(" \t([") and _PART_TOKEN.search(head):
+        return None
+    if _SERIES.match(after.lstrip(" \t,-")):
+        return lead
+    return None
+
+
 def _is_part_pair(a: str, b: str) -> bool:
     """Whether two prefix-sharing tokens are two parts rather than one.
 
@@ -129,7 +172,8 @@ def _is_part_pair(a: str, b: str) -> bool:
       read as a feature family; they share one die and one feature set.
     - **Both tokens are too short to be evidence.** See the constant above.
     """
-    if a.startswith(b) or b.startswith(a):
+    lower_a, lower_b = a.casefold(), b.casefold()
+    if lower_a.startswith(lower_b) or lower_b.startswith(lower_a):
         return False
     return min(len(a), len(b)) >= _MIN_PAIR_TOKEN_CHARS
 
@@ -141,6 +185,7 @@ def _near_identical(a: str, b: str) -> bool:
     SN54HC590A/SN74HC590A -- which differ at the FIRST digit, where a
     shared-prefix test sees two unrelated tokens.
     """
+    a, b = a.casefold(), b.casefold()
     if len(a) != len(b) or a == b:
         return False
     if len(a) < _MIN_PAIR_TOKEN_CHARS:
@@ -152,6 +197,32 @@ def _near_identical(a: str, b: str) -> bool:
     # Lengths are equal by the guard above, so strict= changes nothing here.
     diff = sum(1 for x, y in zip(a, b, strict=True) if x != y)
     return 1 <= diff <= 2
+
+
+def _prefix_group(tokens: list[str]) -> list[str]:
+    """Every token sharing a 3-character prefix with another, in order."""
+    group = [
+        a
+        for i, a in enumerate(tokens)
+        if any(
+            a.casefold() != b.casefold()
+            and a[:3].casefold() == b[:3].casefold()
+            and _is_part_pair(a, b)
+            for j, b in enumerate(tokens)
+            if i != j
+        )
+    ]
+    return group if len(group) >= 2 else []
+
+
+def _near_identical_group(tokens: list[str]) -> list[str]:
+    """Every token near-identical to another, in order."""
+    group = [
+        a
+        for i, a in enumerate(tokens)
+        if any(_near_identical(a, b) for j, b in enumerate(tokens) if i != j)
+    ]
+    return group if len(group) >= 2 else []
 
 
 def detect_variants(title: str) -> VariantSignal | None:
@@ -167,20 +238,34 @@ def detect_variants(title: str) -> VariantSignal | None:
     if slash:
         return VariantSignal(family=_bounded(slash), rule="slash-list")
 
-    wildcard = _WILDCARD.findall(title)
+    wildcard = [t for t in _WILDCARD.findall(title) if _is_wildcard_token(t)]
     if wildcard:
         return VariantSignal(family=_bounded(wildcard), rule="wildcard")
 
-    tokens = _PART_TOKEN.findall(title)
-    for i, a in enumerate(tokens):
-        for b in tokens[i + 1 :]:
-            if a != b and a[:3] == b[:3] and _is_part_pair(a, b):
-                return VariantSignal(family=_bounded([a, b]), rule="list")
-            if _near_identical(a, b):
-                return VariantSignal(family=_bounded([a, b]), rule="near-identical")
+    # Case-insensitively unique, because `title_text` concatenates the PDF
+    # metadata title with the page-1 block and vendors routinely set one in
+    # full caps. Two casings of one token are one part, not a family.
+    tokens: list[str] = []
+    seen: set[str] = set()
+    for token in _PART_TOKEN.findall(title):
+        if token.casefold() not in seen:
+            seen.add(token.casefold())
+            tokens.append(token)
 
-    if tokens and _SERIES.search(title):
-        return VariantSignal(family=_bounded(tokens), rule="series")
+    # Collect every token that pairs, not just the first two. The family text
+    # is the agent's only view of who the caution covers: naming "1N4001,
+    # 1N4002" on a document listing 1N4001-1N4007 invites an agent asked about
+    # 1N4007 to conclude its part is out of scope.
+    for rule, matches in (
+        ("list", _prefix_group(tokens)),
+        ("near-identical", _near_identical_group(tokens)),
+    ):
+        if matches:
+            return VariantSignal(family=_bounded(matches), rule=rule)
+
+    series = _series_family(title, tokens)
+    if series is not None:
+        return VariantSignal(family=series, rule="series")
 
     return None
 
