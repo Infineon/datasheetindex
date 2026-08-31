@@ -23,11 +23,27 @@ fetched from one vendor is not hand-labelled, so it yields no recall figure,
 but its firing rate (52%) matches the corpus base rate (52%) -- evidence the
 rate is not an artifact of corpus selection.
 
-Precision is the property that matters. The flag suppresses a boilerplate hint
-and adds a caution to tool output, so a false positive costs noise while a
-false negative costs a confident wrong answer. That asymmetry is why the rules
-below are all conservative, and why a miss must degrade to the always-on
-caution in the tool descriptions rather than to silence.
+**Recall is the property that matters, and the asymmetry is measured.** This
+paragraph used to lead with the opposite, and that error cost four rounds of
+review: every guard added to raise precision over-reached and killed real
+families -- a casing rule took ATmega and nRF, a leading-token rule took every
+title led by a filename or document number, and vocabulary entries for `usb`
+and `rs` took the Microchip hub and Recom converter families.
+
+The numbers. A **false positive** was measured directly: forcing the flag onto
+a genuinely single-part datasheet and asking a plainly answerable question gave
+6/6 correct answers at 4.3 turns, against 6/6 at 4.2 turns with no flag. It
+costs a tenth of a turn. A **false negative** returns the document to the
+unmodified library's behaviour, which answered the motivating per-part question
+correctly 0 times in 9.
+
+So the rules below are conservative about *rejecting*, not about firing, and
+two consequences follow for anyone maintaining them:
+
+- An exclusion that plausibly doubles as a vendor prefix is not worth its
+  precision. Prefer the noisy answer.
+- A miss must still degrade to the always-on caution in the tool descriptions
+  rather than to silence, since that caution is all a missed document gets.
 
 The residual 15% is not reachable by a better rule. Both corpus misses show
 why: one is a family technical reference manual whose title names no part at
