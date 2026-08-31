@@ -625,7 +625,7 @@ class DatasheetIndex:
         front_matter = build_front_matter(doc)
         preamble = front_matter.text
 
-        # 3. Detect whether this datasheet covers a product family. Read
+        # 3a. Detect whether this datasheet covers a product family. Read
         # before the tree is built, because it decides whether the ordering
         # section is boilerplate to skip or the authoritative per-part table.
         variant_signal = detect_variants(title_text(doc))
@@ -636,7 +636,7 @@ class DatasheetIndex:
                 variant_signal.family,
             )
 
-        # 4. Extract ToC, build tree, enrich with table counts
+        # 3b. Extract ToC, build tree, enrich with table counts
         raw_toc = extract_toc(doc)
         nodes = build_tree(
             raw_toc, total_pages, multi_variant=variant_signal is not None
@@ -753,7 +753,10 @@ class DatasheetIndex:
                     from datasheetindex.llm.toc_fallback import generate_toc_from_text
 
                     candidate_nodes = generate_toc_from_text(
-                        text_content, total_pages, active_llm_callable
+                        text_content,
+                        total_pages,
+                        active_llm_callable,
+                        multi_variant=variant_signal is not None,
                     )
                     enrich_with_table_counts(
                         candidate_nodes,

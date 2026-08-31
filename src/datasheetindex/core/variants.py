@@ -60,8 +60,16 @@ _PART_TOKEN = re.compile(
 # "PIC16F882/883/887", "OPA340/2340": one part token continued by bare numbers.
 # Checked before _PART_TOKEN pairs because the continuations are not themselves
 # part-shaped (they carry no letter).
+#
+# The negative lookahead rejects document metadata, which has the identical
+# shape: "Rev1/2020", "Ver2/2023", "Doc3/2019". Those routinely sit in a title
+# block, and without this a single-part datasheet is flagged as a family whose
+# name is a revision string -- printed verbatim to the agent in the read-time
+# note.
 _SLASH_LIST = re.compile(
-    r"\b(?=[A-Za-z0-9]*[0-9])[A-Za-z][A-Za-z0-9]{2,16}(?:/[0-9]{2,5}){1,8}\b"
+    r"\b(?!(?:rev|ver|vers|version|doc|rel|iss|issue|draft)[0-9])"
+    r"(?=[A-Za-z0-9]*[0-9])[A-Za-z][A-Za-z0-9]{2,16}(?:/[0-9]{2,5}){1,8}\b",
+    re.IGNORECASE,
 )
 
 # "ADS111x", "MSP430F552x": a lowercase x standing in for the varying digit.
@@ -101,6 +109,31 @@ def _bounded(parts: list[str]) -> str:
     return joined[: _MAX_FAMILY_CHARS - 3].rstrip(", ") + "..."
 
 
+# Below this, a token sharing a 3-character prefix with another differs only in
+# its last character or two and carries almost no evidence -- "DDR3"/"DDR4",
+# "USB2"/"USB3" are bus widths, not a product family. Every family the corpus
+# states in full is longer (1N4001, LM111, ADS1113).
+_MIN_PAIR_TOKEN_CHARS = 5
+
+
+def _is_part_pair(a: str, b: str) -> bool:
+    """Whether two prefix-sharing tokens are two parts rather than one.
+
+    Rejects the two ways this rule misfires on a real title block:
+
+    - **One token contains the other.** ``TPS7A4901DGNR`` beside
+      ``TPS7A4901`` is a part and its own order code, not two parts --
+      and the pair co-occurs routinely, because ``title_text``
+      concatenates the PDF metadata title with the page-1 block. Package
+      and temperature suffixes are the one thing this detector must never
+      read as a feature family; they share one die and one feature set.
+    - **Both tokens are too short to be evidence.** See the constant above.
+    """
+    if a.startswith(b) or b.startswith(a):
+        return False
+    return min(len(a), len(b)) >= _MIN_PAIR_TOKEN_CHARS
+
+
 def _near_identical(a: str, b: str) -> bool:
     """Same length and leading letters, differing in 1-2 positions.
 
@@ -109,6 +142,10 @@ def _near_identical(a: str, b: str) -> bool:
     shared-prefix test sees two unrelated tokens.
     """
     if len(a) != len(b) or a == b:
+        return False
+    if len(a) < _MIN_PAIR_TOKEN_CHARS:
+        # Same threshold as the prefix rule, for the same reason: "DDR3"/"DDR4"
+        # and "USB2"/"USB3" satisfy every structural test this applies.
         return False
     if a[:2] != b[:2]:
         return False
@@ -137,7 +174,7 @@ def detect_variants(title: str) -> VariantSignal | None:
     tokens = _PART_TOKEN.findall(title)
     for i, a in enumerate(tokens):
         for b in tokens[i + 1 :]:
-            if a != b and a[:3] == b[:3]:
+            if a != b and a[:3] == b[:3] and _is_part_pair(a, b):
                 return VariantSignal(family=_bounded([a, b]), rule="list")
             if _near_identical(a, b):
                 return VariantSignal(family=_bounded([a, b]), rule="near-identical")

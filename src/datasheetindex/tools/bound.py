@@ -382,11 +382,21 @@ def _ordering_section(nodes: list[TocNode]) -> TocNode | None:
     Found by title classification rather than by ``boilerplate_category``,
     because on exactly the documents this matters for that flag is deliberately
     suppressed -- the ordering section is authoritative there, not skippable.
+
+    Shallowest, then earliest -- not simply the first in document order.
+    ``classify_title`` also matches "Part Numbering", which is commonly a
+    subsection early in the document explaining the naming convention, while
+    the per-part table sits in a top-level "Ordering Information" chapter near
+    the end. A depth-first scan returns the subsection, so the note would point
+    the agent at the wrong page and the overlap suppression below would be
+    computed from the wrong range.
     """
-    for node in flatten_nodes(nodes):
-        if classify_title(node.title) == "ordering":
-            return node
-    return None
+    candidates = [
+        n for n in flatten_nodes(nodes) if classify_title(n.title) == "ordering"
+    ]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda n: (n.level, n.start_page))
 
 
 def _variant_note(
@@ -970,13 +980,17 @@ class DatasheetTools:
 
         1. A position header: ``=== Page X of N ===`` for a single-page read,
            ``=== Pages X-Y of N ===`` for a multi-page range.
-        2. Zero or more ``=== NOTE: ... ===`` lines -- present when the
-           requested range cuts content the publisher marked as continuing
-           onto an adjacent page, at the head of the range, the tail, or both;
-           either boundary can carry more than one marker (e.g. a page opening
-           with two continued tables). The ``===`` wrapper is what marks the
-           line as tool framing rather than document content: real datasheets
-           sometimes contain their own literal ``NOTE:`` lines in body text.
+        2. Zero or more ``=== NOTE: ... ===`` lines, of two kinds. The first,
+           when the datasheet covers a product family, says the text may
+           describe the family rather than one part and names the ordering
+           section; it is omitted when the range overlaps that section. The
+           rest are emitted when the requested range cuts content the
+           publisher marked as continuing onto an adjacent page, at the head
+           of the range, the tail, or both; either boundary can carry more
+           than one marker (e.g. a page opening with two continued tables).
+           The ``===`` wrapper is what marks the line as tool framing rather
+           than document content: real datasheets sometimes contain their own
+           literal ``NOTE:`` lines in body text.
         3. The section text, WITH ``--- PAGE N ---`` markers so the agent can
            orient within the range.
 

@@ -177,7 +177,7 @@ def test_retry_on_the_same_instance_rebuilds(tmp_path, toc_pdf, build_spy, monke
     def dummy_callable(_system, _user):
         return "unused"
 
-    def flaky_fallback(_text, _pages, _callable):
+    def flaky_fallback(_text, _pages, _callable, **_kw):
         attempts.append(1)
         if len(attempts) == 1:
             raise RuntimeError("gateway timeout")
@@ -965,7 +965,7 @@ def test_a_rejected_fallback_candidate_is_reused(
     )
     monkeypatch.setattr(
         "datasheetindex.llm.toc_fallback.generate_toc_from_text",
-        lambda _text, _pages, _callable: [
+        lambda _text, _pages, _callable, **_kw: [
             TocNode(title="Thin", level=1, start_page=1, end_page=3, node_id="0001")
         ],
     )

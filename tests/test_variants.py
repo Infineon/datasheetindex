@@ -9,6 +9,7 @@ The title strings below are the real page-1 title blocks of the measurement
 corpus, so a rule change that regresses one of them regresses a real document.
 """
 
+import json
 from pathlib import Path
 from typing import cast
 
@@ -423,3 +424,108 @@ class TestAlwaysOnCaution:
     def test_get_section_text_warns_about_family_level_text(self):
         description = self._defs()["get_section_text"].description.lower()
         assert "family" in description
+
+
+class TestDetectorPrecisionGuards:
+    """Non-part tokens that look like part lists to a naive rule.
+
+    Precision is the property this flag lives on -- a false positive prints
+    an agent-visible NOTE naming something that is not a product family. Each
+    case below was found by review, and each fires a different rule.
+    """
+
+    def test_a_revision_token_is_not_a_part_list(self):
+        assert detect_variants("SGP30 Rev1/2020 Gas Sensor") is None
+
+    def test_a_version_token_is_not_a_part_list(self):
+        assert detect_variants("BME280 Ver2/2023 Humidity Sensor") is None
+
+    def test_a_document_number_is_not_a_part_list(self):
+        assert detect_variants("BMP388 Doc2/2019 Pressure Sensor") is None
+
+    def test_bus_names_are_not_a_part_family(self):
+        assert detect_variants("DDR3/DDR4 Memory Interface Controller") is None
+
+    def test_interface_names_are_not_a_part_family(self):
+        assert detect_variants("USB2.0 to USB3.0 bridge") is None
+
+    def test_a_part_and_its_own_order_code_are_not_a_family(self):
+        """title_text concatenates metadata with the page-1 block, so a base
+        part and its order code routinely co-occur. Package suffixes are the
+        one thing this detector must never read as a feature family."""
+        assert detect_variants("TPS7A4901DGNR datasheet TPS7A4901 Rev C") is None
+
+    def test_real_families_still_fire(self):
+        """The guards above must not cost the corpus true positives."""
+        for title in (
+            "1N4001, 1N4002, 1N4003 Rectifier",
+            "LM111, LM211, LM311 Voltage Comparator",
+            "PIC16F882/883/884/886/887 Data Sheet",
+            "ADS111x Ultra-Small ADC",
+        ):
+            assert detect_variants(title) is not None, title
+
+
+class TestOrderingSectionSelection:
+    """Which section the read-time note points the agent at."""
+
+    def test_a_top_level_ordering_chapter_beats_a_nested_subsection(self):
+        """`Part Numbering` under an early chapter classifies as `ordering`
+        too, and pointing at a naming-convention subsection sends the agent
+        to the wrong page."""
+        from datasheetindex.tools.bound import _ordering_section
+
+        nodes = [
+            TocNode(
+                title="2 Overview",
+                level=1,
+                start_page=3,
+                end_page=20,
+                nodes=[TocNode(title="2.4 Part Numbering", level=2, start_page=8)],
+            ),
+            TocNode(title="8 Ordering information", level=1, start_page=69),
+        ]
+        found = _ordering_section(nodes)
+        assert found is not None
+        assert found.start_page == 69
+
+    def test_returns_none_when_no_section_classifies(self):
+        from datasheetindex.tools.bound import _ordering_section
+
+        assert (
+            _ordering_section([TocNode(title="1 Features", level=1, start_page=1)])
+            is None
+        )
+
+
+class TestLlmFallbackKeepsTheSuppression:
+    """The fallback rebuilds the tree, so it must carry the flag too.
+
+    This is the path taken on exactly the documents the fallback exists for --
+    a weak or absent outline -- and on an explicit regenerate_toc=true.
+    Without it the artifact publishes `multi_variant` and a
+    `boilerplate_category: "ordering"` node at the same time.
+    """
+
+    def test_generate_toc_from_text_accepts_and_applies_the_flag(self):
+        from datasheetindex.llm.toc_fallback import generate_toc_from_text
+
+        canned = json.dumps(
+            [
+                {"level": 1, "title": "Features", "start_page": 1},
+                {"level": 1, "title": "Ordering Information", "start_page": 3},
+            ]
+        )
+
+        def fake_llm(system: str, user: str) -> str:
+            """Parameter names match ``LlmCallable``, which is a Protocol."""
+            return canned
+
+        nodes = generate_toc_from_text(
+            "--- PAGE 1 ---\nFeatures\n--- PAGE 3 ---\nOrdering\n",
+            total_pages=4,
+            llm_callable=fake_llm,
+            multi_variant=True,
+        )
+        ordering = next(n for n in nodes if "Ordering" in n.title)
+        assert ordering.boilerplate_category == ""
