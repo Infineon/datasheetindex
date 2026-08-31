@@ -654,3 +654,27 @@ class TestNoteSuppressionIsNarrow:
 
         out = DatasheetTools.get_section_text(self._tools(), 70, 70)
         assert "product family" not in out
+
+
+class TestFamilyCoversEveryImplicatedPart:
+    """A real TI title can implicate parts through more than one rule.
+
+    "LM393B, LM2903B, LM193, LM293, LM393 and LM2903" pairs some tokens by
+    shared prefix and others only by near-identity. Reporting one group's
+    members alone names a family that omits parts the document covers, and
+    an agent asked about an omitted part can read the caution as not
+    applying to it.
+    """
+
+    def test_a_family_spanning_two_rules_names_both_halves(self):
+        signal = detect_variants(
+            "LM393B, LM2903B, LM193, LM293, LM393 and LM2903 Dual Comparators"
+        )
+        assert signal is not None
+        for part in ("LM193", "LM293", "LM393", "LM2903"):
+            assert part in signal.family, f"{part} missing from {signal.family!r}"
+
+    def test_a_single_rule_family_is_unchanged(self):
+        signal = detect_variants("TL431, TL432 Precision Programmable Reference")
+        assert signal is not None
+        assert signal.family == "TL431, TL432"

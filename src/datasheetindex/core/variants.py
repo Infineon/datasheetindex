@@ -256,12 +256,19 @@ def detect_variants(title: str) -> VariantSignal | None:
     # is the agent's only view of who the caution covers: naming "1N4001,
     # 1N4002" on a document listing 1N4001-1N4007 invites an agent asked about
     # 1N4007 to conclude its part is out of scope.
-    for rule, matches in (
-        ("list", _prefix_group(tokens)),
-        ("near-identical", _near_identical_group(tokens)),
-    ):
-        if matches:
-            return VariantSignal(family=_bounded(matches), rule=rule)
+    # Both groups contribute to the family text, while ``rule`` names the
+    # first that fired. A real title can implicate parts through each: in
+    # "LM393B, LM2903B, LM193, LM293, LM393 and LM2903", LM2903B pairs with
+    # LM293 by shared prefix while LM193 reaches LM393 only by near-identity.
+    # Reporting one group alone names a family missing parts the document
+    # covers, and an agent asked about an omitted part can read the caution
+    # as not applying to it.
+    prefix_group = _prefix_group(tokens)
+    near_group = _near_identical_group(tokens)
+    if prefix_group or near_group:
+        rule = "list" if prefix_group else "near-identical"
+        ordered = [t for t in tokens if t in prefix_group or t in near_group]
+        return VariantSignal(family=_bounded(ordered), rule=rule)
 
     series = _series_family(title, tokens)
     if series is not None:
