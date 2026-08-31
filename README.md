@@ -37,7 +37,8 @@ product line or family.
 ## Benchmark
 
 [`benchmark/`](./benchmark/) holds the chamber-grounded benchmark that
-accompanies our EMNLP 2026 Industry Track paper: the grading surface, the
+accompanies our EMNLP 2026 Industry Track paper
+([arXiv:2608.28439](https://arxiv.org/abs/2608.28439)): the grading surface, the
 archived model outputs behind every published number, and the analyses that
 turn one into the other. It grades an extraction agent on two axes -- whether
 it reported what the datasheet says, and whether that claim is physically true

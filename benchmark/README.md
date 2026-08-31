@@ -17,8 +17,9 @@ this repository ships the dispatch-level detector rules alongside the scorer.
 
 > **Paper.** *Fidelity Is Not Enough: Dispatch-Level Instrumentation for
 > Agentic Datasheet Extraction.* EMNLP 2026 Industry Track.
-> <!-- arXiv link goes here once posted; see docs/reproducing.md for which
->      numbers in the paper each artifact below regenerates. -->
+> [arXiv:2608.28439](https://arxiv.org/abs/2608.28439)
+> <!-- See docs/reproducing.md for which numbers in the paper each artifact
+>      below regenerates. -->
 
 ## What is here, and what is not
 
