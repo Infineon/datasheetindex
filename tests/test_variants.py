@@ -800,3 +800,63 @@ class TestFamilyTruncationNeverInventsAPart:
         parts = [p for p in signal.family[:-3].split(", ") if p]
         for part in parts:
             assert len(part) == len("TPS62130"), f"truncated part {part!r}"
+
+
+class TestMixedCaseVendorPartsAreParts:
+    """Several vendors write part numbers in mixed case as house style.
+
+    A rule that treats single-casing as the mark of a part number kills
+    Microchip/Atmel and Nordic families outright. That is the costly
+    direction: a false negative is a confident wrong answer, where a false
+    positive is noise.
+    """
+
+    def test_atmel_megaavr_family(self):
+        signal = detect_variants("ATmega48A, ATmega88A, ATmega168A, ATmega328P megaAVR")
+        assert signal is not None
+        assert "ATmega328P" in signal.family
+
+    def test_atmel_tiny_family(self):
+        assert detect_variants("ATtiny25, ATtiny45, ATtiny85 Datasheet") is not None
+
+    def test_nordic_family(self):
+        assert detect_variants("nRF52832 nRF52840 Multiprotocol SoC") is not None
+
+    def test_title_cased_metadata_rendering(self):
+        """`title_text` puts the metadata title first, and its casing wins the
+        case-insensitive dedup, so a title-cased rendering is what survives."""
+        assert detect_variants("Ads1113, Ads1114, Ads1115 ADS1113 ADS1115") is not None
+
+    def test_arm_cores_are_still_rejected(self):
+        """The precision case the single-case rule was reaching for."""
+        assert (
+            detect_variants("XMC7200 Arm Cortex-M7 and Cortex-M0 dual-core MCU") is None
+        )
+        assert detect_variants("RA6M4 Arm Cortex-M33 and Cortex-M23 MCU") is None
+
+
+class TestSeriesOccurrenceScanIgnoresCase:
+    """The dedup keeps the metadata spelling; the cover carries "Series".
+
+    Scanning for occurrences case-sensitively can only find the spelling the
+    metadata used, so the copy that actually carries the keyword is never
+    examined -- the exact concatenation shape the rule exists for.
+    """
+
+    def test_lowercase_metadata_with_uppercase_cover(self):
+        assert detect_variants("esp32 ESP32 Series") is not None
+
+    def test_lowercase_metadata_with_words_between(self):
+        assert detect_variants("esp32 datasheet ESP32 Series Datasheet") is not None
+
+
+class TestBoundedNeverReturnsAnEmptyFamily:
+    """`family` goes verbatim into an instruction to trust those names."""
+
+    def test_a_single_over_budget_entry_is_kept_whole(self):
+        from datasheetindex.core.variants import _bounded
+
+        huge = "A" + "B" * 200 + "x1"
+        out = _bounded([huge])
+        assert out.strip(", .") != ""
+        assert not out.startswith(",")

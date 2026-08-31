@@ -123,6 +123,11 @@ def _bounded(parts: list[str]) -> str:
             break
         kept.append(part)
         used += cost
+    if not kept:
+        # One entry alone over budget. A slightly long real part number beats
+        # a string with no part in it, which is what dropping everything would
+        # put into an instruction telling the agent to trust these names.
+        return seen[0]
     return ", ".join(kept) + ", ..."
 
 
@@ -177,30 +182,11 @@ def _series_family(title: str, tokens: list[str]) -> str | None:
             continue
         # Every occurrence, not just the first: the concatenated title
         # repeats the token, and it is the later copy that carries "Series".
-        for match in re.finditer(re.escape(token), title):
+        for match in re.finditer(re.escape(token), title, re.IGNORECASE):
             after = title[match.end() :].lstrip(" \t,-")
             if _SERIES.match(after):
                 return token
     return None
-
-
-def _is_pair_token(token: str) -> bool:
-    """Whether a token can stand as one part of a family in the pair rules.
-
-    Rejects mixed-case words. A vendor part number is written in one case --
-    "TPS62130", "1N4001", "LM2903B", or the all-lowercase form a metadata
-    filename carries ("max31855") -- while an English word inside a title is
-    capitalised: "Cortex-M7", "8-Bit".
-
-    Without this, a dual-core MCU datasheet naming both cores publishes a
-    family called "Cortex-M33, Cortex-M23": the two share a 3-character
-    prefix, both clear the length floor, and neither contains the other, so
-    every other test passes. That is this project's own corpus -- the
-    document that motivated the whole feature is Cortex-M33 -- and the
-    wildcard guard above closes only the single-core half of it.
-    """
-    letters = [c for c in token if c.isalpha()]
-    return not (any(c.isupper() for c in letters) and any(c.islower() for c in letters))
 
 
 def _is_part_pair(a: str, b: str) -> bool:
@@ -216,8 +202,6 @@ def _is_part_pair(a: str, b: str) -> bool:
       read as a feature family; they share one die and one feature set.
     - **Both tokens are too short to be evidence.** See the constant above.
     """
-    if not (_is_pair_token(a) and _is_pair_token(b)):
-        return False
     lower_a, lower_b = a.casefold(), b.casefold()
     if lower_a.startswith(lower_b) or lower_b.startswith(lower_a):
         return False
@@ -231,8 +215,6 @@ def _near_identical(a: str, b: str) -> bool:
     SN54HC590A/SN74HC590A -- which differ at the FIRST digit, where a
     shared-prefix test sees two unrelated tokens.
     """
-    if not (_is_pair_token(a) and _is_pair_token(b)):
-        return False
     a, b = a.casefold(), b.casefold()
     if len(a) != len(b) or a == b:
         return False
@@ -245,6 +227,19 @@ def _near_identical(a: str, b: str) -> bool:
     # Lengths are equal by the guard above, so strict= changes nothing here.
     diff = sum(1 for x, y in zip(a, b, strict=True) if x != y)
     return 1 <= diff <= 2
+
+
+def _includes_principal(tokens: list[str], group: list[str]) -> bool:
+    """Whether ``group`` contains the title's principal part token.
+
+    The leading part-shaped token is the document's subject; a real family
+    is stated *about* it, so it (or a token it contains, covering a metadata
+    filename or order-code prefix) must appear among the matches.
+    """
+    if not group or not tokens:
+        return False
+    lead = tokens[0].casefold()
+    return any(t.casefold() == lead or t.casefold() in lead for t in group)
 
 
 def _prefix_group(tokens: list[str]) -> list[str]:
@@ -313,6 +308,19 @@ def detect_variants(title: str) -> VariantSignal | None:
     # as not applying to it.
     prefix_group = _prefix_group(tokens)
     near_group = _near_identical_group(tokens)
+    if not _includes_principal(tokens, prefix_group + near_group):
+        # A family that does not include the document's own part is not this
+        # document's family. "XMC7200 Arm Cortex-M7 and Cortex-M0" pairs the
+        # two core names -- they share a 3-character prefix, clear the length
+        # floor and do not contain each other -- while the actual subject,
+        # XMC7200, is in neither group. Dual-core MCU datasheets are this
+        # project's own corpus, so this misfire is not hypothetical.
+        #
+        # Deliberately NOT a casing test. "A part number is written in one
+        # case" is false for several major vendors -- ATmega328P, ATtiny85,
+        # nRF52832 -- and rejecting mixed case silently loses those families
+        # entirely, which is the costly direction.
+        prefix_group = near_group = []
     if prefix_group or near_group:
         rule = "list" if prefix_group else "near-identical"
         ordered = [t for t in tokens if t in prefix_group or t in near_group]
