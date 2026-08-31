@@ -850,18 +850,6 @@ class TestSeriesOccurrenceScanIgnoresCase:
         assert detect_variants("esp32 datasheet ESP32 Series Datasheet") is not None
 
 
-class TestBoundedNeverReturnsAnEmptyFamily:
-    """`family` goes verbatim into an instruction to trust those names."""
-
-    def test_a_single_over_budget_entry_is_kept_whole(self):
-        from datasheetindex.core.variants import _bounded
-
-        huge = "A" + "B" * 200 + "x1"
-        out = _bounded([huge])
-        assert out.strip(", .") != ""
-        assert not out.startswith(",")
-
-
 class TestCoreNamesAreExcludedPerToken:
     """A CPU core named in a title is not a part, and saying so directly
     is what two indirect proxies failed to do.
@@ -907,19 +895,79 @@ class TestCoreNamesAreExcludedPerToken:
         assert detect_variants("Doc12345 TL431, TL432 Precision Reference") is not None
 
 
-class TestBoundedStaysBounded:
-    """`family` is interpolated into an instruction, so it must stay within
-    budget AND disclose that it was cut."""
+class TestNonPartVocabularyIsExcluded:
+    """Tokens shaped like part numbers that name something else.
 
-    def test_one_over_budget_entry_is_truncated_not_returned_whole(self):
-        from datasheetindex.core.variants import _MAX_FAMILY_CHARS, _bounded
+    Cores, instruction sets, interface standards, package codes and
+    document furniture all take the form "letters, separator, digits", so
+    two of them in one title satisfy every structural test the pair rules
+    apply. Naming the vocabulary is the only approach that has not
+    over-reached: two structural proxies were tried and each lost real
+    families (see `_NON_PART_PREFIXES`).
+    """
 
-        out = _bounded(["A" + "B" * 200 + "x1", "ADS111x"])
-        assert len(out) <= _MAX_FAMILY_CHARS
-        assert out.endswith("...")
+    def test_interface_standards(self):
+        assert (
+            detect_variants("SN65HVD75 Half-Duplex RS-485/RS-422 Transceiver") is None
+        )
+        assert detect_variants("MAX13487E RS-485 and RS-422 Transceivers") is None
 
-    def test_a_dropped_entry_is_always_disclosed(self):
+    def test_package_codes(self):
+        assert detect_variants("STM32F407 LQFP100 LQFP144 Package Options") is None
+
+    def test_instruction_set_names(self):
+        assert detect_variants("ESP32-C6 RISC-V RV32IMAC RV32IMC dual core") is None
+        assert detect_variants("SiFive RISC-V64 and RISC-V32 cores") is None
+
+    def test_document_furniture(self):
+        for title in (
+            "Figure1 and Figure2 show the block diagram of INA219",
+            "Table12 and Table13 list the BME280 registers",
+            "Grade1 Grade2 automotive qualification for TCAN1044A",
+            "STM32F4 Discovery Kit UM1472 and UM1570 boards",
+        ):
+            assert detect_variants(title) is None, title
+
+    def test_the_series_rule_honours_it_too(self):
+        """The principle was enforced in two of three rule paths."""
+        assert (
+            detect_variants("Arm Cortex-M4 Series Technical Reference Manual") is None
+        )
+        assert detect_variants("Cortex-M55 Family Reference") is None
+
+    def test_real_families_are_untouched(self):
+        for title in (
+            "ATmega48A, ATmega88A, ATmega328P megaAVR",
+            "nRF52832 nRF52840 SoC",
+            "1N4001, 1N4002, 1N4003 Rectifier",
+            "LM111, LM211, LM311 Comparator",
+            "TL431, TL432 Precision Reference",
+            "SBAS444H ADS1113 ADS1114 ADS1115",
+            "ESP32 Series Datasheet",
+        ):
+            assert detect_variants(title) is not None, title
+
+
+class TestBoundedDegradesRatherThanFabricate:
+    """When no whole part fits, name none rather than half of one.
+
+    `_variant_note` already omits the parenthetical when `family` is empty,
+    so the note degrades to "this datasheet covers a product family" -- true,
+    and better than a part-number prefix that names nothing.
+    """
+
+    def test_a_single_over_budget_entry_yields_no_name(self):
         from datasheetindex.core.variants import _bounded
 
-        out = _bounded(["A" + "B" * 200 + "x1", "ADS111x"])
-        assert out.endswith("..."), "a partial family must not read as complete"
+        assert _bounded(["A" + "B" * 200 + "x1"]) == ""
+
+    def test_the_note_stays_well_formed_without_a_family(self):
+        from datasheetindex.models import DatasheetArtifacts
+        from datasheetindex.tools.bound import _variant_note
+
+        artifacts = DatasheetArtifacts(
+            json_data={"multi_variant": {"family": "", "rule": "wildcard"}}, nodes=[]
+        )
+        note = _variant_note(artifacts, 5, 5)[0]
+        assert "product family." in note
+        assert "()" not in note

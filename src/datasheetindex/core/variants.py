@@ -124,10 +124,11 @@ def _bounded(parts: list[str]) -> str:
         kept.append(part)
         used += cost
     if not kept:
-        # One entry alone over budget. Cut it rather than return it whole --
-        # the cap exists because this string is interpolated into a note --
-        # but never to nothing.
-        return seen[0][: _MAX_FAMILY_CHARS - 3] + "..."
+        # Not even one entry fits. Naming no part beats naming half of one:
+        # `_variant_note` omits the parenthetical when this is empty, so the
+        # note still says the datasheet covers a family, which is true, and
+        # never presents a part-number prefix that identifies nothing.
+        return ""
     return ", ".join(kept) + ", ..."
 
 
@@ -180,6 +181,10 @@ def _series_family(title: str, tokens: list[str]) -> str | None:
         folded = token.casefold()
         if folded != lead and folded not in lead:
             continue
+        if _is_non_part(token):
+            # "Arm Cortex-M4 Series Technical Reference Manual" otherwise
+            # publishes the core as the family.
+            continue
         # Every occurrence, not just the first: the concatenated title
         # repeats the token, and it is the later copy that carries "Series".
         for match in re.finditer(re.escape(token), title, re.IGNORECASE):
@@ -202,7 +207,7 @@ def _is_part_pair(a: str, b: str) -> bool:
       read as a feature family; they share one die and one feature set.
     - **Both tokens are too short to be evidence.** See the constant above.
     """
-    if _is_core_name(a) or _is_core_name(b):
+    if _is_non_part(a) or _is_non_part(b):
         return False
     lower_a, lower_b = a.casefold(), b.casefold()
     if lower_a.startswith(lower_b) or lower_b.startswith(lower_a):
@@ -217,7 +222,7 @@ def _near_identical(a: str, b: str) -> bool:
     SN54HC590A/SN74HC590A -- which differ at the FIRST digit, where a
     shared-prefix test sees two unrelated tokens.
     """
-    if _is_core_name(a) or _is_core_name(b):
+    if _is_non_part(a) or _is_non_part(b):
         return False
     a, b = a.casefold(), b.casefold()
     if len(a) != len(b) or a == b:
@@ -233,22 +238,28 @@ def _near_identical(a: str, b: str) -> bool:
     return 1 <= diff <= 2
 
 
-# CPU core and architecture names, which appear in MCU datasheet titles by
-# convention and are shaped exactly like part numbers: a letter run, a hyphen
-# and a digit group. Two of them in one title ("Cortex-M7 and Cortex-M0")
-# share a prefix, clear the length floor and do not contain each other, so
-# every structural test the pair rules apply accepts them.
+# Vocabulary that takes a part number's shape -- letters, an optional
+# separator, digits -- while naming something else. Two such tokens in one
+# title share a prefix, clear the length floor and do not contain each other,
+# so every structural test the pair rules apply accepts them.
 #
-# This list is deliberately dumb and explicit. Two indirect proxies for it
-# were tried and both over-reached: requiring single-case tokens lost the
+# This list is deliberately dumb and explicit. Two structural proxies were
+# tried first and each over-reached: requiring single-case tokens lost the
 # ATmega, ATtiny and nRF families, whose vendors write mixed case as house
-# style, and requiring the group to contain the title's leading part token
-# lost every title led by a filename, a descriptor or a document number --
-# and, being all-or-nothing over the combined group, still let core names
-# into the family text whenever a genuine family co-occurred. Naming the
-# cores costs neither.
-_CORE_NAMES = frozenset(
+# style, and requiring the matched group to contain the title's leading part
+# token lost every title led by a filename, a descriptor or a document number
+# ("SBAS444H ADS1113 ADS1114"). Both are false negatives, which degrade the
+# ordering-flag suppression and the read-time note to nothing. Naming the
+# vocabulary has neither failure mode: an entry can only ever be wrong about
+# the word it names.
+#
+# Matched against the token's LEADING alphabetic run, so "Cortex-M7" is
+# tested as "cortex" and "RV32IMAC" as "rv". Extend it when a real title
+# produces a false positive; do not replace it with a structural rule
+# without re-running the corpus and the TI title sample.
+_NON_PART_PREFIXES = frozenset(
     {
+        # CPU cores and instruction sets
         "cortex",
         "neoverse",
         "ethos",
@@ -257,22 +268,62 @@ _CORE_NAMES = frozenset(
         "hexagon",
         "tricore",
         "powerpc",
-        "riscv",
-        "starfive",
         "andes",
+        "starfive",
+        "risc",
+        "rv",
+        # interface and bus standards
+        "rs",
+        "ddr",
+        "lpddr",
+        "usb",
+        "pcie",
+        "sata",
+        "hdmi",
+        "mipi",
+        # package families
+        "lqfp",
+        "tqfp",
+        "qfn",
+        "vqfn",
+        "hvqfn",
+        "bga",
+        "sot",
+        "soic",
+        "tssop",
+        "msop",
+        "dfn",
+        "wlcsp",
+        "sop",
+        "dip",
+        "plcc",
+        # document furniture
+        "figure",
+        "table",
+        "chapter",
+        "section",
+        "note",
+        "errata",
+        "page",
+        "item",
+        "appendix",
+        "annex",
+        "grade",
+        "class",
+        "um",
     }
 )
 
 
-def _is_core_name(token: str) -> bool:
-    """Whether ``token`` names a CPU core rather than a part.
+def _is_non_part(token: str) -> bool:
+    """Whether ``token`` names something other than a part.
 
-    Matches on the token's *leading* alphabetic run -- "Cortex" out of
-    "Cortex-M7" -- not on every letter in it, which would give "cortexm"
-    and match nothing.
+    Compares the token's *leading* alphabetic run -- "Cortex" out of
+    "Cortex-M7" -- not every letter in it, which would give "cortexm" and
+    match nothing.
     """
     lead = re.match(r"[A-Za-z]+", token)
-    return bool(lead) and lead.group().casefold() in _CORE_NAMES
+    return bool(lead) and lead.group().casefold() in _NON_PART_PREFIXES
 
 
 def _prefix_group(tokens: list[str]) -> list[str]:
