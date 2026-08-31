@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.37.0] - 2026-08-31
+
+### Added
+- **The library now tells an agent when a datasheet covers a product family, and stops steering it away from the section that answers per-part questions.** About half of datasheets cover a family rather than one part (52% on a 25-document corpus, 52% on an independent 115-document single-vendor sample), and their body text describes the family. The failure is observed, not hypothesized: asked whether one part had a peripheral, an agent answered "yes" from a family-level features section, when the ordering table said "No" for every variant of that part. It only found the truth after a human said the datasheet covered several products.
+- **`multi_variant` in the ToC JSON and in `get_artifact_manifest`**, present only when a family is detected, carrying the family text (`PSC3P5xD, PSC3M5xD`) and the rule that matched. Absent otherwise, so a single-part build pays no tokens for it -- the same convention as `figure_captions_blocked` in 0.36.0.
+- **A read-time `=== NOTE ===` from `get_section_text`**, naming the family and pointing at the ordering section by title and page. This is not a duplicate of the manifest field, and the distinction is the point: in the observed failure the agent already held the ToC, the ordering section and page 1, and still went wrong many turns later while reading a section. A build-time field fires long before the moment of the mistake; this fires at it. Suppressed when the read overlaps the ordering section itself, where it would point at the page being read.
+- **A standing caution in the `build_datasheet` and `get_section_text` descriptions**, phrased for every datasheet rather than as a gloss on the new key. Detection has recall 0.85, so a miss must degrade to a standing instruction, never to silence.
+
+### Fixed
+- **`boilerplate_category: "ordering"` was actively harmful on family datasheets.** That flag's documented purpose is telling agents what to *deprioritize*, and on a datasheet covering a family the ordering section holds the per-part selection table -- the most authoritative section for a per-part question, not one to skip. `flag_boilerplate(multi_variant=True)` now suppresses that category **and only that one**: legal, revision, contact, toc and glossary are unaffected, and single-part datasheets are unchanged, since ordering really is boilerplate there. Suppression happens before category inheritance, so subsections holding the actual tables do not pick it up from the parent.
+
+### Design notes
+- **Detection is title-only, and that was measured rather than assumed.** Precision 1.00, recall 0.85 against hand-assigned ground truth across 6 vendors. Precision is the property that matters here: the flag suppresses a boilerplate hint and adds a caution, so a false positive costs noise while a false negative costs a confident wrong answer.
+- **Page-1 body text was measured and rejected.** It fires on 22 of 57 otherwise-missed documents but recovers only 2 real families, dropping precision to ~0.41. It cannot separate feature variants (`ADS1255`) from package order codes (`TXB0104RGY`), companion parts (`CC1190`), or tokens that are not part numbers at all (`RGB888`, `PT100`, pin names like `AIN0P`). The title wins because a vendor **curates** it -- writing `ADS111x` or `LM111, LM211, LM311` precisely when the document covers a family.
+- **A library-side LLM call was rejected**, though it would classify all 22 correctly. It would put nondeterminism inside a cached artifact -- the same reason the LLM ToC judge was rejected -- and make a correctness caveat depend on the optional `[llm]` extra. More fundamentally the judgment needs the *question*: "is `TXB0104RGY` a variant?" is unanswerable in the abstract and trivial once you know the user asked about a specific part. The agent holds the question; the library does not. Contrast figure captioning, where the LLM generates content the agent cannot otherwise obtain.
+- **The residual 15% is not reachable by a better rule.** Both corpus misses show why: one is a family reference manual whose title names no part at all, the other an `LM158/LM258/LM358` datasheet whose title is the descriptor alone. Separating a sibling part from an order code needs world knowledge, which is why layer 4 above exists.
+- **`title_text` swallows any error reading page 1.** It runs on every build over an arbitrary PDF, and page 1 is where a malformed or partly-encrypted document fails first. An advisory signal must never take a build down; losing it costs a caution, raising costs the whole artifact.
+
+### Compatibility at a glance
+- **The version bump is load-bearing.** `datasheetindex_version` is a sidecar fingerprint, so 0.37.0 invalidates every 0.36.0 artifact. That is required rather than incidental: the ToC JSON gained a key **and** `boilerplate_category` changes on family datasheets, so a reused 0.36.0 artifact would carry the old flag under code that assumes the new one.
+- **The tool surface gains one manifest key and one note; nothing is removed.** `multi_variant` appears only when detected, and an artifact built before 0.37.0 never carries it. The `=== NOTE ===` uses the existing framing slot in `get_section_text`, which already documented that zero or more such lines may precede the text, so a consumer parsing that format needs no change.
+- **`flag_boilerplate` and `build_tree` gain a keyword-only `multi_variant` argument, defaulting to False.** Existing callers are unaffected. `core/variants.py` is new and additive.
+- **Tool descriptions grew, deliberately.** The budget guard in `tests/test_defs.py` was raised from 2150/800 to 2500/1000 for `build_datasheet`/`get_section_text`, with the reason recorded there. Unlike previous raises this one is not only about explaining a new key: it is the floor for the families detection misses, so it has to read as advice about every datasheet.
+
 ## [0.36.0] - 2026-08-28
 
 ### Fixed

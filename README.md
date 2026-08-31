@@ -251,13 +251,16 @@ tools for the bound PDF source:
   and a bounded `figures` digest naming the pages that carry figure entries
   (see "Figure indexing and captions"). For a PDF with no usable ToC the
   manifest also carries a `hint` telling the agent to navigate by `search_text`
-  instead (see "Datasheets without a ToC")
+  instead (see "Datasheets without a ToC"). When the datasheet covers a product
+  family rather than one part, the manifest also carries `multi_variant` (see
+  "Datasheets that cover a product family")
 - `get_section_text` - return extracted text for a page range from the latest
   build, opening with a position header (`=== Page X of N ===` for one page,
   `=== Pages X-Y of N ===` for a range) followed by zero or more
-  `=== NOTE: ... ===` lines when the range cuts content the publisher marked
-  as continuing onto an adjacent page; absence of a note is not a
-  completeness guarantee
+  `=== NOTE: ... ===` lines -- when the range cuts content the publisher marked
+  as continuing onto an adjacent page, and when the datasheet covers a product
+  family, in which case the note names the family and points at the per-part
+  ordering table; absence of a note is not a completeness guarantee
 - `search_text` - find page-aware text snippets in the latest build (pass a
   single pattern or a list of patterns), even when labels wrap across lines or
   table values interrupt the phrase; each hit carries the section breadcrumb.
@@ -395,6 +398,64 @@ case this exists for, since a `Page 1..N` outline has `page_coverage == 1.0` and
 any candidate must match it. A rejected candidate returns the same ToC with no
 explanation attached; the way to detect it is `toc_source`, which stays
 `pdf_outline` instead of becoming `llm_reconstructed`.
+
+### Datasheets that cover a product family
+
+About half of datasheets describe a family of parts rather than one part, and
+their body text describes the family. A features list, a block diagram or a
+peripheral section can name something a given part in the family does not have,
+while the per-part answer sits in the selection or ordering table. An agent that
+does not notice this answers confidently and wrongly -- observed: asked whether
+one part carried a CORDIC accelerator, an agent answered "yes" from a
+family-level features section, when the ordering table said "No" for every
+variant of that part.
+
+The library used to make this worse. `boilerplate_category: "ordering"` marks a
+section as one to *deprioritize*, and on a family datasheet that is the one
+section that can answer the question. Four things now address it:
+
+1. The `ordering` category is **suppressed** when a family is detected -- and
+   only that category. Single-part datasheets are unchanged, since ordering
+   really is boilerplate there.
+2. `multi_variant` appears in the ToC JSON and in `build_datasheet`'s manifest,
+   naming the family and the rule that matched. It is present only when
+   detected, so a single-part build pays nothing for it:
+
+   ```json
+   "multi_variant": { "family": "PSC3P5xD, PSC3M5xD", "rule": "wildcard" }
+   ```
+
+3. `get_section_text` prepends a note when the range may describe the family:
+
+   ```
+   === NOTE: this datasheet covers a product family (PSC3P5xD, PSC3M5xD). Text
+   in this range may describe the family rather than the specific part you were
+   asked about. Per-part differences are tabulated in "8 Ordering information"
+   (page 69). ===
+   ```
+
+   It is suppressed inside the ordering section, where it would point at the
+   page being read. The read-time note matters independently of the manifest
+   field: in the observed failure the agent already held the ToC and the
+   ordering section, and went wrong many turns later while reading a section.
+4. `build_datasheet` and `get_section_text` carry a standing caution about
+   per-part questions, phrased for every datasheet.
+
+Detection reads the **title block** only -- page 1's largest-font text plus the
+PDF metadata title -- and is deliberately conservative: measured precision 1.00
+and recall 0.85 against hand-labelled ground truth over a 25-document, 6-vendor
+corpus. A false positive costs some noise; a false negative costs a confident
+wrong answer, so **the absence of `multi_variant` is not evidence that a
+document covers a single part.** That is why the standing caution in the tool
+descriptions is unconditional.
+
+Page-1 *body* text was measured as an alternative and rejected: it drops
+precision to about 0.41 while recovering two real families out of 57 misses,
+because package order codes, companion parts, and tokens that are not part
+numbers at all (`RGB888`, `PT100`, pin names) look exactly like feature
+variants without vendor-specific grammars. The title works because a vendor
+curates it -- writing `ADS111x` or `LM111, LM211, LM311` precisely when the
+document covers a family.
 
 ### Figure indexing and captions
 
@@ -574,6 +635,7 @@ src/datasheetindex/
         figures.py         # raster_regions: exact raster placements, clipped
                             #   to the page and normalized for inspect_page
         preamble.py        # Page-marked front matter + per-page signals
+        variants.py        # Does this PDF cover a product family?
         quality.py         # ToC quality assessment
         annotations.py     # Footnote and cross-reference enrichment
         boilerplate.py     # Title-pattern boilerplate classification
