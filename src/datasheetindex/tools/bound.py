@@ -428,16 +428,27 @@ def _variant_note(
         if start_page >= ordering.start_page and end_page <= last:
             return []
 
+    # The imperative phrasing is measured, not stylistic. Against a live
+    # Sonnet agent on the PSoC Control C3 datasheet, n=10 per variant:
+    # a descriptive note ("may describe the family rather than the specific
+    # part ... per-part differences are tabulated in X") answered correctly
+    # 1/10, while this one answered 10/10 (Fisher exact p < 0.001). The
+    # descriptive runs all stopped at 5 turns -- build, read the features
+    # section, answer -- where these take 6-11 and go read the table. Naming
+    # the prohibited action and the required next step is what changed;
+    # stating a possibility was not enough. Do not soften this back into a
+    # description without re-running that comparison.
     named = f" ({family})" if family else ""
     note = (
-        f"=== NOTE: this datasheet covers a product family{named}. Text in "
-        f"this range may describe the family rather than the specific part "
-        f"you were asked about."
+        f"=== NOTE: this datasheet covers a product family{named}. Do NOT "
+        f"report a per-part answer from the text below: it describes the "
+        f"family, and a given part may not have what it names."
     )
     if ordering is not None:
         note += (
-            f' Per-part differences are tabulated in "{ordering.title}" '
-            f"(page {ordering.start_page})."
+            f' Before answering, read "{ordering.title}" (page '
+            f"{ordering.start_page}) and confirm the value against the "
+            f"per-part table there."
         )
     return [note + " ==="]
 

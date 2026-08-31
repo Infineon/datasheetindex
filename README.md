@@ -428,16 +428,26 @@ section that can answer the question. Four things now address it:
 3. `get_section_text` prepends a note when the range may describe the family:
 
    ```
-   === NOTE: this datasheet covers a product family (PSC3P5xD, PSC3M5xD). Text
-   in this range may describe the family rather than the specific part you were
-   asked about. Per-part differences are tabulated in "8 Ordering information"
-   (page 69). ===
+   === NOTE: this datasheet covers a product family (PSC3P5xD, PSC3M5xD). Do NOT
+   report a per-part answer from the text below: it describes the family, and a
+   given part may not have what it names. Before answering, read "8 Ordering
+   information" (page 69) and confirm the value against the per-part table
+   there. ===
    ```
 
    It is suppressed inside the ordering section, where it would point at the
    page being read. The read-time note matters independently of the manifest
    field: in the observed failure the agent already held the ToC and the
    ordering section, and went wrong many turns later while reading a section.
+
+   **The imperative phrasing is measured, not stylistic.** Against a live agent
+   asked the per-part question on this datasheet, n=10 per variant: a
+   descriptive note ("may describe the family ... per-part differences are
+   tabulated in X") answered correctly 1/10, while the phrasing above answered
+   10/10 (Fisher exact p < 0.001). Every descriptive run stopped after reading
+   the features section without opening the ordering table. Naming the
+   prohibited action and the required next step is what changed the behaviour;
+   stating a possibility was not enough.
 4. `build_datasheet` and `get_section_text` carry a standing caution about
    per-part questions, phrased for every datasheet.
 

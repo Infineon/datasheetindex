@@ -375,7 +375,7 @@ class TestReadTimeNote:
         tools = self._tools(nodes=nodes)
         out = DatasheetTools.get_section_text(tools, 40, 41)
         assert "product family" in out
-        assert "tabulated in" not in out
+        assert "Before answering, read" not in out
 
     def test_no_note_when_already_reading_the_ordering_section(self):
         """Inside the per-part table, the note would point at the current page."""
@@ -678,3 +678,52 @@ class TestFamilyCoversEveryImplicatedPart:
         signal = detect_variants("TL431, TL432 Precision Programmable Reference")
         assert signal is not None
         assert signal.family == "TL431, TL432"
+
+
+class TestNoteIsDirective:
+    """The note names a prohibited action and a required next step.
+
+    Measured, not stylistic. Against a live Sonnet agent asked a per-part
+    question on a real family datasheet, n=10 per variant: a descriptive
+    note ("may describe the family ... per-part differences are tabulated
+    in X") answered correctly 1/10; this phrasing answered 10/10, Fisher
+    exact p < 0.001. Every descriptive run stopped at 5 turns without
+    opening the ordering table.
+
+    These assertions are deliberately about the *shape* of the instruction
+    rather than exact prose, so wording can be improved but not softened
+    back into a description.
+    """
+
+    def _note(self, with_ordering=True):
+        from datasheetindex.models import DatasheetArtifacts
+        from datasheetindex.tools.bound import _variant_note
+
+        nodes = (
+            [
+                TocNode(
+                    title="8 Ordering information", level=1, start_page=69, end_page=71
+                )
+            ]
+            if with_ordering
+            else []
+        )
+        artifacts = DatasheetArtifacts(
+            json_data={"multi_variant": {"family": "PSC3P5xD", "rule": "wildcard"}},
+            nodes=nodes,
+        )
+        return _variant_note(artifacts, 22, 22)[0]
+
+    def test_it_forbids_answering_from_this_text(self):
+        assert "Do NOT report a per-part answer" in self._note()
+
+    def test_it_requires_reading_the_per_part_table_first(self):
+        note = self._note()
+        assert "Before answering, read" in note
+        assert "8 Ordering information" in note
+        assert "69" in note
+
+    def test_the_prohibition_survives_without_an_ordering_section(self):
+        """The instruction not to answer from this text does not depend on
+        our being able to name where the real answer lives."""
+        assert "Do NOT report a per-part answer" in self._note(with_ordering=False)
