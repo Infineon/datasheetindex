@@ -860,3 +860,66 @@ class TestBoundedNeverReturnsAnEmptyFamily:
         out = _bounded([huge])
         assert out.strip(", .") != ""
         assert not out.startswith(",")
+
+
+class TestCoreNamesAreExcludedPerToken:
+    """A CPU core named in a title is not a part, and saying so directly
+    is what two indirect proxies failed to do.
+
+    A casing rule ("part numbers are single-case") lost ATmega and nRF
+    families. A principal-part gate ("the family must include the leading
+    token") lost any title whose leading part-shaped token is a filename,
+    a descriptor or a document number -- and, being all-or-nothing over the
+    combined group, let core names ride along whenever a real family
+    co-occurred. Excluding the cores themselves has neither failure mode.
+    """
+
+    def test_cores_alone_do_not_make_a_family(self):
+        assert (
+            detect_variants("XMC7200 Arm Cortex-M7 and Cortex-M0 dual-core MCU") is None
+        )
+
+    def test_cores_do_not_ride_along_with_a_real_family(self):
+        signal = detect_variants("RA6M4, RA6M5 Arm Cortex-M33 and Cortex-M23 MCU")
+        assert signal is not None
+        assert signal.family == "RA6M4, RA6M5"
+
+    def test_cores_do_not_ride_along_when_named_first(self):
+        signal = detect_variants(
+            "Dual-Core Cortex-M7 and Cortex-M4 STM32H745 STM32H755"
+        )
+        assert signal is not None
+        assert "Cortex" not in signal.family
+
+    def test_a_leading_filename_no_longer_kills_the_family(self):
+        signal = detect_variants(
+            "Infineon-BSC0902NSI-DataSheet-v02_01-EN BSC0902NSI BSC0901NSI"
+        )
+        assert signal is not None
+        assert "BSC0901NSI" in signal.family
+
+    def test_a_leading_descriptor_no_longer_kills_the_family(self):
+        assert detect_variants("Automotive 16-Bit ADS1113 ADS1114") is not None
+
+    def test_a_leading_document_number_no_longer_kills_the_family(self):
+        assert detect_variants("SBAS444H ADS1113 ADS1114 ADS1115") is not None
+        assert detect_variants("Rev2 datasheet LM158, LM258, LM358") is not None
+        assert detect_variants("Doc12345 TL431, TL432 Precision Reference") is not None
+
+
+class TestBoundedStaysBounded:
+    """`family` is interpolated into an instruction, so it must stay within
+    budget AND disclose that it was cut."""
+
+    def test_one_over_budget_entry_is_truncated_not_returned_whole(self):
+        from datasheetindex.core.variants import _MAX_FAMILY_CHARS, _bounded
+
+        out = _bounded(["A" + "B" * 200 + "x1", "ADS111x"])
+        assert len(out) <= _MAX_FAMILY_CHARS
+        assert out.endswith("...")
+
+    def test_a_dropped_entry_is_always_disclosed(self):
+        from datasheetindex.core.variants import _bounded
+
+        out = _bounded(["A" + "B" * 200 + "x1", "ADS111x"])
+        assert out.endswith("..."), "a partial family must not read as complete"
