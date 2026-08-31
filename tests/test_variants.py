@@ -727,3 +727,76 @@ class TestNoteIsDirective:
         """The instruction not to answer from this text does not depend on
         our being able to name where the real answer lives."""
         assert "Do NOT report a per-part answer" in self._note(with_ordering=False)
+
+
+class TestSeriesSurvivesTitleConcatenation:
+    """`title_text` joins the metadata title to the page-1 block.
+
+    So the family token routinely appears twice, and the copy carrying
+    "Series" is rarely the first part-shaped token in the joined string.
+    Anchoring the rule to the leading token alone silently loses the
+    detection on the input shape this module actually receives.
+    """
+
+    def test_a_repeated_token_still_fires(self):
+        assert detect_variants("ESP32 Datasheet ESP32 Series Datasheet") is not None
+
+    def test_a_filename_style_metadata_prefix_still_fires(self):
+        signal = detect_variants(
+            "Infineon-XMC1400-DataSheet-v01_02-EN XMC1400 Series Datasheet"
+        )
+        assert signal is not None
+        assert signal.family == "XMC1400"
+
+    def test_an_order_code_prefix_still_fires(self):
+        assert detect_variants("ADS1115IDGSR ADS1115 Series") is not None
+
+    def test_a_package_code_before_series_is_still_rejected(self):
+        """The precision this anchoring was added for must survive."""
+        assert detect_variants("MAX4173 Low-Cost SOT23 Series Current Monitor") is None
+
+
+class TestCoreNamesAreNotFamiliesInPairRules:
+    """The wildcard guard closed only half of the Cortex problem.
+
+    Two cores named in one title share a 3-character prefix and pass every
+    structural test the pair rule applies, so a single-part dual-core MCU
+    datasheet -- which is exactly this project's corpus; the motivating
+    document is Cortex-M33 -- was published as a family called "Cortex-M33".
+    """
+
+    def test_two_arm_cores_are_not_a_family(self):
+        assert (
+            detect_variants("XMC7200 Arm Cortex-M7 and Cortex-M0 dual-core MCU") is None
+        )
+
+    def test_two_cores_in_another_vendor_style(self):
+        assert detect_variants("RA6M4 Arm Cortex-M33 and Cortex-M23 MCU") is None
+
+    def test_real_families_still_fire(self):
+        for title in (
+            "1N4001, 1N4002, 1N4003 Rectifier",
+            "LM111, LM211, LM311 Voltage Comparator",
+            "TL431, TL432 Precision Programmable Reference",
+            "CD4017B, CD4022B TYPES",
+        ):
+            assert detect_variants(title) is not None, title
+
+
+class TestFamilyTruncationNeverInventsAPart:
+    """`family` is shown to the agent verbatim inside an instruction.
+
+    Now that every matching part is named, the 120-character cap is
+    load-bearing: cutting mid-token presents a part number that does not
+    exist, in a note telling the agent to trust it.
+    """
+
+    def test_truncation_falls_on_a_separator(self):
+        signal = detect_variants(
+            ", ".join(f"TPS621{n}" for n in range(30, 50)) + " Step-Down Converters"
+        )
+        assert signal is not None
+        assert signal.family.endswith("...")
+        parts = [p for p in signal.family[:-3].split(", ") if p]
+        for part in parts:
+            assert len(part) == len("TPS62130"), f"truncated part {part!r}"

@@ -112,7 +112,18 @@ def _bounded(parts: list[str]) -> str:
     joined = ", ".join(seen)
     if len(joined) <= _MAX_FAMILY_CHARS:
         return joined
-    return joined[: _MAX_FAMILY_CHARS - 3].rstrip(", ") + "..."
+    # Drop whole entries, never characters. The agent is shown this string
+    # inside an instruction telling it to trust the names, so a cut mid-token
+    # would present a part number that does not exist.
+    kept: list[str] = []
+    used = 0
+    for part in seen:
+        cost = len(part) + (2 if kept else 0)
+        if used + cost > _MAX_FAMILY_CHARS - 5:
+            break
+        kept.append(part)
+        used += cost
+    return ", ".join(kept) + ", ..."
 
 
 # Below this, a token sharing a 3-character prefix with another differs only in
@@ -143,20 +154,53 @@ def _is_wildcard_token(token: str) -> bool:
 def _series_family(title: str, tokens: list[str]) -> str | None:
     """The family named by an "X Series" phrase, if the title carries one.
 
-    The keyword must directly qualify the title's **first** part-shaped token.
-    Unanchored, the rule reads "MAX4173 Low-Cost SOT23 Series Current Monitor"
-    as a family named after a package code -- exactly the class of token this
-    module must never mistake for a variant.
+    The keyword must directly qualify a token, and that token must be the
+    title's *principal* part -- the leading one, or a part the leading one
+    contains. Two constraints, because each alone gets a real title wrong:
+
+    - Adjacency alone reads "MAX4173 Low-Cost SOT23 Series Current Monitor"
+      as a family named after a package code.
+    - Leading position alone loses the shape ``title_text`` actually
+      produces. It concatenates the PDF metadata title with the page-1
+      block, so the family token appears twice and the copy carrying
+      "Series" is rarely first: "ESP32 Datasheet ESP32 Series Datasheet",
+      or "Infineon-XMC1400-DataSheet-v01_02-EN XMC1400 Series Datasheet",
+      whose leading token is the filename. Containment covers both, and
+      also the order-code case ("ADS1115IDGSR ADS1115 Series").
     """
     if not tokens:
         return None
-    lead = tokens[0]
-    head, _, after = title.partition(lead)
-    if head.strip(" \t([") and _PART_TOKEN.search(head):
-        return None
-    if _SERIES.match(after.lstrip(" \t,-")):
-        return lead
+    lead = tokens[0].casefold()
+    for token in tokens:
+        folded = token.casefold()
+        if folded != lead and folded not in lead:
+            continue
+        # Every occurrence, not just the first: the concatenated title
+        # repeats the token, and it is the later copy that carries "Series".
+        for match in re.finditer(re.escape(token), title):
+            after = title[match.end() :].lstrip(" \t,-")
+            if _SERIES.match(after):
+                return token
     return None
+
+
+def _is_pair_token(token: str) -> bool:
+    """Whether a token can stand as one part of a family in the pair rules.
+
+    Rejects mixed-case words. A vendor part number is written in one case --
+    "TPS62130", "1N4001", "LM2903B", or the all-lowercase form a metadata
+    filename carries ("max31855") -- while an English word inside a title is
+    capitalised: "Cortex-M7", "8-Bit".
+
+    Without this, a dual-core MCU datasheet naming both cores publishes a
+    family called "Cortex-M33, Cortex-M23": the two share a 3-character
+    prefix, both clear the length floor, and neither contains the other, so
+    every other test passes. That is this project's own corpus -- the
+    document that motivated the whole feature is Cortex-M33 -- and the
+    wildcard guard above closes only the single-core half of it.
+    """
+    letters = [c for c in token if c.isalpha()]
+    return not (any(c.isupper() for c in letters) and any(c.islower() for c in letters))
 
 
 def _is_part_pair(a: str, b: str) -> bool:
@@ -172,6 +216,8 @@ def _is_part_pair(a: str, b: str) -> bool:
       read as a feature family; they share one die and one feature set.
     - **Both tokens are too short to be evidence.** See the constant above.
     """
+    if not (_is_pair_token(a) and _is_pair_token(b)):
+        return False
     lower_a, lower_b = a.casefold(), b.casefold()
     if lower_a.startswith(lower_b) or lower_b.startswith(lower_a):
         return False
@@ -185,6 +231,8 @@ def _near_identical(a: str, b: str) -> bool:
     SN54HC590A/SN74HC590A -- which differ at the FIRST digit, where a
     shared-prefix test sees two unrelated tokens.
     """
+    if not (_is_pair_token(a) and _is_pair_token(b)):
+        return False
     a, b = a.casefold(), b.casefold()
     if len(a) != len(b) or a == b:
         return False
