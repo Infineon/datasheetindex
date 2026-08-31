@@ -428,16 +428,33 @@ def _variant_note(
         if start_page >= ordering.start_page and end_page <= last:
             return []
 
-    # The imperative phrasing is measured, not stylistic. Against a live
-    # Sonnet agent on the PSoC Control C3 datasheet, n=10 per variant:
-    # a descriptive note ("may describe the family rather than the specific
-    # part ... per-part differences are tabulated in X") answered correctly
-    # 1/10, while this one answered 10/10 (Fisher exact p < 0.001). The
-    # descriptive runs all stopped at 5 turns -- build, read the features
-    # section, answer -- where these take 6-11 and go read the table. Naming
-    # the prohibited action and the required next step is what changed;
-    # stating a possibility was not enough. Do not soften this back into a
-    # description without re-running that comparison.
+    # The imperative phrasing is measured, not stylistic. Driving a live
+    # Sonnet agent through the MCP server on the PSoC Control C3 datasheet,
+    # with only the five datasheet tools available, n=10 per variant:
+    #
+    #   descriptive  ("may describe the family ... are tabulated in X")   1/10
+    #   directive without negation ("The text below describes the
+    #     family ... To answer about a specific part, read X first")      5/10
+    #   this one, with the explicit prohibition                          10/10
+    #
+    # Fisher exact p < 0.001 against the descriptive form; the unmodified
+    # library answers 0/9. **The negation is load-bearing** -- dropping it
+    # for the gentler phrasing costs half the benefit, so do not soften this
+    # on style grounds. The descriptive runs all stopped at 5 turns (build,
+    # read the features section, answer) where these take 6-11 and go read
+    # the table: naming the prohibited action AND the required next step is
+    # what changed behaviour.
+    #
+    # The obvious objection -- that an imperative this blunt misfires when
+    # the detector is wrong -- was measured too. Forcing the flag onto a
+    # genuinely single-part datasheet and asking a plainly answerable
+    # question, n=6: 6/6 correct with and without the note, 4.3 turns
+    # against a 4.2-turn control. A false positive costs nothing here, which
+    # is what makes the aggressive phrasing defensible. Literature on
+    # negation (ironic rebound, negation instability) concerns negating the
+    # *content* of an answer; this negates a *procedure* and names the
+    # alternative in the same sentence, so the model always has somewhere
+    # to go. Re-run both comparisons before changing any of it.
     named = f" ({family})" if family else ""
     note = (
         f"=== NOTE: this datasheet covers a product family{named}. Do NOT "
