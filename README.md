@@ -6,6 +6,19 @@
 
 Agent-first parameter extraction from technical datasheets.
 
+## Contents
+
+- [What it does](#what-it-does) · [Philosophy](#philosophy) · [Supported products](#supported-products)
+- [Benchmark](#benchmark) · [Links](#links)
+- **Getting started** — [Setup](#setup) · [Development](#development) · [Input sources](#input-sources)
+- **Using it from an agent** — [Hand the MCP server to an agent](#hand-the-mcp-server-to-an-agent) · [Realize the tools without the Claude Agent SDK](#realize-the-tools-without-the-claude-agent-sdk) · [Run a local MCP server](#run-a-local-mcp-server)
+- **What the artifacts tell an agent** — [Datasheets without a ToC](#datasheets-without-a-toc) · [Knowing where the ToC came from](#knowing-where-the-toc-came-from) · [Asking for a better ToC](#asking-for-a-better-toc) · [Datasheets that cover a product family](#datasheets-that-cover-a-product-family) · [Figure indexing and captions](#figure-indexing-and-captions)
+- **Reference** — [Python API](#python-api) · [CLI](#cli) · [Project structure](#project-structure) · [License](#license)
+
+Design rationale — the measurements behind each decision, and the approaches
+rejected on them — lives in
+[`docs/datasheetindex_architecture.md`](./docs/datasheetindex_architecture.md).
+
 ## What it does
 
 `datasheetindex` is meant to be handed to an external agent in two parts:
@@ -401,161 +414,88 @@ explanation attached; the way to detect it is `toc_source`, which stays
 
 ### Datasheets that cover a product family
 
-About half of datasheets describe a family of parts rather than one part, and
-their body text describes the family. A features list, a block diagram or a
-peripheral section can name something a given part in the family does not have,
-while the per-part answer sits in the selection or ordering table. An agent that
-does not notice this answers confidently and wrongly -- observed: asked whether
-one part carried a CORDIC accelerator, an agent answered "yes" from a
-family-level features section, when the ordering table said "No" for every
-variant of that part.
+About half of datasheets describe a family of parts, and their body text
+describes the family: a features list or a peripheral section can name
+something a given part does not have, while the per-part answer sits in the
+selection or ordering table. An agent that misses this answers confidently and
+wrongly -- observed, and reproducible 9 times out of 9 before this existed.
 
-The library used to make this worse. `boilerplate_category: "ordering"` marks a
+The library used to make it worse: `boilerplate_category: "ordering"` marks a
 section as one to *deprioritize*, and on a family datasheet that is the one
 section that can answer the question. Four things now address it:
 
-1. The `ordering` category is **suppressed** when a family is detected -- and
-   only that category. Single-part datasheets are unchanged, since ordering
-   really is boilerplate there.
-2. `multi_variant` appears in the ToC JSON and in `build_datasheet`'s manifest,
-   naming the family and the rule that matched. It is present only when
-   detected, so a single-part build pays nothing for it:
+1. **The `ordering` category is suppressed** when a family is detected, and
+   only that category -- single-part datasheets are unchanged.
+2. **`multi_variant`** appears in the ToC JSON and in `build_datasheet`'s
+   manifest, present only when detected:
 
    ```json
    "multi_variant": { "family": "PSC3P5xD, PSC3M5xD", "rule": "wildcard" }
    ```
 
-3. `get_section_text` prepends a note when the range may describe the family:
-
-   ```
-   === NOTE: this datasheet covers a product family (PSC3P5xD, PSC3M5xD). Do NOT
-   report a per-part answer from the text below: it describes the family, and a
-   given part may not have what it names. Before answering, read "8 Ordering
-   information" (page 69) and confirm the value against the per-part table
-   there. ===
-   ```
-
-   It is suppressed inside the ordering section, where it would point at the
-   page being read. The read-time note matters independently of the manifest
-   field: in the observed failure the agent already held the ToC and the
-   ordering section, and went wrong many turns later while reading a section.
-
-   **The imperative phrasing is measured, not stylistic.** Against a live agent
-   asked the per-part question on this datasheet, n=10 per variant: a
-   descriptive note ("may describe the family ... per-part differences are
-   tabulated in X") answered correctly 1/10, while the phrasing above answered
-   10/10 (Fisher exact p < 0.001). Every descriptive run stopped after reading
-   the features section without opening the ordering table. Naming the
-   prohibited action and the required next step is what changed the behaviour;
-   stating a possibility was not enough.
-4. `build_datasheet` and `get_section_text` carry a standing caution about
-   per-part questions, phrased for every datasheet.
+3. **`get_section_text` prepends a note** when the range may describe the
+   family, naming the ordering section and suppressed inside it. It is phrased
+   as an instruction ("Do NOT report a per-part answer from the text below ...
+   Before answering, read *X*"), which is measured rather than stylistic: a
+   descriptive phrasing scored 1/10 against this one's 10/10.
+4. **A standing caution** in the `build_datasheet` and `get_section_text`
+   descriptions, phrased for every datasheet.
 
 Detection reads the **title block** only -- page 1's largest-font text plus the
-PDF metadata title -- and is deliberately conservative: measured precision 1.00
-and recall 0.85 against hand-labelled ground truth over a 25-document, 6-vendor
-corpus. A false positive costs some noise; a false negative costs a confident
-wrong answer, so **the absence of `multi_variant` is not evidence that a
-document covers a single part.** That is why the standing caution in the tool
-descriptions is unconditional.
+PDF metadata title -- at a measured precision of 1.00 and recall of 0.85. So
+**the absence of `multi_variant` is not evidence that a document covers a
+single part**, which is why the standing caution is unconditional.
 
-Page-1 *body* text was measured as an alternative and rejected: it drops
-precision to about 0.41 while recovering two real families out of 57 misses,
-because package order codes, companion parts, and tokens that are not part
-numbers at all (`RGB888`, `PT100`, pin names) look exactly like feature
-variants without vendor-specific grammars. The title works because a vendor
-curates it -- writing `ADS111x` or `LM111, LM211, LM311` precisely when the
-document covers a family.
+> Why the title rather than page-1 body text (precision falls to ~0.41), why
+> this is not an LLM call, and why the exclusion list is kept deliberately
+> short are in
+> [the architecture doc](./docs/datasheetindex_architecture.md).
 
 ### Figure indexing and captions
 
-Alongside `toc`, the ToC JSON carries `figures` -- a page-then-position list
-of every raster image placement (`kind: "raster"`, with `region` normalized
-to the `inspect_page(region=...)` coordinate contract, `bbox` in raw PDF
-points, `pixels`, `page_area_pct`, and `xref` -- the image XObject drawn,
-which two placements of the same picture share) and every `Figure N` / `Fig. N`
-caption the text layer names (`kind: "caption"`, with a string
-`figure_number` -- `"10-1"` as readily as `"12"`). The two kinds are reported
-as separate entries, never merged, even when a raster region and a caption
-share a page. `figures_excluded` reports `{"below_min_area_pct": ...,
-"min_area_pct": ...}` for placements dropped as decorative (a logo repeated
-across every page). Both keys are always present -- `figures: []` on a
-document with none -- so an empty result is distinguishable from an artifact
-built before this feature existed.
+Alongside `toc`, the ToC JSON carries a `figures` array with one entry per
+raster image placement (`kind: "raster"` -- `region` in the
+`inspect_page(region=...)` coordinate contract, plus `bbox`, `pixels`,
+`page_area_pct`, and the `xref` two placements of one picture share) and one
+per `Figure N` mention the text layer names (`kind: "caption"`, with a string
+`figure_number`). The two kinds are never merged, even on the same page.
+Three sibling keys disclose what is *not* there, and all are always present so
+an empty result is distinguishable from an artifact predating the feature:
 
-`build_datasheet` (and `DatasheetIndex.build()`, `build_batch`) also take
-`caption_figures: bool = True` and `max_figure_captions: int = 20`. When a
-vision-capable client is available -- supplied explicitly, or self-created
-the same way the ToC fallback is -- every raster region above the area
-threshold gets a short VLM description (`caption_source: "llm"`), largest
-regions first, up to the cap; `figure_captions_excluded` discloses what the
-cap dropped, and `figure_captions_blocked` is true when *every*
-attempted caption was rejected for a reason that will not change on retry --
-a certificate that did not verify, or credentials the gateway refuses -- so
-"no captions" can be told apart from "nothing to caption". One rejection
-among successes is a blip and does not set it. Placements sharing an `xref` are one picture: the largest is
-described, every placement receives the answer, and the cap counts pictures,
-not placements. A header logo repeated on four pages is therefore one call
-with four identical captions, not four calls -- measured at 33% of the calls
-on a seven-document PCN corpus and 10% across nineteen documents. The caption names the kind of content (table, schematic, plot,
-photo, block diagram, pinout) and then, immediately, its most identifying
-labels -- for a table, its row labels first and then its column headings; for
-a plot, its axes and plotted quantity -- under 60 words, and it never
-transcribes cell values or numbers. This is what lets an agent tell, from the
-manifest alone, that a page rendered entirely as a picture (no text layer at
-all) is worth opening with `inspect_page`: `search_text` returning zero hits
-on that page proves nothing, since there is no text there to search. That
-inference is easy to miss pages later, so `search_text` states the limitation
-in its own description and, when a search comes back empty on a document that
-holds raster regions, attaches a `note` naming the digest and `inspect_page`
-as the next step. Only then -- a hit-free search over a document with nothing
-but text-layer figure captions has nothing hidden from it, and a note on a
-search that succeeded is noise.
+| key | says |
+|---|---|
+| `figures_excluded` | placements dropped as decorative, and the area threshold used |
+| `figure_captions_excluded` | what `max_figure_captions` dropped |
+| `figure_captions_blocked` | `true` only when *every* caption attempt was permanently rejected (bad certificate, refused credentials), so "no captions" can be told from "nothing to caption" |
+
+**Captioning.** `build_datasheet` (and `DatasheetIndex.build()`, `build_batch`)
+take `caption_figures: bool = True` and `max_figure_captions: int = 20`. With a
+vision-capable client, each raster region above the area threshold gets a short
+VLM description, largest first, up to the cap. Placements sharing an `xref` are
+one picture: it is described once, every placement receives the answer, and the
+cap counts pictures rather than placements. A caption names the kind of content
+and then its most identifying labels -- a table's row labels and column
+headings, a plot's axes -- in under 60 words, and never transcribes values.
+
 **Each captioned figure is one VLM call**, so raising the cap raises cost
-proportionally. Without credentials configured, captioning is a no-op and the
-deterministic `figures` array is unaffected either way. `caption_figures=False`
-or `max_figure_captions=0` turns it off explicitly and restores the
-pre-captioning artifact exactly.
+proportionally. Without credentials captioning is a no-op and the deterministic
+`figures` array is unaffected; `caption_figures=False` or
+`max_figure_captions=0` restores the pre-captioning artifact exactly.
 
-Two knobs bound the cost of each call. `DATASHEETINDEX_VISION_MODEL` names the
-model used for captioning alone -- unset, it follows the model used for
-summaries and the ToC fallback -- which is worth setting when your gateway
-serves a cheaper vision model, since captioning is the only per-figure cost in
-a build. Name a **non-reasoning** model: a reasoning model spends the whole
-output budget thinking and returns an empty caption. Each reply is capped at
-300 output tokens, above every compliant answer measured (the prompt asks for
-under 60 words, which lands near 90 tokens) and there to bound a model that
-answers a 128-pin pinout by listing all 128 pins. Truncation is anticipated by
-the prompt, which puts identifying labels before any description of structure.
+`DATASHEETINDEX_VISION_MODEL` names a model for captioning alone -- unset, it
+follows the model used for summaries and the ToC fallback -- which is worth
+setting when your gateway serves a cheaper vision model. **Name a
+non-reasoning model:** a reasoning model spends the whole output budget
+thinking and returns an empty caption. Replies are capped at 300 output
+tokens, and the prompt puts identifying labels first so truncation costs
+description rather than identity.
 
-Images are sent to the vision model at `detail: "high"`, not the API's
-cheaper `"low"` (512x512-downscale) tier. Measured on a product-change-notice
-datasheet whose "Product Attributes" table is rendered entirely as a raster
-image: at `"low"` the model confidently invented several row headings that do
-not exist in the table; at `"high"` it returned 19 of 20 row headings
-verbatim correct, including the two rows naming a supplier. Cost, read from
-`usage` on live responses: 120 input tokens per image at `"low"` versus 1074
-at `"high"` -- about 9x, or roughly 2.4k to 21.5k input tokens per document at
-the default cap of 20, paid once per document and then cached on disk by the
-existing artifact reuse.
-
-A caller who supplies, or has credentials for, a vision-capable client and asks
-for summaries gets both. A **keyless** build runs no summaries: with
-`llm_callable=None`, `include_summaries=True` produces summaries only when the
-weak-ToC fallback needed a client of its own, so a document's figures never
-switch summaries on by themselves. Captioning is unaffected -- it is the one
-branch that self-creates a client for its own sake.
-
-`build_datasheet`'s manifest does not repeat the `figures` array; it carries a
-bounded **digest** of it, so an agent learns that raster content exists without
-reading a file:
+**The manifest carries a bounded digest, not the array**, so an agent learns
+that raster content exists without reading a file:
 
 ```json
 "figures": {
-  "total": 27,
-  "raster": 20,
-  "captioned": 7,
-  "pages_with_figures": 12,
+  "total": 27, "raster": 20, "captioned": 7, "pages_with_figures": 12,
   "pages": [
     { "page": 3, "figures": 2, "caption": "Figure 1. Functional block diagram" },
     { "page": 9, "figures": 1, "caption": null }
@@ -564,27 +504,25 @@ reading a file:
 }
 ```
 
-`total` counts the entries in the ToC JSON's `figures` array that carry a
-usable integer `page`, `raster` the `kind: "raster"` ones, and `captioned`
-those carrying a caption from either source. `pages` lists one row per page
-carrying figure entries, in ascending page order, with that page's entry count
-and its **largest-area** caption (by `page_area_pct`, clipped to 350
-characters), not merely its first in document order -- a small figure listed
-ahead of a larger one in the ToC JSON must not shadow it in the digest. Ties
-break on document order, never on dict or set iteration, so the digest is
-byte-stable across runs. Because a `"caption"` entry
-is created for any `Figure N` mention in the page text, a row can name a page
-holding no raster image at all. Measured across a 14-document corpus, that
-overwhelmingly means the figure is **drawn as vector art** -- which
-`get_image_info()` cannot enumerate, so the index names the figure without being
-able to offer a region for it. Such a page rewards a full-page `inspect_page`;
-it is a signal, not noise. It is
-capped at 40 rows -- `pages_with_figures` is the true count
-and `truncated` says whether rows were dropped -- so the manifest's size does
-not grow with a pathological document's figure count. The key is always
-present, so `"total": 0` is distinguishable from an artifact predating the
-figure index. Full detail, including each region's coordinates for
-`inspect_page(region=...)`, stays in the ToC JSON at `json_path`.
+`pages` lists one row per page holding figure entries, ascending, carrying that
+page's **largest-area** caption. It is capped at 40 rows -- `pages_with_figures`
+is the true count and `truncated` says whether rows were dropped -- so the
+manifest cannot grow without bound. A row naming a page with no raster image
+almost always means a **vector-drawn figure**, which cannot be enumerated for a
+region: that page rewards a full-page `inspect_page`. Full detail, including
+each region's coordinates, stays in the ToC JSON at `json_path`.
+
+This is what lets an agent tell from the manifest alone that a page rendered
+entirely as a picture is worth opening: `search_text` returning nothing there
+proves nothing, because there is no text to search. `search_text` says so in
+its own description, and attaches a `note` naming the digest and `inspect_page`
+when a search comes back empty on a document that holds raster regions.
+
+> Why images are sent at `detail: "high"` (measured: 19 of 20 row headings
+> correct versus confabulation at `"low"`, for ~9x the input tokens), why the
+> digest breaks ties on document order, and the rest of the measurements behind
+> these defaults are in
+> [the architecture doc](./docs/datasheetindex_architecture.md#figure-indexing).
 
 ## Python API
 
