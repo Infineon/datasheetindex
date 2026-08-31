@@ -33,6 +33,7 @@ from datasheetindex.core.artifact_cache import (
     sidecar_path,
     write_sidecar,
 )
+from datasheetindex.core.boilerplate import classify_title
 from datasheetindex.core.engine import layout_active, layout_engine
 from datasheetindex.core.locate import TextLocation
 from datasheetindex.core.locate import locate_text as locate_text_core
@@ -58,7 +59,12 @@ from datasheetindex.llm.figure_captions import (
     DEFAULT_MAX_FIGURE_CAPTIONS,
     validate_max_figure_captions,
 )
-from datasheetindex.models import DatasheetArtifacts, TocNode, TocQuality
+from datasheetindex.models import (
+    DatasheetArtifacts,
+    TocNode,
+    TocQuality,
+    flatten_nodes,
+)
 from datasheetindex.tools.vision import Detail, inspect_page
 
 if TYPE_CHECKING:
@@ -368,6 +374,59 @@ def _continuation_notes(text_content: str, start_page: int, end_page: int) -> li
             f"which is outside this range. ==="
         )
     return notes
+
+
+def _ordering_section(nodes: list[TocNode]) -> TocNode | None:
+    """The shallowest section holding the per-part selection tables, if any.
+
+    Found by title classification rather than by ``boilerplate_category``,
+    because on exactly the documents this matters for that flag is deliberately
+    suppressed -- the ordering section is authoritative there, not skippable.
+    """
+    for node in flatten_nodes(nodes):
+        if classify_title(node.title) == "ordering":
+            return node
+    return None
+
+
+def _variant_note(
+    artifacts: DatasheetArtifacts, start_page: int, end_page: int
+) -> list[str]:
+    """A note that this range may describe a family rather than one part.
+
+    Emitted at read time, not only at build time, because that is where the
+    observed failure happened: the agent held the ToC, the ordering section
+    and page 1, then read a features section and answered a per-part question
+    from it. A manifest field fires many turns before that moment.
+
+    Suppressed inside the ordering section itself, where it would point the
+    agent at the page it is already reading.
+    """
+    variant = artifacts.json_data.get("multi_variant")
+    if not variant:
+        return []
+
+    family = variant.get("family", "")
+    ordering = _ordering_section(artifacts.nodes)
+    if ordering is not None:
+        overlaps = start_page <= (ordering.end_page or ordering.start_page) and (
+            end_page >= ordering.start_page
+        )
+        if overlaps:
+            return []
+
+    named = f" ({family})" if family else ""
+    note = (
+        f"=== NOTE: this datasheet covers a product family{named}. Text in "
+        f"this range may describe the family rather than the specific part "
+        f"you were asked about."
+    )
+    if ordering is not None:
+        note += (
+            f' Per-part differences are tabulated in "{ordering.title}" '
+            f"(page {ordering.start_page})."
+        )
+    return [note + " ==="]
 
 
 class DatasheetTools:
@@ -892,6 +951,14 @@ class DatasheetTools:
         # arrive. Same wall the 0.25.0 figures digest was added to climb.
         if artifacts.json_data.get("figure_captions_blocked"):
             manifest["figure_captions_blocked"] = True
+        # Published only when the datasheet covers a product family, for the
+        # same reason as the key above: absent means "no news", so the key's
+        # presence is itself the signal. Without it the agent cannot tell a
+        # family datasheet from a single-part one, and answers a per-part
+        # question from family-level body text -- the observed failure.
+        variant = artifacts.json_data.get("multi_variant")
+        if variant:
+            manifest["multi_variant"] = variant
         if not manifest["toc"]:
             manifest["hint"] = _NO_TOC_HINT
         return manifest
@@ -927,7 +994,8 @@ class DatasheetTools:
             header = f"=== Page {start_page} of {total_pages} ==="
         else:
             header = f"=== Pages {start_page}-{end_page} of {total_pages} ==="
-        notes = _continuation_notes(artifacts.text_content, start_page, end_page)
+        notes = _variant_note(artifacts, start_page, end_page)
+        notes += _continuation_notes(artifacts.text_content, start_page, end_page)
         section = extract_section_text(artifacts.text_content, start_page, end_page)
         return "\n".join([header, *notes, section])
 

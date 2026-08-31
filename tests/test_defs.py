@@ -861,10 +861,18 @@ def test_tool_descriptions_stay_within_a_budget():
     gained a key, and the whole point of publishing it is that the agent stops
     asking for captions that cannot arrive -- which it can only do if the
     description says so. Same argument as ``toc_source`` above.
+
+    Raised from 2150/800 for the multi-variant caution. Unlike the raises
+    above this one is NOT only about explaining a new manifest key: the
+    detector behind ``multi_variant`` has recall 0.85, so the standing
+    instruction is the floor for the families it misses and has to read as
+    advice about every datasheet, not as a gloss on a field. It earns the
+    tokens on roughly half of all documents -- the measured share that covers
+    a product family.
     """
     budgets = {
-        "build_datasheet": 2150,
-        "get_section_text": 800,
+        "build_datasheet": 2500,
+        "get_section_text": 1000,
         "search_text": 700,
         "inspect_page": 400,
         "extract_table_markdown": 400,

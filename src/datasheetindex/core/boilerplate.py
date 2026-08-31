@@ -164,7 +164,9 @@ def classify_title(title: str) -> str:
     return ""
 
 
-def flag_boilerplate(nodes: list[TocNode]) -> list[TocNode]:
+def flag_boilerplate(
+    nodes: list[TocNode], *, multi_variant: bool = False
+) -> list[TocNode]:
     """Recursively set ``boilerplate_category`` on each node.
 
     Classification rules:
@@ -176,15 +178,29 @@ def flag_boilerplate(nodes: list[TocNode]) -> list[TocNode]:
       appendix are themselves revision-history content.
     - Top-level nodes with no own classification stay empty.
 
+    ``multi_variant`` suppresses the `ordering` category alone. On a datasheet
+    covering a product family the per-part selection table lives in the
+    ordering section, so it is the *most* authoritative section for a per-part
+    question rather than something to skip -- and this flag's whole purpose is
+    telling an agent what to deprioritize. Suppressing it here rather than
+    dropping the pattern keeps the category meaningful on the ~48% of
+    datasheets that cover one part, where ordering really is boilerplate.
+
     Modifies nodes in-place and returns them for convenience.
     """
-    _flag_recursive(nodes, parent_category="")
+    _flag_recursive(nodes, parent_category="", multi_variant=multi_variant)
     return nodes
 
 
-def _flag_recursive(nodes: list[TocNode], parent_category: str) -> None:
+def _flag_recursive(
+    nodes: list[TocNode], parent_category: str, *, multi_variant: bool
+) -> None:
     for node in nodes:
         own = classify_title(node.title)
+        if own == "ordering" and multi_variant:
+            # Suppressed before inheritance, so subsections holding the actual
+            # per-part tables do not pick the category up from this node.
+            own = ""
         if own:
             node.boilerplate_category = own
         elif parent_category:
@@ -192,4 +208,6 @@ def _flag_recursive(nodes: list[TocNode], parent_category: str) -> None:
         else:
             node.boilerplate_category = ""
         if node.nodes:
-            _flag_recursive(node.nodes, node.boilerplate_category)
+            _flag_recursive(
+                node.nodes, node.boilerplate_category, multi_variant=multi_variant
+            )
