@@ -906,11 +906,19 @@ class TestNonPartVocabularyIsExcluded:
     families (see `_NON_PART_PREFIXES`).
     """
 
-    def test_interface_standards(self):
-        assert (
-            detect_variants("SN65HVD75 Half-Duplex RS-485/RS-422 Transceiver") is None
-        )
-        assert detect_variants("MAX13487E RS-485 and RS-422 Transceivers") is None
+    def test_interface_standards_named_rs_are_a_deliberate_false_positive(self):
+        """`rs` is NOT excluded, and that is a considered trade.
+
+        "SN65HVD75 ... RS-485/RS-422" does fire, naming a standard as the
+        family. Excluding `rs` would fix it and would also kill the real
+        Recom RS-2405S/RS-1212D family -- and by this module's measured
+        asymmetry a false positive costs 6/6 correct answers and +0.1
+        turns, where a false negative costs the whole benefit. Recorded as
+        a test so the trade is visible rather than looking like an
+        oversight.
+        """
+        assert detect_variants("SN65HVD75 Half-Duplex RS-485/RS-422") is not None
+        assert detect_variants("RS-2405S RS-1212D DC/DC Converter") is not None
 
     def test_package_codes(self):
         assert detect_variants("STM32F407 LQFP100 LQFP144 Package Options") is None
@@ -971,3 +979,63 @@ class TestBoundedDegradesRatherThanFabricate:
         note = _variant_note(artifacts, 5, 5)[0]
         assert "product family." in note
         assert "()" not in note
+
+
+class TestExclusionsNeverCostRealFamilies:
+    """The exclusion list is held to the module's own asymmetry.
+
+    A false positive was measured at essentially no cost -- forcing the flag
+    onto a single-part datasheet gave 6/6 correct answers and +0.1 turns --
+    while a false negative loses the whole benefit for that document. So an
+    entry that plausibly doubles as a vendor prefix is not worth its
+    precision: `usb` and `rs` were both removed after they were found to
+    kill real families, and `ddr`/`lpddr` went with them because
+    `_MIN_PAIR_TOKEN_CHARS` already covers the `DDR3`/`USB2` shapes they
+    were added for.
+    """
+
+    def test_microchip_hub_family(self):
+        signal = detect_variants("USB2512B USB2513B USB2514B Hub Controller")
+        assert signal is not None
+        assert "USB2514B" in signal.family
+
+    def test_usb_transceiver_family(self):
+        assert detect_variants("USB3300 USB3320 Hi-Speed USB Transceiver") is not None
+
+    def test_recom_converter_family(self):
+        assert detect_variants("RS-2405S RS-1212D DC/DC Converter") is not None
+
+    def test_the_short_bus_shapes_are_still_rejected_by_length(self):
+        """What `usb`/`ddr` were nominally for is covered without them."""
+        assert detect_variants("DDR3/DDR4 Memory Interface Controller") is None
+        assert detect_variants("USB2.0 to USB3.0 bridge") is None
+
+
+class TestSlashListHonoursTheExclusions:
+    """`_SLASH_LIST` runs first and returned unconditionally.
+
+    It already carried a bespoke rev/ver/doc lookahead, which is evidence
+    that non-part vocabulary reaches this path too.
+    """
+
+    def test_a_package_list_does_not_shadow_the_real_family(self):
+        signal = detect_variants("STM32F407xx LQFP64/100/144 package options")
+        assert signal is not None
+        assert signal.rule == "wildcard"
+        assert "LQFP" not in signal.family
+
+
+class TestBoundedKeepsWhatFits:
+    """One oversized entry must not discard the entries after it."""
+
+    def test_a_later_fitting_entry_survives(self):
+        from datasheetindex.core.variants import _bounded
+
+        assert _bounded(["A" + "B" * 200 + "x1", "ADS111x"]) == "ADS111x, ..."
+
+    def test_the_dropping_branch_stays_within_budget_and_discloses(self):
+        from datasheetindex.core.variants import _MAX_FAMILY_CHARS, _bounded
+
+        out = _bounded([f"TPS621{n}" for n in range(30, 60)])
+        assert len(out) <= _MAX_FAMILY_CHARS
+        assert out.endswith(", ...")

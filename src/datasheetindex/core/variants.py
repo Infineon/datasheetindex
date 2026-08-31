@@ -120,7 +120,10 @@ def _bounded(parts: list[str]) -> str:
     for part in seen:
         cost = len(part) + (2 if kept else 0)
         if used + cost > _MAX_FAMILY_CHARS - 5:
-            break
+            # Skip it, do not abandon the list: a later, shorter entry may
+            # still fit, and dropping it would shrink the family for no
+            # reason.
+            continue
         kept.append(part)
         used += cost
     if not kept:
@@ -272,11 +275,15 @@ _NON_PART_PREFIXES = frozenset(
         "starfive",
         "risc",
         "rv",
-        # interface and bus standards
-        "rs",
-        "ddr",
-        "lpddr",
-        "usb",
+        # interface and bus standards. Deliberately short: "usb", "rs",
+        # "ddr" and "lpddr" were here and were removed after "usb" was
+        # found to kill the real USB2512B/USB2513B/USB2514B hub family and
+        # "rs" the Recom RS-2405S/RS-1212D converters. `DDR3`/`USB2`, the
+        # shapes they were added for, fall under _MIN_PAIR_TOKEN_CHARS
+        # anyway, so they bought nothing and cost real recall. An entry
+        # that plausibly doubles as a vendor prefix does not belong here:
+        # a false positive was measured at 6/6 correct and +0.1 turns,
+        # while a false negative loses the whole benefit for a document.
         "pcie",
         "sata",
         "hdmi",
@@ -361,7 +368,7 @@ def detect_variants(title: str) -> VariantSignal | None:
     if not title or not title.strip():
         return None
 
-    slash = _SLASH_LIST.findall(title)
+    slash = [t for t in _SLASH_LIST.findall(title) if not _is_non_part(t)]
     if slash:
         return VariantSignal(family=_bounded(slash), rule="slash-list")
 
