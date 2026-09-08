@@ -57,6 +57,11 @@ benchmark/corpus/
 # Subagent-driven-development scratch (ledger, briefs, review packages).
 # Also keeps hatchling from sweeping it into the sdist, as it did on 0.21.0.
 .superpowers/
+# scripts/token_economy.py's default --artifacts directory. Untracked
+# directories at the repo root get swept into hatchling's sdist (this is what
+# .superpowers/ did to 0.21.0), so it is excluded there too -- see
+# [tool.hatch.build.targets.sdist] in pyproject.toml.
+.token-economy-artifacts/
 
 # The benchmark's generated figures and its own virtualenv. The figures are
 # outputs of `benchmark/scripts/render_paper_figures.py`, regenerable from

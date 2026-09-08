@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import statistics
 import sys
 import time
@@ -94,11 +95,17 @@ def _percentile(values: list[int], fraction: float) -> int:
 
     Not ``statistics.quantiles``: it interpolates and needs at least two data
     points, and plenty of small datasheets have exactly one readable section.
+
+    ``math.ceil``, not ``round``: nearest rank *is* the ceiling, and Python
+    rounds half to even, so ``round(0.9 * 5)`` is 4 -- an 80th percentile
+    published in a column headed p90. The error appears only at section counts
+    of 5, 25, 45 and so on, which is exactly the kind of size-dependent
+    inconsistency nobody would find by reading the table.
     """
     if not values:
         return 0
     ordered = sorted(values)
-    rank = max(1, min(len(ordered), round(fraction * len(ordered))))
+    rank = max(1, min(len(ordered), math.ceil(fraction * len(ordered))))
     return ordered[rank - 1]
 
 
@@ -200,6 +207,14 @@ def measure_document(
     reusing the first one would time an attribute lookup and call it a cache
     hit. ``warm_reused`` records whether the artifact files were left
     untouched, which is what makes the warm number honest.
+
+    Both passes set ``caption_figures=False``, against a default of ``True``.
+    Captioning is one VLM call per figure, so leaving it on would make the
+    build timing a measurement of an LLM gateway rather than of this library,
+    and would make the number depend on whether credentials happen to be
+    present. It is stated in the rendered output rather than left implicit:
+    a reader with the ``[llm]`` extra configured will see slower builds than
+    the published ones.
     """
     from datasheetindex import DatasheetTools
 
@@ -339,6 +354,8 @@ def _fmt(value: float | int | None, spec: str = ",") -> str:
 def render_markdown(
     measurements: list[DocumentMeasurement],
     summary: dict,
+    failures: list[str] | None = None,
+    extra_flags: list[str] | None = None,
 ) -> str:
     """Render the committed table.
 
@@ -352,6 +369,16 @@ def render_markdown(
         f"Tokens counted with the `{summary['encoding']}` encoding. "
         f"{summary['documents']} documents, {summary['priced']} priced.",
         "",
+    ]
+    if failures:
+        lines += [
+            f"> **{len(failures)} document(s) could not be measured**, so this "
+            "table is incomplete:",
+            "",
+            *[f"> - `{failure}`" for failure in failures],
+            "",
+        ]
+    lines += [
         "| Document | Pages | Full doc | Manifest | Section (med) | "
         "Section (p90) | First answer | vs full | Further answer | vs full | "
         "Build (cold) | Build (warm) |",
@@ -425,6 +452,27 @@ def render_markdown(
         "gets large. An agent that asks one thing and leaves sees the first "
         "ratio; an agent doing real extraction work sees the second.",
         "",
+        "**The ratios are medians of per-document ratios, not the quotient "
+        "of the medians above.** Each document is priced on its own and the "
+        "ratios are then summarised, which is why dividing the two token "
+        "medians gives a different -- and less representative -- number: a "
+        "median of the per-document ratios is not the ratio of the medians, "
+        "and the token medians are taken over different sets, since an "
+        "unpriced document still has a full-document count.",
+        "",
+        "**Build timings exclude figure captioning**, which `build_datasheet` "
+        "enables by default. Captioning is one VLM call per figure, so "
+        "including it would time an LLM gateway rather than this library, and "
+        "would make the number depend on whether credentials are present. "
+        "With the `[llm]` extra configured and a figure-heavy datasheet, "
+        "expect builds well above the numbers here.",
+        "",
+        "**`Manifest` includes the artifact paths the agent is really sent**, "
+        "which are absolute. The same document measured under a longer "
+        "`--artifacts` path therefore counts a token or two more -- "
+        "immaterial to the ratios, but it does mean these counts are not "
+        "byte-reproducible across machines.",
+        "",
         "**Nothing here measures accuracy.** A cheap wrong answer is worth "
         "nothing, and this script has no ground truth to check against. That "
         "is the benchmark's job -- see `benchmark/`.",
@@ -438,7 +486,8 @@ def render_markdown(
         "",
         "```bash",
         "uv run --group bench python scripts/token_economy.py \\",
-        "    --corpus <dir> --markdown docs/token-economy.md",
+        "    --corpus <dir> --markdown docs/token-economy.md"
+        + ("".join(f" \\\n    {flag}" for flag in extra_flags) if extra_flags else ""),
         "```",
         "",
     ]
@@ -493,6 +542,7 @@ def main(argv: list[str] | None = None) -> int:
 
     encode = get_encoder()
     measurements: list[DocumentMeasurement] = []
+    failures: list[str] = []
     for i, pdf in enumerate(pdfs, start=1):
         print(f"[{i}/{len(pdfs)}] {pdf.name}", file=sys.stderr, flush=True)
         # One subdirectory per document: the cold pass forces a rebuild, and a
@@ -503,6 +553,7 @@ def main(argv: list[str] | None = None) -> int:
             measurements.append(measure_document(pdf, encode, str(out)))
         except Exception as exc:  # noqa: BLE001 - one bad PDF must not end the run
             print(f"    failed: {exc}", file=sys.stderr, flush=True)
+            failures.append(f"{pdf.name}: {exc}")
 
     summary = summarize(measurements)
     if args.json:
@@ -511,18 +562,33 @@ def main(argv: list[str] | None = None) -> int:
                 {
                     "summary": summary,
                     "documents": [m.to_dict() for m in measurements],
+                    "failures": failures,
                 },
                 indent=2,
             )
             + "\n",
             encoding="utf-8",
         )
-    rendered = render_markdown(measurements, summary)
+
+    extra_flags = ["--allow-editable-reuse"] if args.allow_editable_reuse else []
+    rendered = render_markdown(measurements, summary, failures, extra_flags)
     if args.markdown:
+        # ``--markdown docs/token-economy.md`` is the documented invocation, so
+        # a run that measured nothing -- a mistyped or half-fetched corpus --
+        # would otherwise replace the published table with an empty one and
+        # report success.
+        if not measurements:
+            print(
+                f"measured nothing; refusing to overwrite {args.markdown}",
+                file=sys.stderr,
+            )
+            return 1
         args.markdown.write_text(rendered, encoding="utf-8")
     else:
         print(rendered)
-    return 0
+    # Non-zero on any failure: the table is published, and a partial one must
+    # not look like a clean run to whoever or whatever invoked this.
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":

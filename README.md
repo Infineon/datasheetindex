@@ -56,12 +56,21 @@ against the [25-document corpus](./docs/corpus.md) -- no model, no network, no
 credentials. Full results, per document, are in
 [`docs/token-economy.md`](./docs/token-economy.md).
 
-| | Median |
+| Median across the corpus | |
 |---|---|
 | Whole document in context | 33,973 tokens |
-| First answer (map + one section) | 9,637 tokens, **3.1x** cheaper |
-| Every further answer about the same part | 625 tokens, **54x** cheaper |
-| Build | 7.3s cold, 0.01s warm (cached artifact) |
+| First answer (map + one section) | 9,637 tokens |
+| Every further answer about the same part | 625 tokens |
+| First answer vs. the document | **3.1x** cheaper |
+| Further answer vs. the document | **54x** cheaper |
+| Build | 6.3s cold, 0.01s warm (cached artifact) |
+
+Each ratio is the **median of the per-document ratios**, so it is deliberately
+not the quotient of the two token medians above: every document is priced on
+its own and the ratios are then summarised. Build timings exclude figure
+captioning, which `build_datasheet` enables by default -- it is one VLM call
+per figure, and timing it would measure an LLM gateway rather than this
+library.
 
 **The two ratios are different claims, and the first one is the weaker.** The
 first answer pays for the enriched ToC as well as the section, and on a large

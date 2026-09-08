@@ -74,6 +74,28 @@ def test_leaf_sections_skips_nodes_without_a_usable_page_range():
     assert [leaf["title"] for leaf in te.iter_leaf_sections(toc)] == ["Good"]
 
 
+@pytest.mark.parametrize(
+    ("size", "expected_index"),
+    [
+        # Nearest-rank p90 is ceil(0.9 * n). `round` is banker's rounding, so
+        # it answers 4 for n=5 (an 80th percentile) while agreeing with ceil
+        # at n=15 -- a silent, size-dependent understatement in a published
+        # column.
+        (5, 5),
+        (15, 14),
+        (1, 1),
+        (10, 9),
+    ],
+)
+def test_percentile_is_nearest_rank_at_every_size(size, expected_index):
+    values = list(range(1, size + 1))
+    assert te._percentile(values, 0.9) == expected_index
+
+
+def test_percentile_of_nothing_is_zero():
+    assert te._percentile([], 0.9) == 0
+
+
 def test_leaf_sections_handles_an_empty_toc():
     assert list(te.iter_leaf_sections([])) == []
 
@@ -206,6 +228,32 @@ def test_render_markdown_lists_every_document_and_the_headline():
     assert "further" in text.lower()
 
 
+def test_render_markdown_records_documents_that_failed_to_measure():
+    """A truncated table must say it is truncated.
+
+    The documented command writes straight to ``docs/token-economy.md``, so a
+    run against a half-fetched corpus would otherwise replace the published
+    results with a quietly shorter table.
+    """
+    m = _measurement(section_tokens=[500])
+    summary = te.summarize([m])
+    text = te.render_markdown([m], summary, failures=["broken.pdf: not a PDF"])
+    assert "broken.pdf" in text
+    assert "not a PDF" in text
+
+
+def test_render_markdown_reproduces_the_flags_the_run_actually_used():
+    """The emitted command must regenerate *this* table.
+
+    Without ``--allow-editable-reuse`` a checkout reports no warm timing at
+    all, so a block omitting it cannot reproduce a table showing cache hits.
+    """
+    m = _measurement(section_tokens=[500])
+    summary = te.summarize([m])
+    text = te.render_markdown([m], summary, extra_flags=["--allow-editable-reuse"])
+    assert "--allow-editable-reuse" in text
+
+
 def test_render_markdown_states_what_the_numbers_do_not_claim():
     """The caveats travel with the table, not only in the README.
 
@@ -220,6 +268,11 @@ def test_render_markdown_states_what_the_numbers_do_not_claim():
     assert "conservative" in lowered
     # And it says nothing about whether the answer is right.
     assert "accuracy" in lowered or "correct" in lowered
+    # The build timings exclude figure captioning, which is on by default.
+    assert "caption" in lowered
+    # The two token medians are medians in their own right and do not divide
+    # to the ratio; a reader must not be invited to check that arithmetic.
+    assert "median of the per-document ratios" in lowered
 
 
 # --------------------------------------------------------------------------
@@ -273,12 +326,20 @@ def test_measure_document_reports_the_warm_build_as_a_cache_hit(
     assert m.notes == []
 
 
-def test_measure_document_says_so_when_the_warm_build_was_not_a_hit(toc_pdf, tmp_path):
-    """Without ``not_editable`` this is a checkout, where reuse is disabled.
+def test_measure_document_says_so_when_the_warm_build_was_not_a_hit(
+    toc_pdf, tmp_path, monkeypatch
+):
+    """State the rule; do not merely observe that this checkout is editable.
+
+    ``test_reuse.py::test_an_editable_install_never_reuses`` says the same
+    thing in the same words. Leaning on the ambient install would make this
+    test pass for the environment's reason and fail against a wheel install,
+    where reuse is enabled and the warm pass really is a hit.
 
     The number must degrade to a stated ``n/a``, never to a fast-looking
     timing the table would present as a cache hit.
     """
+    monkeypatch.setattr("datasheetindex.tools.bound.is_editable_install", lambda: True)
     out = tmp_path / "artifacts"
     m = te.measure_document(toc_pdf, encode=_words, output_dir=str(out))
     assert m.warm_reused is False
