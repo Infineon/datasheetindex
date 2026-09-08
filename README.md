@@ -70,7 +70,9 @@ not the quotient of the two token medians above: every document is priced on
 its own and the ratios are then summarised. Build timings exclude figure
 captioning, which `build_datasheet` enables by default -- it is one VLM call
 per figure, and timing it would measure an LLM gateway rather than this
-library.
+library. The token counts are deterministic and reproduce exactly; the build
+timing is one machine's and moves by tens of percent with load, so read it as
+an order of magnitude and a cold/warm ratio.
 
 **The two ratios are different claims, and the first one is the weaker.** The
 first answer pays for the enriched ToC as well as the section, and on a large
@@ -81,13 +83,21 @@ That is 45x on a 31-page datasheet and 728x on a 784-page reference manual,
 which is the shape to expect -- the bigger the document, the more there is not
 to read.
 
-Three things this does **not** say. The baseline is the extracted text, so it
+Four things this does **not** say. The baseline is the extracted text, so it
 *understates* what attaching the PDF costs, since the pages arrive as images
 too. Nothing here measures whether the answer is right -- a cheap wrong answer
-is worth nothing, and that is what [`benchmark/`](#benchmark) is for. And one
+is worth nothing, and that is what [`benchmark/`](#benchmark) is for. One
 document of the 25 is unpriced rather than counted as a win: a 5-page diode
 datasheet with no usable ToC, where an agent falls back to `search_text` and
 this measurement does not follow it.
+
+And the table is **not independently reproducible to the byte**. The corpus is
+vendor PDFs we cannot redistribute, and as of 2026-09-08 six of the 24 fetchable
+documents -- all Texas Instruments -- have been reissued since our copies were
+captured. `docs/corpus.md` marks them, and does not refresh their checksums:
+those identify the documents these numbers were measured against, so a copy
+fetched today is a different document and may legitimately price differently.
+A re-run should land in the same place; it will not land on the same digits.
 
 ## Benchmark
 
