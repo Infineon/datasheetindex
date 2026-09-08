@@ -133,6 +133,12 @@ dev = [
     "datasheetindex[mcp]",
 ]
 
+# Not in `dev` for the same reason as `sdk` below: a plain `uv sync` is what CI
+# and the pre-commit hook run in, and nothing there needs a BPE table.
+# `scripts/token_economy.py` is the only consumer, and it prints an install
+# hint rather than traceback when the group is absent.
+bench = ["tiktoken>=0.13.0"]
+
 # Not in `dev`, so a plain `uv sync` never pulls it: the wheel unpacks to ~263 MB,
 # of which ~262 MB is a bundled `claude` CLI binary that these tests never invoke
 # (create_sdk_mcp_server is pure Python). That is 5x the layout extra, which is

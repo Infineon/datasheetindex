@@ -9,7 +9,7 @@ Agent-first parameter extraction from technical datasheets.
 ## Contents
 
 - [What it does](#what-it-does) · [Philosophy](#philosophy) · [Supported products](#supported-products)
-- [Benchmark](#benchmark) · [Links](#links)
+- [Token economy](#token-economy) · [Benchmark](#benchmark) · [Links](#links)
 - **Getting started** — [Setup](#setup) · [Development](#development) · [Input sources](#input-sources)
 - **Using it from an agent** — [Hand the MCP server to an agent](#hand-the-mcp-server-to-an-agent) · [Realize the tools without the Claude Agent SDK](#realize-the-tools-without-the-claude-agent-sdk) · [Run a local MCP server](#run-a-local-mcp-server)
 - **What the artifacts tell an agent** — [Datasheets without a ToC](#datasheets-without-a-toc) · [Knowing where the ToC came from](#knowing-where-the-toc-came-from) · [Asking for a better ToC](#asking-for-a-better-toc) · [Datasheets that cover a product family](#datasheets-that-cover-a-product-family) · [Figure indexing and captions](#figure-indexing-and-captions)
@@ -46,6 +46,39 @@ the full [Infineon product portfolio](https://www.infineon.com/cms/en/product/)
 [microcontrollers](https://www.infineon.com/cms/en/product/microcontroller/),
 power, sensors, and connectivity devices). It has no dependency on a specific
 product line or family.
+
+## Token economy
+
+The library's premise is that answering a question about a datasheet does not
+require the datasheet in context: you need the map `build_datasheet` returns,
+and the one section you then read. `scripts/token_economy.py` measures that
+against the [25-document corpus](./docs/corpus.md) -- no model, no network, no
+credentials. Full results, per document, are in
+[`docs/token-economy.md`](./docs/token-economy.md).
+
+| | Median |
+|---|---|
+| Whole document in context | 33,973 tokens |
+| First answer (map + one section) | 9,637 tokens, **3.1x** cheaper |
+| Every further answer about the same part | 625 tokens, **54x** cheaper |
+| Build | 7.3s cold, 0.01s warm (cached artifact) |
+
+**The two ratios are different claims, and the first one is the weaker.** The
+first answer pays for the enriched ToC as well as the section, and on a large
+document that map is most of the cost -- for the 322-page PIC16F887 it is half
+the document's tokens on its own. The compounding is in the second row: the
+map is paid once, so the tenth question about a part costs a section alone.
+That is 45x on a 31-page datasheet and 728x on a 784-page reference manual,
+which is the shape to expect -- the bigger the document, the more there is not
+to read.
+
+Three things this does **not** say. The baseline is the extracted text, so it
+*understates* what attaching the PDF costs, since the pages arrive as images
+too. Nothing here measures whether the answer is right -- a cheap wrong answer
+is worth nothing, and that is what [`benchmark/`](#benchmark) is for. And one
+document of the 25 is unpriced rather than counted as a win: a 5-page diode
+datasheet with no usable ToC, where an agent falls back to `search_text` and
+this measurement does not follow it.
 
 ## Benchmark
 
@@ -148,6 +181,21 @@ uv run ty check            # type check
 The pre-commit pytest hook runs the fast subset only:
 `uv run pytest -q -m "not integration and not real_pdf"`. Run
 `uv run pytest` for the full suite, including real-PDF and integration tests.
+
+To re-measure the [token economy](#token-economy) numbers, fetch the corpus as
+described in [`docs/corpus.md`](./docs/corpus.md) and run:
+
+```bash
+uv run --group bench python scripts/token_economy.py \
+    --corpus <dir> --markdown docs/token-economy.md
+```
+
+`tiktoken` lives in the `bench` dependency-group rather than `dev`, so a plain
+`uv sync` -- what CI and the pre-commit hook run in -- does not pull it. Note
+that artifact reuse is disabled on an editable install by design, so a run from
+a checkout reports no warm-build timing unless you pass
+`--allow-editable-reuse`, which measures the cache path an installed consumer
+takes.
 
 ## Input sources
 
@@ -601,6 +649,9 @@ src/datasheetindex/
     cli.py                 # CLI entry point
     index.py               # Main DatasheetIndex class
     models.py              # Data models
+
+scripts/
+    token_economy.py       # Token-economy measurement (see "Token economy")
 ```
 
 ## License

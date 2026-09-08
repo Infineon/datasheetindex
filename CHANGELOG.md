@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **A token-economy measurement, and the numbers it produces.** `scripts/token_economy.py` prices, per document and with no model or network involved, what an answer costs against what the document costs: the whole page-matched text, the manifest `build_datasheet` returns, and what `get_section_text` returns for each leaf ToC section. Committed results for the 25-document corpus are in `docs/token-economy.md`, the corpus itself is identified by page count and SHA-256 in `docs/corpus.md`, and the README carries the headline. `tiktoken` sits in a new `bench` dependency-group rather than `dev`, so a plain `uv sync` -- what CI and the pre-commit hook run in -- does not pull it.
+- **Two ratios, because they are two different claims.** The first answer about a document costs the manifest plus one section: median 9,637 tokens against 33,973 for the document, only **3.1x**. Every further answer about the same part costs a section alone, since the manifest is already in context and the artifact already on disk: median 625 tokens, **54x**, rising from 45x on a 31-page datasheet to 728x on a 784-page reference manual. Reporting only the first would understate the library on the workload it exists for; reporting only the second would overstate the first question.
+
+### Design notes
+- **The manifest, not the section, dominates the first answer, and the table says so.** For the 322-page PIC16F887 the enriched ToC is 92,177 tokens against 185,565 for the whole document -- half of it. That is why the first-answer ratio is 3.1x rather than the order of magnitude the premise suggests, and it is the number to attack if the first question's cost ever matters more than the tenth's.
+- **One document of 25 is unpriced rather than counted as a win.** `vishay_1n4001`, a 5-page diode datasheet, has no usable ToC, so there is no section to price; an agent there falls back to `search_text`, whose cost this does not measure. Pricing it at `full / manifest` would have flattered the median.
+- **The baseline is deliberately conservative.** `Full doc` is the extracted text, not the PDF: attaching the document itself costs more, because the pages arrive as images too. A ratio computed against the larger, more realistic baseline would be bigger, and less defensible.
+- **It measures cost, never correctness.** A cheap wrong answer is worth nothing. Accuracy is `benchmark/`'s job, and it needs ground truth this script deliberately does not have -- which is also why no accuracy claim appears next to these numbers.
+- **Artifact reuse is disabled on an editable install, so the warm-build number is unmeasurable from a checkout.** Rather than reporting a silent `n/a`, the script names the reason and offers `--allow-editable-reuse`, which disables that one rule so the warm pass exercises the on-disk cache an installed consumer takes. The cold pass forces a rebuild regardless, and the warm pass runs through a *fresh* instance -- reusing the first would time `build_datasheet`'s in-memory short circuit and call it a cache hit. `warm_reused` records which happened, and a row that was not a hit prints no warm timing at all.
+
 ## [0.37.0] - 2026-08-31
 
 ### Added
