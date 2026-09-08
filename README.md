@@ -63,7 +63,7 @@ credentials. Full results, per document, are in
 | Every further answer about the same part | 625 tokens |
 | First answer vs. the document | **3.1x** cheaper |
 | Further answer vs. the document | **54x** cheaper |
-| Build | 6.3s cold, 0.01s warm (cached artifact) |
+| Build | ~6s cold, 0.01s warm (cached artifact) |
 
 Each ratio is the **median of the per-document ratios**, so it is deliberately
 not the quotient of the two token medians above: every document is priced on

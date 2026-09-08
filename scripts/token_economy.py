@@ -467,6 +467,12 @@ def render_markdown(
         "With the `[llm]` extra configured and a figure-heavy datasheet, "
         "expect builds well above the numbers here.",
         "",
+        "**The token counts are deterministic; the build timings are not.** "
+        "Re-running reproduces every token count exactly, but the timings are "
+        "one machine's, on one run, and move by tens of percent with load and "
+        "hardware -- treat them as an order of magnitude and a cold/warm "
+        "ratio, not as figures to compare across machines.",
+        "",
         "**`Manifest` includes the artifact paths the agent is really sent**, "
         "which are absolute. The same document measured under a longer "
         "`--artifacts` path therefore counts a token or two more -- "

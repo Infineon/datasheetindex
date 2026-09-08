@@ -5,38 +5,38 @@ Tokens counted with the `o200k_base` encoding. 25 documents, 24 priced.
 
 | Document | Pages | Full doc | Manifest | Section (med) | Section (p90) | First answer | vs full | Further answer | vs full | Build (cold) | Build (warm) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| vishay_1n4001.pdf | 5 | 2,683 | 386 | 0 | 0 | n/a | n/a | n/a | n/a | 1.1s | 0.01s |
-| raspi_pico.pdf | 31 | 13,856 | 4,917 | 307 | 877 | 5,224 | 2.7x | 307 | 45x | 4.7s | 0.03s |
-| ti_ina219.pdf | 38 | 23,860 | 7,100 | 634 | 1,050 | 7,734 | 3.1x | 634 | 38x | 4.3s | 0.01s |
-| ti_ne555.pdf | 39 | 17,830 | 5,561 | 556 | 941 | 6,117 | 2.9x | 556 | 32x | 4.7s | 0.01s |
-| ti_sn74hc595.pdf | 41 | 16,273 | 3,437 | 532 | 926 | 3,969 | 4.1x | 532 | 31x | 4.5s | 0.01s |
-| ti_tcan1044a.pdf | 42 | 20,040 | 7,502 | 545 | 945 | 8,047 | 2.5x | 545 | 37x | 4.2s | 0.01s |
+| vishay_1n4001.pdf | 5 | 2,683 | 386 | 0 | 0 | n/a | n/a | n/a | n/a | 0.9s | 0.01s |
+| raspi_pico.pdf | 31 | 13,856 | 4,917 | 307 | 877 | 5,224 | 2.7x | 307 | 45x | 5.0s | 0.03s |
+| ti_ina219.pdf | 38 | 23,860 | 7,100 | 634 | 1,050 | 7,734 | 3.1x | 634 | 38x | 5.1s | 0.01s |
+| ti_ne555.pdf | 39 | 17,830 | 5,561 | 556 | 941 | 6,117 | 2.9x | 556 | 32x | 4.1s | 0.01s |
+| ti_sn74hc595.pdf | 41 | 16,273 | 3,437 | 532 | 926 | 3,969 | 4.1x | 532 | 31x | 4.4s | 0.01s |
+| ti_tcan1044a.pdf | 42 | 20,040 | 7,502 | 545 | 945 | 8,047 | 2.5x | 545 | 37x | 4.0s | 0.01s |
 | ti_lm317.pdf | 44 | 15,411 | 6,831 | 408 | 746 | 7,239 | 2.1x | 408 | 38x | 4.8s | 0.01s |
 | ti_opa2340.pdf | 48 | 23,025 | 6,856 | 786 | 1,089 | 7,642 | 3.0x | 786 | 29x | 4.7s | 0.01s |
-| bosch_bmp280.pdf | 49 | 20,829 | 7,851 | 609 | 744 | 8,460 | 2.5x | 609 | 34x | 5.0s | 0.01s |
-| ti_tps54360.pdf | 50 | 26,643 | 8,363 | 760 | 1,242 | 9,123 | 2.9x | 760 | 35x | 6.3s | 0.02s |
-| ti_ads1115.pdf | 57 | 33,973 | 10,096 | 776 | 992 | 10,872 | 3.1x | 776 | 44x | 5.9s | 0.01s |
-| bosch_bme280.pdf | 60 | 27,975 | 10,722 | 550 | 792 | 11,272 | 2.5x | 550 | 51x | 6.3s | 0.03s |
+| bosch_bmp280.pdf | 49 | 20,829 | 7,851 | 609 | 744 | 8,460 | 2.5x | 609 | 34x | 4.7s | 0.01s |
+| ti_tps54360.pdf | 50 | 26,643 | 8,363 | 760 | 1,242 | 9,123 | 2.9x | 760 | 35x | 6.0s | 0.01s |
+| ti_ads1115.pdf | 57 | 33,973 | 10,096 | 776 | 992 | 10,872 | 3.1x | 776 | 44x | 5.8s | 0.01s |
+| bosch_bme280.pdf | 60 | 27,975 | 10,722 | 550 | 792 | 11,272 | 2.5x | 550 | 51x | 5.9s | 0.02s |
 | ti_lm358.pdf | 68 | 46,506 | 4,931 | 778 | 1,630 | 5,709 | 8.1x | 778 | 60x | 7.2s | 0.01s |
-| ti_cc2640r2f.pdf | 72 | 37,132 | 9,463 | 689 | 992 | 10,152 | 3.7x | 689 | 54x | 6.8s | 0.01s |
-| esp32c3_ds.pdf | 76 | 32,595 | 12,899 | 462 | 746 | 13,361 | 2.4x | 462 | 71x | 5.6s | 0.01s |
-| esp32_ds.pdf | 78 | 40,373 | 9,958 | 617 | 1,391 | 10,575 | 3.8x | 617 | 65x | 8.0s | 0.01s |
-| infineon_psc3.pdf | 90 | 55,792 | 7,766 | 737 | 1,839 | 8,503 | 6.6x | 737 | 76x | 9.3s | 0.02s |
-| ti_tlv9061.pdf | 99 | 41,159 | 5,369 | 750 | 1,944 | 6,119 | 6.7x | 750 | 55x | 10.7s | 0.02s |
-| esp8266_trm.pdf | 111 | 53,385 | 13,715 | 515 | 912 | 14,230 | 3.8x | 515 | 104x | 6.1s | 0.01s |
-| bosch_bmi160.pdf | 114 | 57,582 | 16,811 | 581 | 827 | 17,392 | 3.3x | 581 | 99x | 34.4s | 0.01s |
-| ti_msp430f5529.pdf | 143 | 101,951 | 20,469 | 906 | 1,568 | 21,375 | 4.8x | 906 | 113x | 11.6s | 0.01s |
-| micro_atmega328.pdf | 294 | 199,004 | 69,229 | 742 | 1,062 | 69,971 | 2.8x | 742 | 268x | 18.9s | 0.03s |
-| micro_pic16f887.pdf | 322 | 185,565 | 92,177 | 680 | 1,047 | 92,857 | 2.0x | 680 | 273x | 29.4s | 0.04s |
-| raspi_rp2040.pdf | 642 | 400,095 | 46,518 | 689 | 2,796 | 47,207 | 8.5x | 689 | 581x | 41.6s | 0.02s |
-| esp32_trm.pdf | 784 | 401,974 | 64,763 | 552 | 1,512 | 65,315 | 6.2x | 552 | 728x | 82.4s | 0.03s |
+| ti_cc2640r2f.pdf | 72 | 37,132 | 9,463 | 689 | 992 | 10,152 | 3.7x | 689 | 54x | 10.9s | 0.01s |
+| esp32c3_ds.pdf | 76 | 32,595 | 12,899 | 462 | 746 | 13,361 | 2.4x | 462 | 71x | 5.7s | 0.01s |
+| esp32_ds.pdf | 78 | 40,373 | 9,958 | 617 | 1,391 | 10,575 | 3.8x | 617 | 65x | 6.5s | 0.01s |
+| infineon_psc3.pdf | 90 | 55,792 | 7,766 | 737 | 1,839 | 8,503 | 6.6x | 737 | 76x | 9.6s | 0.01s |
+| ti_tlv9061.pdf | 99 | 41,159 | 5,369 | 750 | 1,944 | 6,119 | 6.7x | 750 | 55x | 9.8s | 0.02s |
+| esp8266_trm.pdf | 111 | 53,385 | 13,715 | 515 | 912 | 14,230 | 3.8x | 515 | 104x | 6.5s | 0.01s |
+| bosch_bmi160.pdf | 114 | 57,582 | 16,811 | 581 | 827 | 17,392 | 3.3x | 581 | 99x | 28.1s | 0.01s |
+| ti_msp430f5529.pdf | 143 | 101,951 | 20,469 | 906 | 1,568 | 21,375 | 4.8x | 906 | 113x | 11.3s | 0.02s |
+| micro_atmega328.pdf | 294 | 199,004 | 69,229 | 742 | 1,062 | 69,971 | 2.8x | 742 | 268x | 18.3s | 0.03s |
+| micro_pic16f887.pdf | 322 | 185,565 | 92,177 | 680 | 1,047 | 92,857 | 2.0x | 680 | 273x | 30.3s | 0.03s |
+| raspi_rp2040.pdf | 642 | 400,095 | 46,518 | 689 | 2,796 | 47,207 | 8.5x | 689 | 581x | 36.8s | 0.03s |
+| esp32_trm.pdf | 784 | 401,974 | 64,763 | 552 | 1,512 | 65,315 | 6.2x | 552 | 728x | 86.9s | 0.03s |
 
 ## Headline
 
 - Median full document: **33,973** tokens
 - Median **first** answer (manifest + one section): **9,637** tokens, **3.1x** cheaper than the document (range 2.0x-8.5x)
 - Median **further** answer about the same part (one section, manifest already in context): **625** tokens, **54x** cheaper
-- Median build: **6.30s** cold, **0.01s** warm (25 of 25 cache hits)
+- Median build: **6.01s** cold, **0.01s** warm (25 of 25 cache hits)
 
 ## How to read this
 
@@ -47,6 +47,8 @@ Tokens counted with the `o200k_base` encoding. 25 documents, 24 priced.
 **The ratios are medians of per-document ratios, not the quotient of the medians above.** Each document is priced on its own and the ratios are then summarised, which is why dividing the two token medians gives a different -- and less representative -- number: a median of the per-document ratios is not the ratio of the medians, and the token medians are taken over different sets, since an unpriced document still has a full-document count.
 
 **Build timings exclude figure captioning**, which `build_datasheet` enables by default. Captioning is one VLM call per figure, so including it would time an LLM gateway rather than this library, and would make the number depend on whether credentials are present. With the `[llm]` extra configured and a figure-heavy datasheet, expect builds well above the numbers here.
+
+**The token counts are deterministic; the build timings are not.** Re-running reproduces every token count exactly, but the timings are one machine's, on one run, and move by tens of percent with load and hardware -- treat them as an order of magnitude and a cold/warm ratio, not as figures to compare across machines.
 
 **`Manifest` includes the artifact paths the agent is really sent**, which are absolute. The same document measured under a longer `--artifacts` path therefore counts a token or two more -- immaterial to the ratios, but it does mean these counts are not byte-reproducible across machines.
 

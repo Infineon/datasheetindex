@@ -270,6 +270,8 @@ def test_render_markdown_states_what_the_numbers_do_not_claim():
     assert "accuracy" in lowered or "correct" in lowered
     # The build timings exclude figure captioning, which is on by default.
     assert "caption" in lowered
+    # And they are one machine's, unlike the token counts.
+    assert "one machine" in lowered
     # The two token medians are medians in their own right and do not divide
     # to the ratio; a reader must not be invited to check that arithmetic.
     assert "median of the per-document ratios" in lowered
