@@ -507,6 +507,33 @@ class TestOrderingSectionSelection:
         assert found is not None
         assert found.start_page == 31
 
+    def test_the_per_part_table_beats_the_marking_legend(self):
+        """micro_pic16f887's shape. The marking legend classifies `ordering`
+        too, but it is a level-2 subsection of the packaging chapter and maps
+        markings to part numbers -- it is not the per-part parameter table.
+        Microchip's is "Product Identification System" at the end of the
+        document, and the note must point there."""
+        from datasheetindex.tools.bound import _ordering_section
+
+        nodes = [
+            TocNode(
+                title="19.0 Packaging Information",
+                level=1,
+                start_page=298,
+                nodes=[
+                    TocNode(
+                        title="19.1 Package Marking Information",
+                        level=2,
+                        start_page=298,
+                    )
+                ],
+            ),
+            TocNode(title="Product Identification System", level=1, start_page=320),
+        ]
+        found = _ordering_section(nodes)
+        assert found is not None
+        assert found.start_page == 320
+
     def test_returns_none_when_no_section_classifies(self):
         from datasheetindex.tools.bound import _ordering_section
 

@@ -158,6 +158,22 @@ def test_classify_title_negative(title):
         ("Revision History (continued)", "revision"),
         ("Ordering Information (Continued)", "ordering"),
         ("Packaging Information (continued)", "mechanical"),
+        # Punctuation *after* the closing paren must not defeat the strip:
+        # `_CONTINUATION_RE` is anchored on the end of the string, so a
+        # trailing period or colon -- ordinary in vendor headings -- used to
+        # leave "(continued" in place and drop the title back to unclassified.
+        ("Ordering Information (Continued).", "ordering"),
+        ("Ordering Information (Continued):", "ordering"),
+        ("Revision History (continued) -", "revision"),
+        # The apostrophe spellings, which the comment claims and the pattern
+        # did not match. Both the straight and the typographic apostrophe.
+        ("Package Marking Information (Cont'd)", "ordering"),
+        ("Package Marking Information (Cont\u2019d)", "ordering"),
+        ("Revision History (cont.)", "revision"),
+        # Microchip's per-part table. The existing `product identification`
+        # branch is anchored, so the trailing "System" defeated it.
+        ("Product Identification System", "ordering"),
+        ("Product Identification", "ordering"),
     ],
 )
 def test_classify_title_with_prefixes_and_punctuation(title, expected):

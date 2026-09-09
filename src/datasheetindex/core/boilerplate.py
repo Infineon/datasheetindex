@@ -7,13 +7,13 @@ title-only and pattern-based -- no LLM call, no text scanning -- because
 free in the happy path.
 
 Categories:
-    legal     -- disclaimers, important notices, trademarks, copyright, patents
-    ordering  -- ordering info, part numbers, marking information
+    legal      -- disclaimers, important notices, trademarks, copyright, patents
+    ordering   -- ordering info, part numbers, marking information
     mechanical -- package drawings, outlines, dimensions, tape-and-reel
-    revision  -- revision/change/document history
-    contact   -- sales offices, support contacts, "where to buy"
-    toc       -- table of contents, list of figures/tables, index
-    glossary  -- glossary, abbreviations, acronyms, terminology
+    revision   -- revision/change/document history
+    contact    -- sales offices, support contacts, "where to buy"
+    toc        -- table of contents, list of figures/tables, index
+    glossary   -- glossary, abbreviations, acronyms, terminology
 
 Scope: English titles only. Non-ASCII headings (e.g. "免責事項", "Mentions
 légales") are intentionally not classified -- adding multilingual coverage
@@ -80,7 +80,12 @@ _BOILERPLATE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
             r"|order(ing)?\s+(information|number|numbers)"
             r"|part\s+(number|numbers|numbering)(\s+information)?"
             r"|marking\s+(information|codes?)"
-            r"|product\s+(identification|marking|naming)"
+            # `system` is optional because Microchip writes the full
+            # "Product Identification System" and the pattern is anchored --
+            # without it the branch missed the per-part table on every
+            # Microchip datasheet, and `_ordering_section` aimed the
+            # multi-variant note at the package-marking legend instead.
+            r"|product\s+(identification(\s+system)?|marking|naming)"
             r"|device\s+(marking|ordering)"
             # Sibling of `device marking`. The legend maps package markings
             # back to part numbers, so it is per-part identifying information
@@ -184,7 +189,12 @@ _BOILERPLATE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 # Stripped here rather than in one pattern so it holds for all seven
 # categories; `cont.` and `cont'd` are the other spellings seen in the wild.
 _CONTINUATION_RE = re.compile(
-    r"\s*[\(\[]\s*(?:continued|cont(?:inue)?d?|cont\.)\s*[\)\]]\s*$",
+    # The trailing `[.,:;-]*` is load-bearing: the punctuation strip below
+    # removes `)` as well, so if this pattern did not absorb a trailing
+    # period or colon itself, that strip would take the closing paren with it
+    # and leave "(continued" behind for good.
+    r"\s*[\(\[]\s*(?:continued|cont(?:inue)?d?|cont['\u2019]d|cont\.)"
+    r"\s*[\)\]]\s*[.,:;\u2013-]*\s*$",
     re.IGNORECASE,
 )
 
@@ -203,8 +213,18 @@ def _normalize_title(title: str) -> str:
         if new == s:
             break
         s = new
-    s = _CONTINUATION_RE.sub("", s)
-    s = s.strip(" \t:.,-)")
+    # Alternated to a fixed point, not applied once each. `_CONTINUATION_RE`
+    # is anchored on the end of the string, so a trailing period or colon --
+    # ordinary in vendor headings -- sits between it and the paren it needs to
+    # see, and a single pass would leave "(continued" in place and drop the
+    # title back to unclassified. Stripping punctuation first is not enough on
+    # its own either: removing the suffix can expose more punctuation before
+    # it ("Ordering Information: (Continued)").
+    while True:
+        stripped = _CONTINUATION_RE.sub("", s).strip(" \t:.,-)")
+        if stripped == s:
+            break
+        s = stripped
     return s.lower()
 
 
