@@ -39,6 +39,12 @@ from datasheetindex.models import TocNode
         ("Mechanical, Packaging, and Orderable Information", "ordering"),
         ("Orderable Information", "ordering"),
         ("Package Option Addendum", "ordering"),
+        # The marking legend maps package markings back to part numbers, so it
+        # is per-part identifying information and must ride `ordering` -- the
+        # only category multi_variant lifts. Sibling of the existing
+        # "Device Marking" branch; Microchip spells it this way.
+        ("Package Marking Information", "ordering"),
+        ("Package Marking", "ordering"),
         # mechanical -- package drawings and dimensions, no part numbers
         ("Packaging Information", "mechanical"),
         ("Packaging", "mechanical"),
@@ -143,6 +149,15 @@ def test_classify_title_negative(title):
         # Mixed case
         ("REVISION HISTORY", "revision"),
         ("ordering information", "ordering"),
+        # A "(continued)" suffix marks the same section resumed on a later
+        # page and must not change what it is. Microchip repeats the heading
+        # this way -- micro_pic16f887 carries "19.1 Package Marking
+        # Information (Continued)" twice -- and an anchored pattern misses
+        # every one of them, so the continuation inherits its parent instead.
+        ("19.1 Package Marking Information (Continued)", "ordering"),
+        ("Revision History (continued)", "revision"),
+        ("Ordering Information (Continued)", "ordering"),
+        ("Packaging Information (continued)", "mechanical"),
     ],
 )
 def test_classify_title_with_prefixes_and_punctuation(title, expected):
@@ -331,7 +346,7 @@ class TestMechanicalCategory:
         flag_boilerplate(nodes, multi_variant=False)
         assert nodes[0].boilerplate_category == "ordering"
 
-    def test_a_substantive_subsection_does_not_inherit_mechanical(self):
+    def test_a_classified_subsection_keeps_its_own_category(self):
         """A node's own classification wins over the parent's, as for every
         other category."""
         nodes = [
@@ -344,6 +359,49 @@ class TestMechanicalCategory:
         ]
         flag_boilerplate(nodes)
         assert nodes[0].nodes[0].boilerplate_category == "revision"
+
+    def test_an_unclassified_subsection_inherits_mechanical(self):
+        """Inheritance is the documented design, and under a packaging chapter
+        it is right: the unlabelled subsections there are drawings. Pinned so
+        the behaviour is a decision rather than an accident -- measured across
+        the corpus, every inheriting child is a genuine drawing section
+        ("Package dimensions", "Package Details", the MA/PN package codes)."""
+        nodes = [
+            TocNode(
+                title="11 Packaging Information",
+                level=1,
+                start_page=30,
+                nodes=[TocNode(title="11.2 Package Details", level=2, start_page=32)],
+            )
+        ]
+        flag_boilerplate(nodes)
+        assert nodes[0].nodes[0].boilerplate_category == "mechanical"
+
+    def test_the_marking_legend_is_lifted_on_a_family_datasheet(self):
+        """The one inheriting child that is not a drawing. On micro_pic16f887
+        -- a family part -- "19.1 Package Marking Information" sits under
+        "19.0 Packaging Information" and used to inherit `mechanical`, which
+        multi_variant does not lift, so the legend mapping markings to variants
+        carried a deprioritize hint on exactly the datasheet that needs it."""
+        nodes = [
+            TocNode(
+                title="19.0 Packaging Information",
+                level=1,
+                start_page=298,
+                nodes=[
+                    TocNode(
+                        title="19.1 Package Marking Information",
+                        level=2,
+                        start_page=298,
+                    ),
+                    TocNode(title="19.2 Package Details", level=2, start_page=301),
+                ],
+            )
+        ]
+        flag_boilerplate(nodes, multi_variant=True)
+        assert nodes[0].boilerplate_category == "mechanical"
+        assert nodes[0].nodes[0].boilerplate_category == ""
+        assert nodes[0].nodes[1].boilerplate_category == "mechanical"
 
 
 def test_suppressed_ordering_does_not_inherit_its_parent_category():

@@ -82,6 +82,13 @@ _BOILERPLATE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
             r"|marking\s+(information|codes?)"
             r"|product\s+(identification|marking|naming)"
             r"|device\s+(marking|ordering)"
+            # Sibling of `device marking`. The legend maps package markings
+            # back to part numbers, so it is per-part identifying information
+            # -- it must ride `ordering`, the only category multi_variant
+            # lifts. It would otherwise inherit `mechanical` from the
+            # packaging chapter it sits under and keep a deprioritize hint on
+            # a family datasheet: observed on micro_pic16f887.
+            r"|package\s+marking(\s+information)?"
             r"|how\s+to\s+order"
             # TI's compound chapter heading, and the two orderable-table
             # titles nested under it. `ordering` rather than `mechanical`
@@ -169,6 +176,19 @@ _BOILERPLATE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 
+# A trailing "(continued)" marks the same section resumed on a later page, so
+# it must not change what the section *is*. Microchip repeats the heading that
+# way -- micro_pic16f887 carries "19.1 Package Marking Information (Continued)"
+# twice -- and against an anchored pattern every repeat missed, leaving the
+# continuation to inherit its parent's category instead of taking its own.
+# Stripped here rather than in one pattern so it holds for all seven
+# categories; `cont.` and `cont'd` are the other spellings seen in the wild.
+_CONTINUATION_RE = re.compile(
+    r"\s*[\(\[]\s*(?:continued|cont(?:inue)?d?|cont\.)\s*[\)\]]\s*$",
+    re.IGNORECASE,
+)
+
+
 # Despite the underscore, this has a second consumer outside the module:
 # `core/preamble.py` imports it to match features headings (see the comment
 # above its import for why). Changing what this strips changes that match too,
@@ -183,6 +203,7 @@ def _normalize_title(title: str) -> str:
         if new == s:
             break
         s = new
+    s = _CONTINUATION_RE.sub("", s)
     s = s.strip(" \t:.,-)")
     return s.lower()
 
