@@ -31,6 +31,24 @@ from datasheetindex.models import TocNode
         ("Marking Information", "ordering"),
         ("Device Marking", "ordering"),
         ("How to Order", "ordering"),
+        # TI writes the orderable part-number addendum and the package
+        # drawings under one compound heading. It classifies as `ordering`,
+        # not `mechanical`, because the addendum is the per-variant table:
+        # `flag_boilerplate` must be able to suppress it on a family
+        # datasheet, and `_ordering_section` must be able to find it.
+        ("Mechanical, Packaging, and Orderable Information", "ordering"),
+        ("Orderable Information", "ordering"),
+        ("Package Option Addendum", "ordering"),
+        # mechanical -- package drawings and dimensions, no part numbers
+        ("Packaging Information", "mechanical"),
+        ("Packaging", "mechanical"),
+        ("Package Outline", "mechanical"),
+        ("Package Dimensions", "mechanical"),
+        ("Package Drawings", "mechanical"),
+        ("Mechanical Data", "mechanical"),
+        ("Mechanical Drawings", "mechanical"),
+        ("Tape and Reel Information", "mechanical"),
+        ("Thermal Pad Mechanical Data", "mechanical"),
         # revision
         ("Revision History", "revision"),
         ("Document History", "revision"),
@@ -78,6 +96,15 @@ def test_classify_title_positive(title, expected):
         "Functional Description",
         "Application Information",
         "Order of Operations",  # contains "order" but not ordering info
+        # `mechanical` regression, measured on the corpus. Raspberry Pi puts
+        # "2.3. Recommended operating conditions" under "2. Mechanical
+        # specification", and RP2040's "Chapter 5. Electrical and Mechanical"
+        # is the electrical chapter outright. Flagging either would make a
+        # core parameter section inherit a deprioritize hint.
+        "Mechanical specification",
+        "Mechanical Specifications",
+        "Electrical and Mechanical",
+        "Mechanical and Electrical Characteristics",
         "Revision A Functional Updates",  # describes content for rev A, not history
         # Bare-word regression: these used to false-match `legal` because the
         # qualifier was optional. They are common substantive titles in real
@@ -250,6 +277,73 @@ class TestOrderingOnMultiVariantDatasheets:
         nodes = [TocNode(title="Ordering Information", level=1, start_page=9)]
         flag_boilerplate(nodes)
         assert nodes[0].boilerplate_category == "ordering"
+
+
+class TestMechanicalCategory:
+    """Package drawings are boilerplate on every datasheet, family or not.
+
+    Split from `ordering` because the two are read for different questions:
+    `ordering` answers "which part number", `mechanical` answers "what are the
+    package dimensions". Only `ordering` is per-variant authoritative, so only
+    `ordering` is suppressed on a family datasheet.
+    """
+
+    def test_mechanical_is_flagged_on_a_single_part_datasheet(self):
+        nodes = [TocNode(title="11 Packaging Information", level=1, start_page=30)]
+        flag_boilerplate(nodes, multi_variant=False)
+        assert nodes[0].boilerplate_category == "mechanical"
+
+    def test_mechanical_stays_flagged_on_a_multi_variant_datasheet(self):
+        """Drawings are not the per-part table; the addendum is, and that is
+        `ordering`."""
+        nodes = [TocNode(title="11 Packaging Information", level=1, start_page=30)]
+        flag_boilerplate(nodes, multi_variant=True)
+        assert nodes[0].boilerplate_category == "mechanical"
+
+    def test_the_ti_compound_section_is_suppressed_on_a_family_datasheet(self):
+        """The observed TI shape: one chapter carrying both, 12 of 24 corpus
+        documents. Suppression must reach it, or the orderable addendum is
+        flagged skippable on exactly the datasheets that need it."""
+        nodes = [
+            TocNode(
+                title="11 Mechanical, Packaging, and Orderable Information",
+                level=1,
+                start_page=31,
+                nodes=[
+                    TocNode(
+                        title="11.1 Package Option Addendum", level=2, start_page=32
+                    )
+                ],
+            )
+        ]
+        flag_boilerplate(nodes, multi_variant=True)
+        assert nodes[0].boilerplate_category == ""
+        assert nodes[0].nodes[0].boilerplate_category == ""
+
+    def test_the_ti_compound_section_is_flagged_on_a_single_part_datasheet(self):
+        nodes = [
+            TocNode(
+                title="11 Mechanical, Packaging, and Orderable Information",
+                level=1,
+                start_page=31,
+            )
+        ]
+        flag_boilerplate(nodes, multi_variant=False)
+        assert nodes[0].boilerplate_category == "ordering"
+
+    def test_a_substantive_subsection_does_not_inherit_mechanical(self):
+        """A node's own classification wins over the parent's, as for every
+        other category."""
+        nodes = [
+            TocNode(
+                title="11 Packaging Information",
+                level=1,
+                start_page=30,
+                nodes=[TocNode(title="11.1 Revision History", level=2, start_page=34)],
+            )
+        ]
+        flag_boilerplate(nodes)
+        assert nodes[0].nodes[0].boilerplate_category == "revision"
 
 
 def test_suppressed_ordering_does_not_inherit_its_parent_category():

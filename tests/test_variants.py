@@ -489,6 +489,24 @@ class TestOrderingSectionSelection:
         assert found is not None
         assert found.start_page == 69
 
+    def test_the_ti_compound_chapter_is_found(self):
+        """TI names the chapter "Mechanical, Packaging, and Orderable
+        Information"; the per-part addendum is inside it, so the note must
+        point there."""
+        from datasheetindex.tools.bound import _ordering_section
+
+        nodes = [
+            TocNode(title="1 Features", level=1, start_page=1),
+            TocNode(
+                title="11 Mechanical, Packaging, and Orderable Information",
+                level=1,
+                start_page=31,
+            ),
+        ]
+        found = _ordering_section(nodes)
+        assert found is not None
+        assert found.start_page == 31
+
     def test_returns_none_when_no_section_classifies(self):
         from datasheetindex.tools.bound import _ordering_section
 

@@ -9,6 +9,7 @@ free in the happy path.
 Categories:
     legal     -- disclaimers, important notices, trademarks, copyright, patents
     ordering  -- ordering info, part numbers, marking information
+    mechanical -- package drawings, outlines, dimensions, tape-and-reel
     revision  -- revision/change/document history
     contact   -- sales offices, support contacts, "where to buy"
     toc       -- table of contents, list of figures/tables, index
@@ -82,6 +83,39 @@ _BOILERPLATE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
             r"|product\s+(identification|marking|naming)"
             r"|device\s+(marking|ordering)"
             r"|how\s+to\s+order"
+            # TI's compound chapter heading, and the two orderable-table
+            # titles nested under it. `ordering` rather than `mechanical`
+            # even though the drawings live there too: this is the branch
+            # `flag_boilerplate` suppresses on a family datasheet and the one
+            # `_ordering_section` looks for, and the per-part addendum is
+            # what both need to reach. Measured on 12 of 24 corpus documents.
+            r"|mechanical,?\s+packaging,?\s+and\s+orderable\s+information"
+            r"|orderable\s+information"
+            r"|package\s+option\s+addendum"
+            r")$"
+        ),
+    ),
+    (
+        "mechanical",
+        re.compile(
+            # Package drawings and dimensions -- reference material an agent
+            # should reach only for a mechanical question, kept apart from
+            # `ordering` because the two answer different questions and only
+            # `ordering` is per-variant authoritative.
+            #
+            # Deliberately narrow on the `mechanical ...` branch: it takes
+            # `data`/`drawings`/`dimensions` and NOT `specification`. Raspberry
+            # Pi files "2.3. Recommended operating conditions" under
+            # "2. Mechanical specification", and RP2040's "Chapter 5.
+            # Electrical and Mechanical" is the electrical chapter outright --
+            # flagging either would hand a core parameter section an inherited
+            # deprioritize hint.
+            r"^("
+            r"packaging(\s+(information|details?))?"
+            r"|package\s+(information|outlines?|dimensions?|drawings?|details?)"
+            r"|mechanical\s+(data|drawings?|dimensions?)"
+            r"|thermal\s+pad\s+mechanical\s+data"
+            r"|tape\s+and\s+reel(\s+information)?"
             r")$"
         ),
     ),
