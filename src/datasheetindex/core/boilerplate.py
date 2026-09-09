@@ -7,12 +7,13 @@ title-only and pattern-based -- no LLM call, no text scanning -- because
 free in the happy path.
 
 Categories:
-    legal     -- disclaimers, important notices, trademarks, copyright, patents
-    ordering  -- ordering info, part numbers, marking information
-    revision  -- revision/change/document history
-    contact   -- sales offices, support contacts, "where to buy"
-    toc       -- table of contents, list of figures/tables, index
-    glossary  -- glossary, abbreviations, acronyms, terminology
+    legal      -- disclaimers, important notices, trademarks, copyright, patents
+    ordering   -- ordering info, part numbers, marking information
+    mechanical -- package drawings, outlines, dimensions, tape-and-reel
+    revision   -- revision/change/document history
+    contact    -- sales offices, support contacts, "where to buy"
+    toc        -- table of contents, list of figures/tables, index
+    glossary   -- glossary, abbreviations, acronyms, terminology
 
 Scope: English titles only. Non-ASCII headings (e.g. "免責事項", "Mentions
 légales") are intentionally not classified -- adding multilingual coverage
@@ -79,9 +80,54 @@ _BOILERPLATE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
             r"|order(ing)?\s+(information|number|numbers)"
             r"|part\s+(number|numbers|numbering)(\s+information)?"
             r"|marking\s+(information|codes?)"
-            r"|product\s+(identification|marking|naming)"
+            # `system` is optional because Microchip writes the full
+            # "Product Identification System" and the pattern is anchored --
+            # without it the branch missed the per-part table on every
+            # Microchip datasheet, and `_ordering_section` aimed the
+            # multi-variant note at the package-marking legend instead.
+            r"|product\s+(identification(\s+system)?|marking|naming)"
             r"|device\s+(marking|ordering)"
+            # Sibling of `device marking`. The legend maps package markings
+            # back to part numbers, so it is per-part identifying information
+            # -- it must ride `ordering`, the only category multi_variant
+            # lifts. It would otherwise inherit `mechanical` from the
+            # packaging chapter it sits under and keep a deprioritize hint on
+            # a family datasheet: observed on micro_pic16f887.
+            r"|package\s+marking(\s+information)?"
             r"|how\s+to\s+order"
+            # TI's compound chapter heading, and the two orderable-table
+            # titles nested under it. `ordering` rather than `mechanical`
+            # even though the drawings live there too: this is the branch
+            # `flag_boilerplate` suppresses on a family datasheet and the one
+            # `_ordering_section` looks for, and the per-part addendum is
+            # what both need to reach. Measured on 12 of 24 corpus documents.
+            r"|mechanical,?\s+packaging,?\s+and\s+orderable\s+information"
+            r"|orderable\s+information"
+            r"|package\s+option\s+addendum"
+            r")$"
+        ),
+    ),
+    (
+        "mechanical",
+        re.compile(
+            # Package drawings and dimensions -- reference material an agent
+            # should reach only for a mechanical question, kept apart from
+            # `ordering` because the two answer different questions and only
+            # `ordering` is per-variant authoritative.
+            #
+            # Deliberately narrow on the `mechanical ...` branch: it takes
+            # `data`/`drawings`/`dimensions` and NOT `specification`. Raspberry
+            # Pi files "2.3. Recommended operating conditions" under
+            # "2. Mechanical specification", and RP2040's "Chapter 5.
+            # Electrical and Mechanical" is the electrical chapter outright --
+            # flagging either would hand a core parameter section an inherited
+            # deprioritize hint.
+            r"^("
+            r"packaging(\s+(information|details?))?"
+            r"|package\s+(information|outlines?|dimensions?|drawings?|details?)"
+            r"|mechanical\s+(data|drawings?|dimensions?)"
+            r"|thermal\s+pad\s+mechanical\s+data"
+            r"|tape\s+and\s+reel(\s+information)?"
             r")$"
         ),
     ),
@@ -135,6 +181,24 @@ _BOILERPLATE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 
+# A trailing "(continued)" marks the same section resumed on a later page, so
+# it must not change what the section *is*. Microchip repeats the heading that
+# way -- micro_pic16f887 carries "19.1 Package Marking Information (Continued)"
+# twice -- and against an anchored pattern every repeat missed, leaving the
+# continuation to inherit its parent's category instead of taking its own.
+# Stripped here rather than in one pattern so it holds for all seven
+# categories; `cont.` and `cont'd` are the other spellings seen in the wild.
+_CONTINUATION_RE = re.compile(
+    # The trailing `[.,:;-]*` is load-bearing: the punctuation strip below
+    # removes `)` as well, so if this pattern did not absorb a trailing
+    # period or colon itself, that strip would take the closing paren with it
+    # and leave "(continued" behind for good.
+    r"\s*[\(\[]\s*(?:continued|cont(?:inue)?d?|cont['\u2019]d|cont\.)"
+    r"\s*[\)\]]\s*[.,:;\u2013-]*\s*$",
+    re.IGNORECASE,
+)
+
+
 # Despite the underscore, this has a second consumer outside the module:
 # `core/preamble.py` imports it to match features headings (see the comment
 # above its import for why). Changing what this strips changes that match too,
@@ -149,8 +213,39 @@ def _normalize_title(title: str) -> str:
         if new == s:
             break
         s = new
-    s = s.strip(" \t:.,-)")
+    # Alternated to a fixed point, not applied once each. `_CONTINUATION_RE`
+    # is anchored on the end of the string, so a trailing period or colon --
+    # ordinary in vendor headings -- sits between it and the paren it needs to
+    # see, and a single pass would leave "(continued" in place and drop the
+    # title back to unclassified. Stripping punctuation first is not enough on
+    # its own either: removing the suffix can expose more punctuation before
+    # it ("Ordering Information: (Continued)").
+    while True:
+        stripped = _CONTINUATION_RE.sub("", s).strip(" \t:.,-)")
+        if stripped == s:
+            break
+        s = stripped
     return s.lower()
+
+
+# Kept next to the patterns it mirrors, so a new marking spelling added to the
+# `ordering` branch above is added here in the same edit.
+_MARKING_LEGEND_RE = re.compile(
+    r"^(package\s+|device\s+|product\s+)?marking(\s+(information|codes?))?$"
+)
+
+
+def is_marking_legend(title: str) -> bool:
+    """True for a markings-to-part-numbers legend.
+
+    These classify `ordering` -- correctly, they are per-part identifying
+    information and `multi_variant` must lift them -- but they are *not* the
+    per-part parameter table, so `tools/bound._ordering_section` must never
+    aim the multi-variant note at one. Separate from ``classify_title``
+    because the two questions are different: what a section is, against
+    whether it is the section an agent should be sent to.
+    """
+    return bool(_MARKING_LEGEND_RE.match(_normalize_title(title)))
 
 
 def classify_title(title: str) -> str:

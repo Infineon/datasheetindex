@@ -33,7 +33,7 @@ from datasheetindex.core.artifact_cache import (
     sidecar_path,
     write_sidecar,
 )
-from datasheetindex.core.boilerplate import classify_title
+from datasheetindex.core.boilerplate import classify_title, is_marking_legend
 from datasheetindex.core.engine import layout_active, layout_engine
 from datasheetindex.core.locate import TextLocation
 from datasheetindex.core.locate import locate_text as locate_text_core
@@ -392,7 +392,16 @@ def _ordering_section(nodes: list[TocNode]) -> TocNode | None:
     computed from the wrong range.
     """
     candidates = [
-        n for n in flatten_nodes(nodes) if classify_title(n.title) == "ordering"
+        n
+        for n in flatten_nodes(nodes)
+        # A marking legend is excluded outright rather than merely ranked
+        # last: it maps package markings to part numbers, never carries the
+        # per-part parameter values, and the note tells the agent to "confirm
+        # the value against the per-part table there". With nothing else
+        # classified the honest result is None -- the note then names no
+        # section, which is its designed fallback and better than a page the
+        # agent is instructed to trust and cannot answer from.
+        if classify_title(n.title) == "ordering" and not is_marking_legend(n.title)
     ]
     if not candidates:
         return None

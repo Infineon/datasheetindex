@@ -23,7 +23,7 @@ rejected on them — lives in
 
 `datasheetindex` is meant to be handed to an external agent in two parts:
 
-1. **Enriched ToC JSON** - Hierarchical section tree with page ranges, table hints, pre-computed breadcrumbs, boilerplate flags (revision history, disclaimers, etc.), a page-marked preamble (pages 1-2 raw text, with per-page signals in `preamble_pages`) for agent orientation, and a `figures` array indexing every raster image placement and text-layer figure caption (see "Figure indexing and captions" below)
+1. **Enriched ToC JSON** - Hierarchical section tree with page ranges, table hints, pre-computed breadcrumbs, boilerplate flags (revision history, disclaimers, package drawings, etc.), a page-marked preamble (pages 1-2 raw text, with per-page signals in `preamble_pages`) for agent orientation, and a `figures` array indexing every raster image placement and text-layer figure caption (see "Figure indexing and captions" below)
 2. **Page-matched text file** - Full document text with `--- PAGE N ---` markers aligned to the JSON, with column-aware reading order for two-column layouts (running headers and footers are omitted; set `DATASHEETINDEX_FURNITURE=0` to keep them)
 
 All page numbers are **1-indexed** across the JSON, the text file markers, and
@@ -492,7 +492,10 @@ section as one to *deprioritize*, and on a family datasheet that is the one
 section that can answer the question. Four things now address it:
 
 1. **The `ordering` category is suppressed** when a family is detected, and
-   only that category -- single-part datasheets are unchanged.
+   only that category -- single-part datasheets are unchanged. TI's compound
+   chapter heading ("Mechanical, Packaging, and Orderable Information") is
+   classified `ordering` rather than `mechanical` so that this suppression,
+   and the note in 3, reach the orderable addendum inside it.
 2. **`multi_variant`** appears in the ToC JSON and in `build_datasheet`'s
    manifest, present only when detected:
 
