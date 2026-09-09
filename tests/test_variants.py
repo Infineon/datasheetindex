@@ -534,6 +534,36 @@ class TestOrderingSectionSelection:
         assert found is not None
         assert found.start_page == 320
 
+    def test_a_marking_legend_never_wins_however_it_is_placed(self):
+        """A markings-to-part-numbers legend is not the per-part parameter
+        table, at any level or page. Placed top-level and earlier than the
+        real chapter it would otherwise take the `min((level, start_page))`
+        tie and aim the note at the wrong page -- the failure this branch
+        already hit once on micro_pic16f887, where the legend only lost
+        because it happened to be nested."""
+        from datasheetindex.tools.bound import _ordering_section
+
+        nodes = [
+            TocNode(title="3 Package Marking Information", level=1, start_page=12),
+            TocNode(title="9 Ordering Information", level=1, start_page=88),
+        ]
+        found = _ordering_section(nodes)
+        assert found is not None
+        assert found.start_page == 88
+
+    def test_a_lone_marking_legend_yields_no_pointer(self):
+        """With nothing else classified, the honest answer is None. The note
+        then degrades to naming no section, which is its designed fallback --
+        better than instructing the agent to "confirm the value against the
+        per-part table there" while pointing at a legend that is not one."""
+        from datasheetindex.tools.bound import _ordering_section
+
+        nodes = [
+            TocNode(title="1 Features", level=1, start_page=1),
+            TocNode(title="7 Package Marking Information", level=1, start_page=40),
+        ]
+        assert _ordering_section(nodes) is None
+
     def test_returns_none_when_no_section_classifies(self):
         from datasheetindex.tools.bound import _ordering_section
 

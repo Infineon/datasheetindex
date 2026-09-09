@@ -228,6 +228,26 @@ def _normalize_title(title: str) -> str:
     return s.lower()
 
 
+# Kept next to the patterns it mirrors, so a new marking spelling added to the
+# `ordering` branch above is added here in the same edit.
+_MARKING_LEGEND_RE = re.compile(
+    r"^(package\s+|device\s+|product\s+)?marking(\s+(information|codes?))?$"
+)
+
+
+def is_marking_legend(title: str) -> bool:
+    """True for a markings-to-part-numbers legend.
+
+    These classify `ordering` -- correctly, they are per-part identifying
+    information and `multi_variant` must lift them -- but they are *not* the
+    per-part parameter table, so `tools/bound._ordering_section` must never
+    aim the multi-variant note at one. Separate from ``classify_title``
+    because the two questions are different: what a section is, against
+    whether it is the section an agent should be sent to.
+    """
+    return bool(_MARKING_LEGEND_RE.match(_normalize_title(title)))
+
+
 def classify_title(title: str) -> str:
     """Return the boilerplate category for a title, or ``""`` if none matches."""
     normalized = _normalize_title(title)
