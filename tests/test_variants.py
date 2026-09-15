@@ -710,6 +710,25 @@ class TestPlainOrderingSpellingsAreEvidence:
             == []
         )
 
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "Part Numbering",
+            "Part Numbering Information",
+            "Product Identification",
+            "Product Identification System",
+            "Product Naming",
+        ],
+    )
+    def test_boilerplate_naming_spelling_is_nomenclature_evidence(self, title):
+        """The naming-convention spellings of boilerplate `ordering` rank as
+        nomenclature, below real ordering tables, but are never dropped."""
+        assert classify_title(title) == "ordering"
+        found = find_variant_evidence_sections(
+            [TocNode(title=f"9 {title}", level=1, start_page=40)]
+        )
+        assert [x.kind for x in found] == ["nomenclature"], title
+
 
 class TestNestedEvidenceKeepsItsParent:
     """De-duplication shapes the displayed leads, never note suppression."""
@@ -777,7 +796,7 @@ class TestLeadsNeverNameTheRangeBeingRead:
     """Overview and nomenclature do not suppress the note, so they must not be
     offered as the place to check while the agent is already reading them."""
 
-    def _tools(self):
+    def _tools(self, naming_title="Product Identification System"):
         from datasheetindex.models import DatasheetArtifacts
         from datasheetindex.tools.bound import DatasheetTools
 
@@ -795,7 +814,7 @@ class TestLeadsNeverNameTheRangeBeingRead:
                 TocNode(title="Product overview", level=1, start_page=3, end_page=4),
                 TocNode(title="Device Comparison", level=1, start_page=9, end_page=9),
                 TocNode(
-                    title="Product Identification System",
+                    title=naming_title,
                     level=1,
                     start_page=50,
                     end_page=52,
@@ -813,12 +832,24 @@ class TestLeadsNeverNameTheRangeBeingRead:
         assert '"Device Comparison" (page 9)' in out
         assert '"Product Identification System" (page 50)' in out
 
-    def test_a_read_inside_nomenclature_does_not_name_it(self):
+    @pytest.mark.parametrize(
+        "naming_title", ["Product Identification System", "Product Naming"]
+    )
+    def test_a_read_inside_nomenclature_does_not_name_it(self, naming_title):
+        """Nomenclature is a lead, not proof: the note still fires inside it,
+        but points elsewhere."""
         from datasheetindex.tools.bound import DatasheetTools
 
-        out = DatasheetTools.get_section_text(self._tools(), 50, 51)
-        assert '"Product Identification System"' not in out
+        out = DatasheetTools.get_section_text(self._tools(naming_title), 50, 51)
+        assert "Do NOT report a per-part answer" in out
+        assert f'"{naming_title}"' not in out
         assert '"Product overview" (page 3)' in out
+
+    def test_product_naming_is_offered_as_a_lead_elsewhere(self):
+        from datasheetindex.tools.bound import DatasheetTools
+
+        out = DatasheetTools.get_section_text(self._tools("Product Naming"), 20, 20)
+        assert '"Product Naming" (page 50)' in out
 
     def test_a_wide_read_spanning_a_lead_still_names_it(self):
         from datasheetindex.tools.bound import DatasheetTools

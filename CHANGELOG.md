@@ -61,7 +61,9 @@ All notable changes to this project will be documented in this file.
 - **The evidence ordering pattern is narrower than the boilerplate one by
   exclusion only.** Every plain ordering spelling the boilerplate classifier
   accepts is also an evidence candidate -- "Ordering Code(s)", "Order numbers",
-  "How to order", "Part numbers" -- and a test pins that subset relationship,
+  "How to order", "Part numbers" -- and its naming-convention spellings
+  ("Part Numbering", "Product Identification System", "Product Naming") rank
+  as nomenclature leads. Tests pin that subset relationship,
   since a heading missed here loses a family both its lead and its note
   suppression. The boilerplate `ordering` branch also gains "Order codes", ST's
   "Ordering Information Scheme", and "Device Ordering Information". On the

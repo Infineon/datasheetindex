@@ -1211,8 +1211,13 @@ question -- decides what answers it.
 
 Detection is **title-only**, and that is measured rather than assumed — precision
 1.00, recall 0.85 against hand-labelled ground truth over a 25-document corpus, at a
-52% base rate. Precision is the property that matters: a false positive costs noise,
-a false negative costs a confident wrong answer. Two alternatives were measured and
+52% base rate. **Recall is the property that matters**, and the asymmetry is
+measured: forcing the flag onto a single-part datasheet cost a tenth of a turn (6/6
+correct at 4.3 turns against 6/6 at 4.2 unflagged), while a false negative returns
+the unmodified library's behaviour, which answered the motivating per-part question
+0 times in 9. So the rules are conservative about *rejecting* a family, not about
+firing, and a miss degrades to the always-on caution in the tool descriptions rather
+than to silence. Two alternatives were measured and
 rejected. Page-1 **body** text recovers 2 real families out of 57 misses while
 dropping precision to ~0.41, because package order codes (`TXB0104RGY`), companion
 parts (`CC1190`) and tokens that are not part numbers at all (`RGB888`, `PT100`, pin
@@ -1774,8 +1779,15 @@ WHEN TEXT IS SUFFICIENT (no need to inspect):
 MULTI-PRODUCT DATASHEETS:
 Some datasheets cover a product family (e.g., TPS651/652/653) in one PDF.
 When extracting for a specific product:
-• Check early pages for an ordering table or product overview that maps
-  part numbers to their differences (often just a few parameters differ)
+• Do not report a per-part value from family-level text (features lists,
+  peripheral descriptions): it can name something the requested part lacks.
+  This holds whether or not build_datasheet reports multi_variant.
+• Look for part-specific evidence wherever it sits -- a device comparison or
+  selection table, ordering information, a product overview, or a
+  nomenclature section. These are leads, not guaranteed answers, and none of
+  them is reliably early or preferred.
+• Search for the exact part number and verify the value where that part is
+  explicitly named
 • In tables with variant columns, pick the column for the target product
 • In tables with conditional rows, filter by the target product name
 • If sections are split per variant (e.g., "6.1 AD7606 Specs"), navigate

@@ -184,7 +184,7 @@ _EVIDENCE_PATTERNS: list[tuple[VariantEvidenceKind, str, re.Pattern[str]]] = [
         "nomenclature",
         "nomenclature-title",
         re.compile(
-            r"^(?:nomenclature|part\s+number\s+nomenclature|"
+            r"^(?:nomenclature|part\s+number\s+nomenclature|product\s+naming|"
             r"part\s+numbering(?:\s+information)?|"
             r"product\s+identification(?:\s+system)?)$"
         ),
