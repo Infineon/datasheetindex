@@ -35,7 +35,8 @@ from datasheetindex.models import TocNode
         # drawings under one compound heading. It classifies as `ordering`,
         # not `mechanical`, because the addendum is the per-variant table:
         # `flag_boilerplate` must be able to suppress it on a family
-        # datasheet, and `_ordering_section` must be able to find it.
+        # datasheet. Variant-evidence ranking is deliberately narrower because
+        # this appendix does not carry feature differences on every TI family.
         ("Mechanical, Packaging, and Orderable Information", "ordering"),
         ("Orderable Information", "ordering"),
         ("Package Option Addendum", "ordering"),

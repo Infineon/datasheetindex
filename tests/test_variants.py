@@ -17,7 +17,11 @@ import pymupdf
 
 from datasheetindex import DatasheetIndex
 from datasheetindex.core.structure import build_tree
-from datasheetindex.core.variants import detect_variants, title_text
+from datasheetindex.core.variants import (
+    detect_variants,
+    find_variant_evidence_sections,
+    title_text,
+)
 from datasheetindex.models import TocNode
 
 
@@ -368,6 +372,24 @@ class TestReadTimeNote:
         assert "8 Ordering information" in out
         assert "69" in out
 
+    def test_note_ranks_comparison_before_ordering(self):
+        from datasheetindex.tools.bound import DatasheetTools
+
+        nodes = [
+            TocNode(title="6 Device Comparison", level=1, start_page=9, end_page=9),
+            TocNode(
+                title="11 Ordering Information",
+                level=1,
+                start_page=121,
+                end_page=130,
+            ),
+        ]
+        tools = self._tools(nodes=nodes, pages=140)
+
+        out = DatasheetTools.get_section_text(tools, 40, 41)
+
+        assert out.index("6 Device Comparison") < out.index("11 Ordering Information")
+
     def test_note_omits_the_pointer_when_no_ordering_section_exists(self):
         from datasheetindex.tools.bound import DatasheetTools
 
@@ -375,7 +397,7 @@ class TestReadTimeNote:
         tools = self._tools(nodes=nodes)
         out = DatasheetTools.get_section_text(tools, 40, 41)
         assert "product family" in out
-        assert "Before answering, read" not in out
+        assert "Search for the exact requested part number" in out
 
     def test_no_note_when_already_reading_the_ordering_section(self):
         """Inside the per-part table, the note would point at the current page."""
@@ -388,6 +410,32 @@ class TestReadTimeNote:
         ]
         tools = self._tools(nodes=nodes)
         assert "product family" not in DatasheetTools.get_section_text(tools, 70, 71)
+
+    def test_no_note_when_already_reading_a_comparison_section(self):
+        from datasheetindex.tools.bound import DatasheetTools
+
+        nodes = [
+            TocNode(title="6 Device Comparison", level=1, start_page=9, end_page=10),
+        ]
+        tools = self._tools(nodes=nodes)
+
+        assert "product family" not in DatasheetTools.get_section_text(tools, 9, 10)
+
+    def test_suppression_sees_comparison_sections_past_the_display_cap(self):
+        from datasheetindex.tools.bound import DatasheetTools
+
+        nodes = [
+            TocNode(
+                title=f"{index} Device Comparison",
+                level=1,
+                start_page=page,
+                end_page=page,
+            )
+            for index, page in enumerate((9, 19, 29, 39), start=1)
+        ]
+        tools = self._tools(nodes=nodes)
+
+        assert "product family" not in DatasheetTools.get_section_text(tools, 39, 39)
 
     def test_note_precedes_the_section_text(self):
         """Framing before content, as the documented result order requires."""
@@ -466,111 +514,145 @@ class TestDetectorPrecisionGuards:
             assert detect_variants(title) is not None, title
 
 
-class TestOrderingSectionSelection:
-    """Which section the read-time note points the agent at."""
+class TestVariantEvidenceSections:
+    """Likely navigation targets across real vendor document shapes."""
 
-    def test_a_top_level_ordering_chapter_beats_a_nested_subsection(self):
-        """`Part Numbering` under an early chapter classifies as `ordering`
-        too, and pointing at a naming-convention subsection sends the agent
-        to the wrong page."""
-        from datasheetindex.tools.bound import _ordering_section
-
-        nodes = [
-            TocNode(
-                title="2 Overview",
-                level=1,
-                start_page=3,
-                end_page=20,
-                nodes=[TocNode(title="2.4 Part Numbering", level=2, start_page=8)],
-            ),
-            TocNode(title="8 Ordering information", level=1, start_page=69),
-        ]
-        found = _ordering_section(nodes)
-        assert found is not None
-        assert found.start_page == 69
-
-    def test_the_ti_compound_chapter_is_found(self):
-        """TI names the chapter "Mechanical, Packaging, and Orderable
-        Information"; the per-part addendum is inside it, so the note must
-        point there."""
-        from datasheetindex.tools.bound import _ordering_section
-
+    def test_ti_device_comparison_beats_its_ordering_appendix(self):
         nodes = [
             TocNode(title="1 Features", level=1, start_page=1),
+            TocNode(title="6 Device Comparison", level=1, start_page=9),
             TocNode(
                 title="11 Mechanical, Packaging, and Orderable Information",
                 level=1,
-                start_page=31,
+                start_page=121,
             ),
         ]
-        found = _ordering_section(nodes)
-        assert found is not None
-        assert found.start_page == 31
 
-    def test_the_per_part_table_beats_the_marking_legend(self):
-        """micro_pic16f887's shape. The marking legend classifies `ordering`
-        too, but it is a level-2 subsection of the packaging chapter and maps
-        markings to part numbers -- it is not the per-part parameter table.
-        Microchip's is "Product Identification System" at the end of the
-        document, and the note must point there."""
-        from datasheetindex.tools.bound import _ordering_section
+        found = find_variant_evidence_sections(nodes)
 
+        assert [(x.kind, x.start_page) for x in found] == [("comparison", 9)]
+
+    def test_ti_package_appendix_is_not_promoted_without_a_comparison_node(self):
+        """ADS111x puts the answer on page 3 but omits it from the PDF outline.
+
+        Pointing at TI's page-41 package appendix is worse than returning no
+        candidate and telling the agent to search for the exact part number.
+        """
         nodes = [
+            TocNode(title="1 Features", level=1, start_page=1),
             TocNode(
-                title="19.0 Packaging Information",
+                title="14 Mechanical, Packaging, and Orderable Information",
                 level=1,
-                start_page=298,
+                start_page=41,
+            ),
+        ]
+
+        assert find_variant_evidence_sections(nodes) == []
+
+    def test_espressif_series_comparison_needs_no_ordering_section(self):
+        nodes = [
+            TocNode(title="Features", level=1, start_page=3),
+            TocNode(title="1 ESP32 Series Comparison", level=1, start_page=11),
+        ]
+
+        found = find_variant_evidence_sections(nodes)
+
+        assert len(found) == 1
+        assert found[0].kind == "comparison"
+        assert found[0].start_page == 11
+
+    def test_table_prefix_does_not_hide_a_device_comparison(self):
+        nodes = [
+            TocNode(title="Table 2. Device Comparison", level=1, start_page=4),
+        ]
+
+        found = find_variant_evidence_sections(nodes)
+
+        assert len(found) == 1
+        assert found[0].kind == "comparison"
+
+    def test_standalone_selection_guide_is_evidence(self):
+        nodes = [TocNode(title="Selection Guide", level=1, start_page=6)]
+
+        found = find_variant_evidence_sections(nodes)
+
+        assert len(found) == 1
+        assert found[0].kind == "selection"
+
+    def test_available_devices_is_evidence(self):
+        nodes = [TocNode(title="Available Devices", level=1, start_page=8)]
+
+        found = find_variant_evidence_sections(nodes)
+
+        assert len(found) == 1
+        assert found[0].kind == "selection"
+
+    def test_psoc_ordering_section_remains_a_candidate(self):
+        nodes = [
+            TocNode(title="2 Detailed features", level=1, start_page=7),
+            TocNode(title="8 Ordering information", level=1, start_page=69),
+        ]
+
+        found = find_variant_evidence_sections(nodes)
+
+        assert len(found) == 1
+        assert found[0].kind == "ordering"
+        assert found[0].start_page == 69
+
+    def test_microchip_migration_comparison_does_not_beat_device_overview(self):
+        nodes = [
+            TocNode(title="1.0 Device Overview", level=1, start_page=14),
+            TocNode(
+                title="Appendix B: Migrating From Other PIC Devices",
+                level=1,
+                start_page=318,
                 nodes=[
                     TocNode(
-                        title="19.1 Package Marking Information",
+                        title="Table B-1: Feature Comparison",
                         level=2,
-                        start_page=298,
+                        start_page=318,
                     )
                 ],
             ),
             TocNode(title="Product Identification System", level=1, start_page=320),
         ]
-        found = _ordering_section(nodes)
-        assert found is not None
-        assert found.start_page == 320
 
-    def test_a_marking_legend_never_wins_however_it_is_placed(self):
-        """A markings-to-part-numbers legend is not the per-part parameter
-        table, at any level or page. Placed top-level and earlier than the
-        real chapter it would otherwise take the `min((level, start_page))`
-        tie and aim the note at the wrong page -- the failure this branch
-        already hit once on micro_pic16f887, where the legend only lost
-        because it happened to be nested."""
-        from datasheetindex.tools.bound import _ordering_section
+        found = find_variant_evidence_sections(nodes)
 
+        assert [(x.kind, x.start_page) for x in found] == [
+            ("overview", 14),
+            ("nomenclature", 320),
+        ]
+
+    def test_marking_legends_are_not_feature_evidence(self):
         nodes = [
             TocNode(title="3 Package Marking Information", level=1, start_page=12),
             TocNode(title="9 Ordering Information", level=1, start_page=88),
         ]
-        found = _ordering_section(nodes)
-        assert found is not None
-        assert found.start_page == 88
 
-    def test_a_lone_marking_legend_yields_no_pointer(self):
-        """With nothing else classified, the honest answer is None. The note
-        then degrades to naming no section, which is its designed fallback --
-        better than instructing the agent to "confirm the value against the
-        per-part table there" while pointing at a legend that is not one."""
-        from datasheetindex.tools.bound import _ordering_section
+        found = find_variant_evidence_sections(nodes)
 
+        assert len(found) == 1
+        assert found[0].start_page == 88
+
+    def test_a_document_without_a_candidate_returns_an_empty_list(self):
+        nodes = [TocNode(title="Maximum Ratings", level=1, start_page=1)]
+
+        assert find_variant_evidence_sections(nodes) == []
+
+    def test_display_limit_does_not_globally_discard_repeated_headings(self):
         nodes = [
-            TocNode(title="1 Features", level=1, start_page=1),
-            TocNode(title="7 Package Marking Information", level=1, start_page=40),
+            TocNode(
+                title=f"{index} Device Comparison",
+                level=1,
+                start_page=page,
+                end_page=page,
+            )
+            for index, page in enumerate((9, 19, 29, 39), start=1)
         ]
-        assert _ordering_section(nodes) is None
 
-    def test_returns_none_when_no_section_classifies(self):
-        from datasheetindex.tools.bound import _ordering_section
-
-        assert (
-            _ordering_section([TocNode(title="1 Features", level=1, start_page=1)])
-            is None
-        )
+        assert len(find_variant_evidence_sections(nodes)) == 3
+        assert len(find_variant_evidence_sections(nodes, limit=None)) == 4
 
 
 class TestLlmFallbackKeepsTheSuppression:
@@ -761,9 +843,10 @@ class TestNoteIsDirective:
     Measured, not stylistic. Against a live Sonnet agent asked a per-part
     question on a real family datasheet, n=10 per variant: a descriptive
     note ("may describe the family ... per-part differences are tabulated
-    in X") answered correctly 1/10; this phrasing answered 10/10, Fisher
-    exact p < 0.001. Every descriptive run stopped at 5 turns without
-    opening the ordering table.
+    in X") answered correctly 1/10; an explicit prohibition plus a required
+    next step answered 10/10, Fisher exact p < 0.001. The original next step
+    named PSoC's ordering table; the generalized candidate ranking is covered
+    separately and does not inherit that behavioral result.
 
     These assertions are deliberately about the *shape* of the instruction
     rather than exact prose, so wording can be improved but not softened
@@ -792,16 +875,22 @@ class TestNoteIsDirective:
     def test_it_forbids_answering_from_this_text(self):
         assert "Do NOT report a per-part answer" in self._note()
 
-    def test_it_requires_reading_the_per_part_table_first(self):
+    def test_it_names_likely_evidence_without_calling_it_authoritative(self):
         note = self._note()
-        assert "Before answering, read" in note
+        assert "Check likely part-specific evidence" in note
         assert "8 Ordering information" in note
         assert "69" in note
+        assert "confirm the value against the per-part table" not in note
+
+    def test_it_requires_an_exact_part_search(self):
+        assert "search for the exact requested part number" in self._note()
 
     def test_the_prohibition_survives_without_an_ordering_section(self):
         """The instruction not to answer from this text does not depend on
         our being able to name where the real answer lives."""
-        assert "Do NOT report a per-part answer" in self._note(with_ordering=False)
+        note = self._note(with_ordering=False)
+        assert "Do NOT report a per-part answer" in note
+        assert "Search for the exact requested part number" in note
 
 
 class TestSeriesSurvivesTitleConcatenation:

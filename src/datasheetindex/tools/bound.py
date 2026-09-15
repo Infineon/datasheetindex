@@ -33,7 +33,6 @@ from datasheetindex.core.artifact_cache import (
     sidecar_path,
     write_sidecar,
 )
-from datasheetindex.core.boilerplate import classify_title, is_marking_legend
 from datasheetindex.core.engine import layout_active, layout_engine
 from datasheetindex.core.locate import TextLocation
 from datasheetindex.core.locate import locate_text as locate_text_core
@@ -47,6 +46,10 @@ from datasheetindex.core.textfile import (
     furniture_enabled_by_env,
 )
 from datasheetindex.core.textfile import search_text as search_text_content
+from datasheetindex.core.variants import (
+    VariantEvidenceSection,
+    find_variant_evidence_sections,
+)
 from datasheetindex.index import REGENERATE_TOC_REQUIRES_CLIENT, DatasheetIndex
 from datasheetindex.llm.client import (
     close_llm_client,
@@ -63,7 +66,6 @@ from datasheetindex.models import (
     DatasheetArtifacts,
     TocNode,
     TocQuality,
-    flatten_nodes,
 )
 from datasheetindex.tools.vision import Detail, inspect_page
 
@@ -376,36 +378,25 @@ def _continuation_notes(text_content: str, start_page: int, end_page: int) -> li
     return notes
 
 
-def _ordering_section(nodes: list[TocNode]) -> TocNode | None:
-    """The shallowest section holding the per-part selection tables, if any.
+_RESOLVING_EVIDENCE_KINDS = {"comparison", "selection", "ordering"}
 
-    Found by title classification rather than by ``boilerplate_category``,
-    because on exactly the documents this matters for that flag is deliberately
-    suppressed -- the ordering section is authoritative there, not skippable.
 
-    Shallowest, then earliest -- not simply the first in document order.
-    ``classify_title`` also matches "Part Numbering", which is commonly a
-    subsection early in the document explaining the naming convention, while
-    the per-part table sits in a top-level "Ordering Information" chapter near
-    the end. A depth-first scan returns the subsection, so the note would point
-    the agent at the wrong page and the overlap suppression below would be
-    computed from the wrong range.
-    """
-    candidates = [
-        n
-        for n in flatten_nodes(nodes)
-        # A marking legend is excluded outright rather than merely ranked
-        # last: it maps package markings to part numbers, never carries the
-        # per-part parameter values, and the note tells the agent to "confirm
-        # the value against the per-part table there". With nothing else
-        # classified the honest result is None -- the note then names no
-        # section, which is its designed fallback and better than a page the
-        # agent is instructed to trust and cannot answer from.
-        if classify_title(n.title) == "ordering" and not is_marking_legend(n.title)
-    ]
+def _variant_action(candidates: list[VariantEvidenceSection]) -> str:
+    """A bounded next step that does not claim any candidate is authoritative."""
     if not candidates:
-        return None
-    return min(candidates, key=lambda n: (n.level, n.start_page))
+        return (
+            "Search for the exact requested part number and verify the value "
+            "where that part is explicitly named."
+        )
+
+    places = "; ".join(
+        f'"{candidate.title}" (page {candidate.start_page})'
+        for candidate in candidates[:3]
+    )
+    return (
+        f"Check likely part-specific evidence in {places}, and search for the "
+        "exact requested part number before answering."
+    )
 
 
 def _variant_note(
@@ -414,28 +405,28 @@ def _variant_note(
     """A note that this range may describe a family rather than one part.
 
     Emitted at read time, not only at build time, because that is where the
-    observed failure happened: the agent held the ToC, the ordering section
-    and page 1, then read a features section and answered a per-part question
-    from it. A manifest field fires many turns before that moment.
+    observed failure happened: the agent held the ToC and page 1, then read a
+    features section and answered a per-part question from it. A manifest field
+    fires many turns before that moment.
 
-    Suppressed inside the ordering section itself, where it would point the
-    agent at the page it is already reading.
+    Suppressed inside strong variant evidence, where repeating the warning
+    would add noise while the agent is already comparing individual parts.
     """
     variant = artifacts.json_data.get("multi_variant")
     if not variant:
         return []
 
     family = variant.get("family", "")
-    ordering = _ordering_section(artifacts.nodes)
-    if ordering is not None:
-        # Suppressed only when the read lies INSIDE the ordering section, not
-        # on any overlap with it. A whole-chapter or whole-document read that
-        # merely spans those pages is not "already looking at the table", and
-        # the wide reads are where family-level body text is most likely to be
-        # taken for a per-part answer.
-        last = ordering.end_page or ordering.start_page
-        if start_page >= ordering.start_page and end_page <= last:
-            return []
+    candidates = find_variant_evidence_sections(artifacts.nodes, limit=None)
+    # A wide read that merely spans an evidence section still needs the warning;
+    # suppress it only when the complete request is already inside a section
+    # whose title says it compares, selects, or orders individual variants.
+    if any(
+        candidate.kind in _RESOLVING_EVIDENCE_KINDS
+        and candidate.contains(start_page, end_page)
+        for candidate in candidates
+    ):
+        return []
 
     # The imperative phrasing is measured, not stylistic. Driving a live
     # Sonnet agent through the MCP server on the PSoC Control C3 datasheet,
@@ -444,15 +435,17 @@ def _variant_note(
     #   descriptive  ("may describe the family ... are tabulated in X")   1/10
     #   directive without negation ("The text below describes the
     #     family ... To answer about a specific part, read X first")      5/10
-    #   this one, with the explicit prohibition                          10/10
+    #   explicit prohibition plus required next step                     10/10
     #
     # Fisher exact p < 0.001 against the descriptive form; the unmodified
     # library answers 0/9. **The negation is load-bearing** -- dropping it
     # for the gentler phrasing costs half the benefit, so do not soften this
     # on style grounds. The descriptive runs all stopped at 5 turns (build,
-    # read the features section, answer) where these take 6-11 and go read
-    # the table: naming the prohibited action AND the required next step is
-    # what changed behaviour.
+    # read the features section, answer) where these take 6-11 and go seek
+    # part-specific evidence: naming the prohibited action AND a required
+    # next step is what changed behaviour. The original measurement named
+    # PSoC's ordering table; the generalized candidate ranking is separately
+    # covered by the multi-vendor corpus and must not inherit that 10/10 claim.
     #
     # The obvious objection -- that an imperative this blunt misfires when
     # the detector is wrong -- was measured too. Forcing the flag onto a
@@ -470,12 +463,7 @@ def _variant_note(
         f"report a per-part answer from the text below: it describes the "
         f"family, and a given part may not have what it names."
     )
-    if ordering is not None:
-        note += (
-            f' Before answering, read "{ordering.title}" (page '
-            f"{ordering.start_page}) and confirm the value against the "
-            f"per-part table there."
-        )
+    note += f" {_variant_action(candidates)}"
     return [note + " ==="]
 
 
@@ -1022,15 +1010,16 @@ class DatasheetTools:
            ``=== Pages X-Y of N ===`` for a multi-page range.
         2. Zero or more ``=== NOTE: ... ===`` lines, of two kinds. The first,
            when the datasheet covers a product family, says the text may
-           describe the family rather than one part and names the ordering
-           section; it is omitted when the range overlaps that section. The
-           rest are emitted when the requested range cuts content the
-           publisher marked as continuing onto an adjacent page, at the head
-           of the range, the tail, or both; either boundary can carry more
-           than one marker (e.g. a page opening with two continued tables).
-           The ``===`` wrapper is what marks the line as tool framing rather
-           than document content: real datasheets sometimes contain their own
-           literal ``NOTE:`` lines in body text.
+           describe the family rather than one part and names likely comparison,
+           selection, ordering, overview, or nomenclature sections; it is
+           omitted when the range lies inside strong variant evidence. The rest
+           are emitted when the requested range cuts content the publisher
+           marked as continuing onto an adjacent page, at the head of the
+           range, the tail, or both; either boundary can carry more than one
+           marker (e.g. a page opening with two continued tables). The ``===``
+           wrapper is what marks the line as tool framing rather than document
+           content: real datasheets sometimes contain their own literal
+           ``NOTE:`` lines in body text.
         3. The section text, WITH ``--- PAGE N ---`` markers so the agent can
            orient within the range.
 
@@ -1052,6 +1041,44 @@ class DatasheetTools:
         notes += _continuation_notes(artifacts.text_content, start_page, end_page)
         section = extract_section_text(artifacts.text_content, start_page, end_page)
         return "\n".join([header, *notes, section])
+
+    def variant_search_note(self, matches: list[TextSearchMatch]) -> str | None:
+        """Return one family-applicability caveat for an exposed search result.
+
+        Kept out of ``search_text`` itself so the supported Python API retains
+        its list return type. The agent-tool adapter has a response envelope
+        where this can be attached once per call rather than repeated on every
+        hit.
+        """
+        artifacts = self._require_artifacts()
+        variant = artifacts.json_data.get("multi_variant")
+        if not variant or not matches:
+            return None
+
+        candidates = find_variant_evidence_sections(artifacts.nodes, limit=None)
+        resolving = [
+            candidate
+            for candidate in candidates
+            if candidate.kind in _RESOLVING_EVIDENCE_KINDS
+        ]
+        if resolving and all(
+            any(
+                candidate.contains(match["page"], match["page"])
+                for candidate in resolving
+            )
+            for match in matches
+        ):
+            return None
+
+        family = variant.get("family", "")
+        named = f" ({family})" if family else ""
+        return (
+            f"This datasheet covers a product family{named}. A search hit "
+            "outside a part-specific comparison, selection, or ordering "
+            "section shows that the family documentation names the term; it "
+            "does not establish that every part has it. "
+            f"{_variant_action(candidates)}"
+        )
 
     def search_text(
         self,

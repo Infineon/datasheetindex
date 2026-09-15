@@ -58,10 +58,17 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     import pymupdf
+
+    from datasheetindex.models import TocNode
+
+from datasheetindex.core.boilerplate import (
+    _normalize_title,
+    is_marking_legend,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +124,179 @@ class VariantSignal:
 
     family: str
     rule: str
+
+
+VariantEvidenceKind = Literal[
+    "comparison", "selection", "ordering", "overview", "nomenclature"
+]
+
+
+@dataclass(frozen=True)
+class VariantEvidenceSection:
+    """A ToC section likely to distinguish members of a product family.
+
+    This is navigation evidence, not a claim that the section contains the
+    answer to any particular question. ``kind`` and ``reason`` expose the
+    deterministic title rule behind the ranking instead of inventing a
+    confidence score the corpus has not calibrated.
+    """
+
+    title: str
+    start_page: int
+    end_page: int
+    breadcrumb: str
+    kind: VariantEvidenceKind
+    reason: str
+
+    def contains(self, start_page: int, end_page: int) -> bool:
+        """Whether a requested range lies wholly inside this section."""
+        return start_page >= self.start_page and end_page <= self.end_page
+
+
+_EVIDENCE_PATTERNS: list[tuple[VariantEvidenceKind, str, re.Pattern[str]]] = [
+    (
+        "comparison",
+        "comparison-title",
+        re.compile(
+            r"^(?:(?:device|series|product|part|variant|family)\s+)?"
+            r"(?:feature\s+)?comparison(?:\s+table)?$"
+            r"|^[a-z0-9][a-z0-9-]*\s+series\s+comparison$"
+        ),
+    ),
+    (
+        "selection",
+        "selection-title",
+        re.compile(
+            r"^(?:(?:product|device|part|variant)\s+)?"
+            r"selection(?:\s+(?:guide|table))?$"
+            r"|^available\s+(?:devices?|options?|parts?|products?)$"
+            r"|^(?:product|device|part|variant)\s+"
+            r"(?:matrix|options?|variants?)$"
+        ),
+    ),
+    (
+        "overview",
+        "overview-title",
+        re.compile(r"^(?:device|family|product|series)\s+overview$"),
+    ),
+    (
+        "nomenclature",
+        "nomenclature-title",
+        re.compile(
+            r"^(?:nomenclature|part\s+number\s+nomenclature|"
+            r"part\s+numbering(?:\s+information)?|"
+            r"product\s+identification(?:\s+system)?)$"
+        ),
+    ),
+]
+
+_EVIDENCE_RANK: dict[VariantEvidenceKind, int] = {
+    "comparison": 0,
+    "selection": 1,
+    "ordering": 2,
+    "overview": 3,
+    "nomenclature": 4,
+}
+
+# A comparison nested under one of these headings usually compares this family
+# with a predecessor or sibling, rather than comparing members of the family.
+_EVIDENCE_NEGATIVE_ANCESTRY = re.compile(
+    r"^(?:migrat|revision|legacy|related\s+products?|device\s+and\s+"
+    r"documentation\s+support)"
+)
+
+_EVIDENCE_TABLE_PREFIX_RE = re.compile(r"^table\s+[a-z0-9]+(?:[.-][a-z0-9]+)*[\s:.-]+")
+
+# A plain ordering chapter can carry a feature matrix (the motivating PSoC
+# document does). TI's broad mechanical/package addendum generally does not:
+# on ADS111x and MSP430 it points far past the real comparison table. Keep that
+# boilerplate classification in ``boilerplate.py`` without promoting every
+# spelling there into variant evidence.
+_ORDERING_EVIDENCE_RE = re.compile(
+    r"^(?:ordering\s+(?:information|guide|details?)|"
+    r"order(?:ing)?\s+information|device\s+ordering)$"
+)
+
+
+def _classify_evidence_title(
+    title: str, ancestors: tuple[str, ...]
+) -> tuple[VariantEvidenceKind, str] | None:
+    """Classify one ToC title as variant evidence, if it is a useful candidate."""
+    normalized = _normalize_title(title)
+    normalized = _EVIDENCE_TABLE_PREFIX_RE.sub("", normalized, count=1)
+    if not normalized or any(
+        _EVIDENCE_NEGATIVE_ANCESTRY.match(parent) for parent in ancestors
+    ):
+        return None
+
+    # Marking legends identify a package but do not compare feature values.
+    if is_marking_legend(title):
+        return None
+
+    for kind, reason, pattern in _EVIDENCE_PATTERNS:
+        if pattern.match(normalized):
+            return kind, reason
+
+    if _ORDERING_EVIDENCE_RE.match(normalized):
+        return "ordering", "ordering-title"
+    return None
+
+
+def find_variant_evidence_sections(
+    nodes: list[TocNode], *, limit: int | None = 3
+) -> list[VariantEvidenceSection]:
+    """Return ranked ToC sections likely to carry per-variant evidence.
+
+    The ranking is title-only and deterministic. It deliberately returns
+    candidates rather than one allegedly authoritative section: comparison
+    tables beat ordering appendices when both exist, while documents with no
+    recognizable section honestly return an empty list.
+    """
+    if limit is not None and limit < 1:
+        return []
+
+    candidates: list[tuple[int, int, int, VariantEvidenceSection]] = []
+
+    def walk(children: list[TocNode], ancestors: tuple[str, ...]) -> None:
+        for node in children:
+            classified = _classify_evidence_title(node.title, ancestors)
+            if classified is not None:
+                kind, reason = classified
+                section = VariantEvidenceSection(
+                    title=node.title,
+                    start_page=node.start_page,
+                    end_page=node.end_page or node.start_page,
+                    breadcrumb=node.breadcrumb or node.title,
+                    kind=kind,
+                    reason=reason,
+                )
+                candidates.append(
+                    (_EVIDENCE_RANK[kind], node.level, node.start_page, section)
+                )
+            walk(node.nodes, (*ancestors, _normalize_title(node.title)))
+
+    walk(nodes, ())
+    candidates.sort(key=lambda item: item[:3])
+
+    result: list[VariantEvidenceSection] = []
+    for _, _, _, section in candidates:
+        overlaps_existing = any(
+            (
+                existing.start_page <= section.start_page
+                and section.end_page <= existing.end_page
+            )
+            or (
+                section.start_page <= existing.start_page
+                and existing.end_page <= section.end_page
+            )
+            for existing in result
+        )
+        if overlaps_existing:
+            continue
+        result.append(section)
+        if limit is not None and len(result) == limit:
+            break
+    return result
 
 
 def _bounded(parts: list[str]) -> str:

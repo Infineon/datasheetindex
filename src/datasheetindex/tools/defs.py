@@ -264,6 +264,8 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                     if tools.captions_blocked()
                     else _EMPTY_SEARCH_RASTER_NOTE
                 )
+            elif note := tools.variant_search_note(results):
+                payload["note"] = note
             return _ok(payload)
         except Exception as exc:
             return _err_exc(exc)
@@ -361,13 +363,12 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                 "do not identify sections, call build_datasheet again with "
                 "regenerate_toc=true to rebuild the outline from the body text."
                 "\n\n"
-                "Before answering about a SPECIFIC part number, check whether "
-                "the datasheet covers a product family. About half do, and "
-                "their body text describes the family, so a features or "
-                "peripheral section can name something a given part lacks -- "
-                "confirm in the ordering/selection table. 'multi_variant' "
-                "(absent unless detected) names the family; its absence is not "
-                "evidence of a single-part document."
+                "Before answering for a SPECIFIC part, check whether the "
+                "datasheet covers a family: family text can name features that "
+                "part lacks. Verify where the exact part is named; comparison, "
+                "selection, and ordering sections are leads, not guarantees. "
+                "'multi_variant' names a detected family; its absence does not "
+                "prove the document covers one part."
             ),
             input_schema={
                 "type": "object",
@@ -462,11 +463,10 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                 "the line as the tool's own signal rather than a literal 'NOTE:' "
                 "in the datasheet's body text. Absence of a note means none was "
                 "detected; it is not a guarantee of completeness.\n\n"
-                "A NOTE naming a product family means this text may describe "
-                "the family, not the part you were asked about: confirm the "
-                "value in the ordering/selection table. That note needs the "
-                "family detected, so stay cautious on a per-part question "
-                "even without one."
+                "A family NOTE means this text may not apply to the requested "
+                "part. Follow its leads and search for the exact part number; "
+                "the leads are not guaranteed answers. Detection can miss, so "
+                "stay cautious on a per-part question even without a note."
             ),
             input_schema={
                 "type": "object",

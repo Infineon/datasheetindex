@@ -2,6 +2,66 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.39.0] - 2026-09-15
+
+### Added
+- **Ranked, vendor-neutral navigation for product-family datasheets.** The
+  library no longer assumes that "Ordering Information" is where every
+  per-part answer lives. `find_variant_evidence_sections` ranks likely ToC
+  evidence as comparison, selection, plain ordering, overview, then
+  nomenclature; returns at most three navigation leads; and never calls one
+  authoritative. It recognizes forms such as "Device Comparison", "ESP32
+  Series Comparison", "Selection Guide", "Available Devices", and
+  `Table N. Device Comparison`.
+- **An exact-part fallback when the outline has no trustworthy candidate.**
+  This is the honest path for documents such as TI ADS111x, whose Device
+  Comparison table is absent from the PDF outline, and Vishay 1N400x, which has
+  no useful outline at all. A generic package/order appendix is no longer
+  presented as if it must contain the feature answer.
+- **A conditional family-applicability note on the agent `search_text`
+  response.** A successful search that exposes any hit outside strong
+  comparison, selection, or ordering evidence now gets one top-level note:
+  the family documentation naming a term does not prove every part has it.
+  The note lists the same bounded navigation leads and requires an exact-part
+  search. It is omitted when a page-restricted search is already wholly inside
+  strong evidence. The supported Python `DatasheetTools.search_text()` API
+  remains a list and is unchanged; only the framework-neutral agent envelope
+  gains the optional note.
+
+### Changed
+- **`get_section_text` now points at likely evidence rather than one alleged
+  ordering-table answer.** The measured prohibition remains -- do not report a
+  per-part answer solely from family-level text -- but the required next step
+  is now to inspect ranked evidence and search for the exact part number.
+  Suppression is limited to reads wholly inside comparison, selection, or
+  plain ordering candidates; overview and nomenclature remain leads rather
+  than proof.
+- **Variant-evidence ranking is deliberately narrower than boilerplate
+  classification.** TI's "Mechanical, Packaging, and Orderable Information"
+  remains `boilerplate_category: "ordering"` so a family build does not mark
+  the whole chapter skippable, but it is not automatically promoted as feature
+  evidence. On ADS111x and MSP430 that appendix is far from the actual
+  comparison evidence. Package-marking legends and comparisons nested under
+  migration, revision, or legacy ancestry are likewise excluded. Repeated
+  headings at different page ranges remain distinct, while overlapping
+  parent/child candidates collapse.
+
+### Validation
+- **The generalized behavior was exercised live, not only through fixtures.**
+  Claude Sonnet 5 ran with built-in tools disabled and only the five
+  `datasheetindex` MCP tools available: three independent runs each for
+  Infineon PSC3P5 CORDIC/MOTIF, TI ADS1113 comparator/PGA, TI MSP430F5519
+  ADC12_A, Espressif ESP32-S0WD core count, Microchip PIC16F883 PORTD, Vishay
+  1N4001 VRRM, and a single-part Bosch BME280 control. All **21/21** answers
+  were correct. The paths differed as intended: PSoC used ordering, MSP430 and
+  ESP32 used comparison sections, and ADS1113/PIC16F883/1N4001 resolved from
+  exact-part evidence without being forced into an irrelevant appendix. The
+  BME280 control received no family warning in all three runs.
+- **The live result is a cross-vendor correctness check, not an A/B causal
+  claim.** It was not rerun against 0.38.0, so it shows that the new behavior
+  answered correctly without observed misguidance; it does not say how many of
+  those answers the feature alone changed.
+
 ## [0.38.0] - 2026-09-09
 
 ### Added
