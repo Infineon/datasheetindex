@@ -509,10 +509,11 @@ per-part answer on a family datasheet. Six things now address it:
    ```
 
 3. **Likely evidence sections are ranked** from the ToC: comparison, selection,
-   plain ordering, overview, then nomenclature. They are navigation leads, not
-   claims that a section contains the requested value. Misleading candidates
-   such as package-marking legends, migration comparisons, and TI's generic
-   package/order appendix are not promoted.
+   plain ordering, then nomenclature. They are navigation leads, not claims
+   that a section contains the requested value. Misleading candidates such as
+   package-marking legends, migration comparisons, overview chapters (usually
+   family-level text), and TI's generic package/order appendix are not
+   promoted.
 4. **`get_section_text` prepends a directive note** when a range may describe
    the family: do not report a per-part answer from that text alone; inspect
    the ranked leads and search for the exact part. With no reliable lead, it

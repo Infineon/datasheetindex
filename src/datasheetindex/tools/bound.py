@@ -383,10 +383,9 @@ def _variant_action(nodes: list[TocNode], start_page: int, end_page: int) -> str
     """A bounded next step that does not claim any candidate is authoritative.
 
     A lead containing the whole range is left out. Only comparison, selection
-    and ordering sections suppress the note, so a read inside an overview or a
-    nomenclature section still gets one -- and naming that same section would
-    send the agent to the text it is already holding, which is family-level
-    text on exactly the documents this note is for.
+    and ordering sections suppress the note, so a read inside a nomenclature
+    section still gets one -- and naming that same section would send the
+    agent to the text it is already holding.
     """
     candidates = [
         candidate
@@ -1019,7 +1018,7 @@ class DatasheetTools:
         2. Zero or more ``=== NOTE: ... ===`` lines, of two kinds. The first,
            when the datasheet covers a product family, says the text may
            describe the family rather than one part and names likely comparison,
-           selection, ordering, overview, or nomenclature sections; it is
+           selection, ordering, or nomenclature sections; it is
            omitted when the range lies inside strong variant evidence. The rest
            are emitted when the requested range cuts content the publisher
            marked as continuing onto an adjacent page, at the head of the

@@ -8,11 +8,16 @@ All notable changes to this project will be documented in this file.
 - **Ranked, vendor-neutral navigation for product-family datasheets.** The
   library no longer assumes that "Ordering Information" is where every
   per-part answer lives. `find_variant_evidence_sections` ranks likely ToC
-  evidence as comparison, selection, plain ordering, overview, then
-  nomenclature; returns at most three navigation leads; and never calls one
-  authoritative. It recognizes forms such as "Device Comparison", "ESP32
-  Series Comparison", "Selection Guide", "Available Devices", and
-  `Table N. Device Comparison`.
+  evidence as comparison, selection, plain ordering, then nomenclature;
+  returns at most three navigation leads; and never calls one authoritative.
+  It recognizes forms such as "Device Comparison", "ESP32 Series Comparison",
+  "Selection Guide", "Available Devices", and `Table N. Device Comparison`.
+  A bare "Comparison" or "Selection" heading needs a qualifier, since both
+  kinds switch the note off. **Overview sections are deliberately not
+  leads:** "Product Overview" and "Device Overview" were ranked during
+  development, and both corpus hits -- ESP32's features list, PIC16F887's
+  block diagrams and pinouts -- were the family-level text the observed wrong
+  answer was read from.
 - **An exact-part fallback when the outline has no trustworthy candidate.**
   This is the honest path for documents such as TI ADS111x, whose Device
   Comparison table is absent from the PDF outline, and Vishay 1N400x, which has
@@ -25,11 +30,12 @@ All notable changes to this project will be documented in this file.
   The note lists the same bounded navigation leads and requires an exact-part
   search. It is omitted when every hit is already inside strong evidence, or
   came from a pattern naming one member of the detected family (`ADS1113` on
-  ADS111x, `OPA340` or `OPA2340` on OPAx340) -- that hit is the exact-part evidence the
-  note asks for, and repeating the instruction on it contradicts the search
-  the agent just ran. The part test is deliberately conservative: a
-  part-shaped feature term such as `ADC12`, or the bare family name, keeps the
-  note. In a multi-pattern search only the part pattern's hits are exempt.
+  ADS111x, `OPA340` or `OPA2340` on OPAx340) -- that hit is the exact-part
+  evidence the note asks for, and repeating the instruction on it contradicts
+  the search the agent just ran. The part test is deliberately conservative: a
+  part-shaped feature term such as `ADC12`, the bare family name, and a family
+  spelled with an uppercase X as vendors write it in body text (`PIC16F88X`,
+  `MSP430F55XX`, `OPAX340`) all keep the note. In a multi-pattern search only the part pattern's hits are exempt.
   The supported Python `DatasheetTools.search_text()` API
   remains a list and is unchanged; only the framework-neutral agent envelope
   gains the optional note.
@@ -40,11 +46,10 @@ All notable changes to this project will be documented in this file.
   per-part answer solely from family-level text -- but the required next step
   is now to inspect ranked evidence and search for the exact part number.
   Suppression is limited to reads wholly inside comparison, selection, or
-  plain ordering candidates; overview and nomenclature remain leads rather
-  than proof. Because a read inside one of those still gets the note, a lead
-  that contains the whole requested range -- or every search hit that raised
-  the note -- is left out of it, so the agent is never sent to the family
-  overview it is already reading.
+  plain ordering candidates; nomenclature remains a lead rather than proof.
+  Because a read inside it still gets the note, a lead that contains the whole
+  requested range -- or every search hit that raised the note -- is left out
+  of it, so the agent is never sent to the section it is already reading.
 - **Variant-evidence ranking is deliberately narrower than boilerplate
   classification.** TI's "Mechanical, Packaging, and Orderable Information"
   remains `boilerplate_category: "ordering"` so a family build does not mark
@@ -85,6 +90,12 @@ All notable changes to this project will be documented in this file.
   claim.** It was not rerun against 0.38.0, so it shows that the new behavior
   answered correctly without observed misguidance; it does not say how many of
   those answers the feature alone changed.
+- **Leads changed after the live run, on two of its documents.** Overview leads
+  were removed afterwards: ESP32 now lists only its Series Comparison, and
+  PIC16F887 only "Product Identification System" plus the exact-part search.
+  Neither answer in the run came from an overview (ESP32 used the comparison
+  section, PIC16F883 exact-part evidence), but those two notes were not
+  re-exercised live in their final form.
 
 ## [0.38.0] - 2026-09-09
 

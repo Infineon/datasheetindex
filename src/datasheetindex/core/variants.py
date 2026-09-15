@@ -127,9 +127,7 @@ class VariantSignal:
     rule: str
 
 
-VariantEvidenceKind = Literal[
-    "comparison", "selection", "ordering", "overview", "nomenclature"
-]
+VariantEvidenceKind = Literal["comparison", "selection", "ordering", "nomenclature"]
 
 
 @dataclass(frozen=True)
@@ -154,12 +152,18 @@ class VariantEvidenceSection:
         return start_page >= self.start_page and end_page <= self.end_page
 
 
+# A bare "Comparison" or "Selection" heading is not enough. Both kinds switch
+# the note off for reads inside them, which is the costly direction to err in,
+# and unqualified they as often compare topologies or select a filter mode
+# (Bosch "Filter selection", Microchip "Channel selection" are the corpus
+# shapes one word away). The only corpus bare "Comparison" sits under
+# "ESP32 Series Comparison", which qualifies on its own.
 _EVIDENCE_PATTERNS: list[tuple[VariantEvidenceKind, str, re.Pattern[str]]] = [
     (
         "comparison",
         "comparison-title",
         re.compile(
-            r"^(?:(?:device|series|product|part|variant|family)\s+)?"
+            r"^(?:device|series|product|part|variant|family)\s+"
             r"(?:feature\s+)?comparison(?:\s+table)?$"
             r"|^[a-z0-9][a-z0-9-]*\s+series\s+comparison$"
         ),
@@ -168,17 +172,12 @@ _EVIDENCE_PATTERNS: list[tuple[VariantEvidenceKind, str, re.Pattern[str]]] = [
         "selection",
         "selection-title",
         re.compile(
-            r"^(?:(?:product|device|part|variant)\s+)?"
-            r"selection(?:\s+(?:guide|table))?$"
+            r"^(?:(?:product|device|part|variant)\s+)?selection\s+(?:guide|table)$"
+            r"|^(?:product|device|part|variant)\s+selection$"
             r"|^available\s+(?:devices?|options?|parts?|products?)$"
             r"|^(?:product|device|part|variant)\s+"
             r"(?:matrix|options?|variants?)$"
         ),
-    ),
-    (
-        "overview",
-        "overview-title",
-        re.compile(r"^(?:device|family|product|series)\s+overview$"),
     ),
     (
         "nomenclature",
@@ -191,12 +190,16 @@ _EVIDENCE_PATTERNS: list[tuple[VariantEvidenceKind, str, re.Pattern[str]]] = [
     ),
 ]
 
+# There is deliberately no `overview` kind. "Product Overview" / "Device
+# Overview" was ranked here once, and both corpus hits pointed at family-level
+# text -- ESP32's features list, PIC16F887's block diagrams and pinouts -- which
+# is the text the observed wrong answer was read from. A lead that sends the
+# agent there does harm; no lead degrades to the exact-part search.
 _EVIDENCE_RANK: dict[VariantEvidenceKind, int] = {
     "comparison": 0,
     "selection": 1,
     "ordering": 2,
-    "overview": 3,
-    "nomenclature": 4,
+    "nomenclature": 3,
 }
 
 # A comparison nested under one of these headings usually compares this family
@@ -229,7 +232,7 @@ _ORDERING_EVIDENCE_RE = re.compile(
 
 # Kinds whose title says the section distinguishes individual variants. A read
 # or search hit wholly inside one of these is already where the note would send
-# the agent; overview and nomenclature remain leads, not proof.
+# the agent; nomenclature remains a lead, not proof.
 RESOLVING_EVIDENCE_KINDS: frozenset[VariantEvidenceKind] = frozenset(
     {"comparison", "selection", "ordering"}
 )
@@ -350,6 +353,8 @@ def _wildcard_part_pattern(token: str) -> str:
     channel digit: ``OPAx340`` covers OPA340 as well as OPA2340 and OPA4340.
     A leading or trailing ``x`` may not. Empty there, ``ADS111x`` would admit
     ``ADS111`` -- the family's base name, which is a family search.
+
+    Each wildcard is a capture group, so a caller can see what filled it.
     """
     pieces = []
     for index, char in enumerate(token):
@@ -357,8 +362,15 @@ def _wildcard_part_pattern(token: str) -> str:
             pieces.append(re.escape(char))
             continue
         interior = token[:index].strip("x") and token[index + 1 :].strip("x")
-        pieces.append("[a-z0-9]{0,3}" if interior else "[a-z0-9]{1,3}")
+        pieces.append("([a-z0-9]{0,3})" if interior else "([a-z0-9]{1,3})")
     return "".join(pieces)
+
+
+# A digit followed by X is a vendor's own family spelling -- PIC16F88X,
+# MSP430F55XX, ADS111X -- written in body text as well as titles. Uppercase, so
+# `_is_wildcard_token` (lowercase x only) does not see it, and casefolding
+# would otherwise let the prefix rule accept it as one part.
+_DIGIT_WILDCARD_RE = re.compile(r"[0-9]x", re.IGNORECASE)
 
 
 def is_exact_part_query(query: str, family: str) -> bool:
@@ -383,19 +395,28 @@ def is_exact_part_query(query: str, family: str) -> bool:
       ``PIC16F882/883/887``). The length floor keeps the bare base name
       ``MSP430`` a family search.
 
-    A wildcard family token itself (``ADS111x``) is never an exact part.
+    A family spelling is never an exact part, in either case: the wildcard
+    token itself (``ADS111x``), a digit followed by X (``PIC16F88X``,
+    ``MSP430F55XX``), or an X standing in a wildcard position (``OPAX340``).
     """
     query = query.strip()
-    if not _PART_TOKEN.fullmatch(query) or _is_wildcard_token(query):
+    if (
+        not _PART_TOKEN.fullmatch(query)
+        or _is_wildcard_token(query)
+        or _DIGIT_WILDCARD_RE.search(query)
+    ):
         return False
 
     folded = query.casefold()
     tokens = _PART_TOKEN.findall(family)
     for token in tokens:
         token_folded = token.casefold()
-        if _is_wildcard_token(token) and re.fullmatch(
-            _wildcard_part_pattern(token_folded), folded
-        ):
+        match = (
+            re.fullmatch(_wildcard_part_pattern(token_folded), folded)
+            if _is_wildcard_token(token)
+            else None
+        )
+        if match and not any("x" in filled for filled in match.groups()):
             return True
         if folded == token_folded:
             if len(tokens) >= 2:

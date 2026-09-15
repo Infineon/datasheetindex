@@ -603,7 +603,7 @@ class TestVariantEvidenceSections:
         assert found[0].kind == "ordering"
         assert found[0].start_page == 69
 
-    def test_microchip_migration_comparison_does_not_beat_device_overview(self):
+    def test_microchip_migration_comparison_is_not_a_lead(self):
         nodes = [
             TocNode(title="1.0 Device Overview", level=1, start_page=14),
             TocNode(
@@ -623,10 +623,47 @@ class TestVariantEvidenceSections:
 
         found = find_variant_evidence_sections(nodes)
 
-        assert [(x.kind, x.start_page) for x in found] == [
-            ("overview", 14),
-            ("nomenclature", 320),
-        ]
+        assert [(x.kind, x.start_page) for x in found] == [("nomenclature", 320)]
+
+    @pytest.mark.parametrize(
+        "title", ["Product Overview", "1.0 Device Overview", "Family Overview"]
+    )
+    def test_an_overview_is_not_a_lead(self, title):
+        """Both corpus hits were family-level text: ESP32's features list and
+        PIC16F887's block diagrams -- where the observed wrong answer came from."""
+        assert (
+            find_variant_evidence_sections(
+                [TocNode(title=title, level=1, start_page=2)]
+            )
+            == []
+        )
+
+    @pytest.mark.parametrize(
+        "title",
+        ["Comparison", "Feature Comparison", "Comparison Table", "Selection"],
+    )
+    def test_an_unqualified_heading_is_not_a_lead(self, title):
+        """These kinds switch the note off, so a generic heading must not."""
+        assert (
+            find_variant_evidence_sections(
+                [TocNode(title=f"7.3 {title}", level=2, start_page=30)]
+            )
+            == []
+        )
+
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "Device Comparison",
+            "Family Feature Comparison",
+            "Selection Table",
+            "Device Selection",
+        ],
+    )
+    def test_a_qualified_heading_still_is(self, title):
+        assert find_variant_evidence_sections(
+            [TocNode(title=title, level=1, start_page=30)]
+        )
 
     def test_marking_legends_are_not_feature_evidence(self):
         nodes = [
@@ -793,8 +830,8 @@ class TestNestedEvidenceKeepsItsParent:
 
 
 class TestLeadsNeverNameTheRangeBeingRead:
-    """Overview and nomenclature do not suppress the note, so they must not be
-    offered as the place to check while the agent is already reading them."""
+    """Nomenclature does not suppress the note, so it must not be offered as
+    the place to check while the agent is already reading it."""
 
     def _tools(self, naming_title="Product Identification System"):
         from datasheetindex.models import DatasheetArtifacts
@@ -823,12 +860,12 @@ class TestLeadsNeverNameTheRangeBeingRead:
         )
         return tools
 
-    def test_a_read_inside_the_overview_does_not_name_the_overview(self):
+    def test_an_overview_is_never_named(self):
         from datasheetindex.tools.bound import DatasheetTools
 
-        out = DatasheetTools.get_section_text(self._tools(), 3, 3)
+        out = DatasheetTools.get_section_text(self._tools(), 20, 20)
         assert "Do NOT report a per-part answer" in out
-        assert '"Product overview"' not in out
+        assert "Product overview" not in out
         assert '"Device Comparison" (page 9)' in out
         assert '"Product Identification System" (page 50)' in out
 
@@ -843,7 +880,7 @@ class TestLeadsNeverNameTheRangeBeingRead:
         out = DatasheetTools.get_section_text(self._tools(naming_title), 50, 51)
         assert "Do NOT report a per-part answer" in out
         assert f'"{naming_title}"' not in out
-        assert '"Product overview" (page 3)' in out
+        assert '"Device Comparison" (page 9)' in out
 
     def test_product_naming_is_offered_as_a_lead_elsewhere(self):
         from datasheetindex.tools.bound import DatasheetTools
@@ -854,22 +891,22 @@ class TestLeadsNeverNameTheRangeBeingRead:
     def test_a_wide_read_spanning_a_lead_still_names_it(self):
         from datasheetindex.tools.bound import DatasheetTools
 
-        out = DatasheetTools.get_section_text(self._tools(), 1, 20)
-        assert '"Product overview" (page 3)' in out
+        out = DatasheetTools.get_section_text(self._tools(), 20, 60)
+        assert '"Product Identification System" (page 50)' in out
 
-    def test_search_hits_all_inside_the_overview_do_not_name_it(self):
+    def test_search_hits_all_inside_nomenclature_do_not_name_it(self):
         tools = self._tools()
-        note = tools.variant_search_note("Body 3", tools.search_text("Body 3."))
+        note = tools.variant_search_note("Body 5", tools.search_text("Body 51."))
         assert note is not None
-        assert '"Product overview"' not in note
+        assert '"Product Identification System"' not in note
         assert '"Device Comparison" (page 9)' in note
 
     def test_search_hits_spread_beyond_a_lead_keep_it(self):
         tools = self._tools()
-        hits = tools.search_text(["Body 3.", "Body 20."])
-        note = tools.variant_search_note(["Body 3.", "Body 20."], hits)
+        hits = tools.search_text(["Body 51.", "Body 20."])
+        note = tools.variant_search_note(["Body 51.", "Body 20."], hits)
         assert note is not None
-        assert '"Product overview" (page 3)' in note
+        assert '"Product Identification System" (page 50)' in note
 
 
 class TestExactPartQuery:
@@ -907,6 +944,13 @@ class TestExactPartQuery:
             ("MSP430F552", "MSP430F552x, MSP430F551x"),
             ("ESP32", "ESP32"),
             ("MSP430", "MSP430F552x, MSP430F551x"),
+            # The family in uppercase X, as vendors write it in body text.
+            ("ADS111X", "ADS111x"),
+            ("PIC16F88X", "PIC16F882/883/884/886/887"),
+            ("MSP430F55XX", "MSP430F552x, MSP430F551x"),
+            ("OPAX340", "OPAx340"),
+            ("XX555", "xx555"),
+            ("SNX4HC595", "SNx4HC595"),
             # Not a single token.
             ("ADS1113 comparator", "ADS111x"),
             ("", "ADS111x"),
