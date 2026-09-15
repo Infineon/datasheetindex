@@ -14,12 +14,16 @@ from pathlib import Path
 from typing import cast
 
 import pymupdf
+import pytest
 
 from datasheetindex import DatasheetIndex
+from datasheetindex.core.boilerplate import classify_title
 from datasheetindex.core.structure import build_tree
 from datasheetindex.core.variants import (
     detect_variants,
+    find_resolving_evidence,
     find_variant_evidence_sections,
+    is_exact_part_query,
     title_text,
 )
 from datasheetindex.models import TocNode
@@ -653,6 +657,159 @@ class TestVariantEvidenceSections:
 
         assert len(find_variant_evidence_sections(nodes)) == 3
         assert len(find_variant_evidence_sections(nodes, limit=None)) == 4
+
+
+class TestPlainOrderingSpellingsAreEvidence:
+    """Evidence ordering is narrower than boilerplate ordering by exclusion only.
+
+    The TI compound appendix and marking legends are left out on purpose. A
+    plain ordering heading left out by accident loses a family both its lead
+    and its note suppression while the agent reads that very table.
+    """
+
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "Ordering Information",
+            "Ordering Guide",
+            "Ordering Details",
+            "Ordering Code",
+            "Ordering codes",
+            "Order Information",
+            "Order numbers",
+            "Order codes",
+            "Ordering Information Scheme",
+            "How to order",
+            "Part numbers",
+            "Part Number Information",
+            "Device Ordering Information",
+        ],
+    )
+    def test_boilerplate_ordering_spelling_is_ordering_evidence(self, title):
+        assert classify_title(title) == "ordering"
+        found = find_variant_evidence_sections(
+            [TocNode(title=f"9 {title}", level=1, start_page=40)]
+        )
+        assert [x.kind for x in found] == ["ordering"], title
+
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "Mechanical, Packaging, and Orderable Information",
+            "Orderable Information",
+            "Package Option Addendum",
+            "Package Marking Information",
+        ],
+    )
+    def test_deliberate_exclusions_stay_excluded(self, title):
+        assert classify_title(title) == "ordering"
+        assert (
+            find_variant_evidence_sections(
+                [TocNode(title=title, level=1, start_page=40)]
+            )
+            == []
+        )
+
+
+class TestNestedEvidenceKeepsItsParent:
+    """De-duplication shapes the displayed leads, never note suppression."""
+
+    def _nodes(self):
+        return [
+            TocNode(title="4 Features", level=1, start_page=10, end_page=68),
+            TocNode(
+                title="8 Ordering information",
+                level=1,
+                start_page=69,
+                end_page=83,
+                nodes=[
+                    TocNode(
+                        title="8.1 Selection guide",
+                        level=2,
+                        start_page=70,
+                        end_page=70,
+                    )
+                ],
+            ),
+        ]
+
+    def test_display_list_collapses_to_the_higher_ranked_child(self):
+        found = find_variant_evidence_sections(self._nodes())
+        assert [(x.kind, x.start_page) for x in found] == [("selection", 70)]
+
+    def test_resolving_evidence_keeps_the_parent_chapter(self):
+        found = find_resolving_evidence(self._nodes())
+        assert {(x.kind, x.start_page) for x in found} == {
+            ("selection", 70),
+            ("ordering", 69),
+        }
+
+    def _tools(self):
+        from datasheetindex.models import DatasheetArtifacts
+        from datasheetindex.tools.bound import DatasheetTools
+
+        text = "\n".join(f"--- PAGE {n} ---\nBody {n}." for n in range(1, 91))
+        tools = DatasheetTools.__new__(DatasheetTools)
+        tools._artifacts = DatasheetArtifacts(
+            json_data={
+                "total_pages": 90,
+                "toc": [],
+                "figures": [],
+                "multi_variant": {"family": "PSC3P5xD", "rule": "wildcard"},
+            },
+            text_content=text,
+            nodes=self._nodes(),
+        )
+        return tools
+
+    def test_a_read_of_the_parent_table_is_suppressed(self):
+        from datasheetindex.tools.bound import DatasheetTools
+
+        out = DatasheetTools.get_section_text(self._tools(), 72, 75)
+        assert "product family" not in out
+
+    def test_a_search_hit_in_the_parent_table_gets_no_note(self):
+        tools = self._tools()
+        assert tools.variant_search_note("Body", tools.search_text("Body 75")) is None
+
+
+class TestExactPartQuery:
+    """A search naming one family member is the evidence the note asks for."""
+
+    @pytest.mark.parametrize(
+        ("query", "family"),
+        [
+            ("ADS1113", "ADS111x"),
+            ("ads1113", "ADS111x"),
+            ("OPA2340", "OPAx340"),
+            ("NE555", "xx555"),
+            ("MSP430F5519", "MSP430F552x, MSP430F551x"),
+            ("PIC16F887", "PIC16F882/883/884/886/887"),
+            ("1N4007", "1N4001, 1N4002, 1N4003"),
+            ("LM211", "LM111, LM211, LM311"),
+            ("ESP32-S0WD", "ESP32"),
+        ],
+    )
+    def test_a_family_member_is_an_exact_part(self, query, family):
+        assert is_exact_part_query(query, family)
+
+    @pytest.mark.parametrize(
+        ("query", "family"),
+        [
+            # Feature terms that happen to be part-shaped.
+            ("ADC12", "MSP430F552x, MSP430F551x"),
+            ("comparator", "ADS111x"),
+            # The family itself, by name or by wildcard.
+            ("ADS111x", "ADS111x"),
+            ("ESP32", "ESP32"),
+            ("MSP430", "MSP430F552x, MSP430F551x"),
+            # Not a single token.
+            ("ADS1113 comparator", "ADS111x"),
+            ("", "ADS111x"),
+        ],
+    )
+    def test_a_feature_or_family_search_is_not(self, query, family):
+        assert not is_exact_part_query(query, family)
 
 
 class TestLlmFallbackKeepsTheSuppression:

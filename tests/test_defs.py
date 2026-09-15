@@ -45,7 +45,8 @@ def _family_search_pdf(path):
     """A family datasheet with a family hit and a comparison-table hit."""
     doc = pymupdf.open()
     texts = [
-        "ADS111x family features include a programmable comparator.",
+        "ADS111x family features include a programmable comparator.\n"
+        "ADS1113 is the base model.",
         "Device Comparison\nADS1113 comparator: No",
         "Mechanical, Packaging, and Orderable Information",
     ]
@@ -855,6 +856,38 @@ def test_family_search_inside_comparison_omits_the_note(tmp_path):
 
     assert payload["results"]
     assert "note" not in payload
+
+
+def test_family_search_for_the_exact_part_omits_the_note(tmp_path):
+    """The note asks for this search; repeating it on the result contradicts it."""
+    pdf = tmp_path / "family.pdf"
+    _family_search_pdf(pdf)
+    defs = _defs_by_name()
+    _run(defs["build_datasheet"].handler, {"pdf_source": str(pdf)})
+
+    payload = json.loads(
+        _run(defs["search_text"].handler, {"query": "ADS1113"})["content"][0]["text"]
+    )
+
+    assert payload["results"]
+    assert "note" not in payload
+
+
+def test_family_search_mixing_a_part_and_a_feature_keeps_the_note(tmp_path):
+    pdf = tmp_path / "family.pdf"
+    _family_search_pdf(pdf)
+    defs = _defs_by_name()
+    _run(defs["build_datasheet"].handler, {"pdf_source": str(pdf)})
+
+    payload = json.loads(
+        _run(
+            defs["search_text"].handler,
+            {"query": ["ADS1113", "family features"]},
+        )["content"][0]["text"]
+    )
+
+    assert {r["pattern"] for r in payload["results"]} == {"ADS1113", "family features"}
+    assert "does not establish that every part has it" in payload["note"]
 
 
 def test_search_note_is_absent_when_the_document_has_no_figures(tmp_path):

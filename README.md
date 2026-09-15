@@ -518,8 +518,10 @@ per-part answer on a family datasheet. Six things now address it:
    the ranked leads and search for the exact part. With no reliable lead, it
    says only to search for the exact part rather than inventing a destination.
 5. **`search_text` returns one conditional top-level note** when hits occur
-   outside strong variant evidence. It is not repeated per hit and does not
-   change the Python API's list return type.
+   outside strong variant evidence. Hits for a pattern naming one family
+   member (`ADS1113` on ADS111x) do not trigger it, since that search is what
+   the note asks for. It is not repeated per hit and does not change the
+   Python API's list return type.
 6. **A standing caution** in the `build_datasheet` and `get_section_text`
    descriptions, phrased for every datasheet.
 

@@ -48,7 +48,9 @@ from datasheetindex.core.textfile import (
 from datasheetindex.core.textfile import search_text as search_text_content
 from datasheetindex.core.variants import (
     VariantEvidenceSection,
+    find_resolving_evidence,
     find_variant_evidence_sections,
+    is_exact_part_query,
 )
 from datasheetindex.index import REGENERATE_TOC_REQUIRES_CLIENT, DatasheetIndex
 from datasheetindex.llm.client import (
@@ -378,9 +380,6 @@ def _continuation_notes(text_content: str, start_page: int, end_page: int) -> li
     return notes
 
 
-_RESOLVING_EVIDENCE_KINDS = {"comparison", "selection", "ordering"}
-
-
 def _variant_action(candidates: list[VariantEvidenceSection]) -> str:
     """A bounded next step that does not claim any candidate is authoritative."""
     if not candidates:
@@ -417,16 +416,15 @@ def _variant_note(
         return []
 
     family = variant.get("family", "")
-    candidates = find_variant_evidence_sections(artifacts.nodes, limit=None)
     # A wide read that merely spans an evidence section still needs the warning;
     # suppress it only when the complete request is already inside a section
     # whose title says it compares, selects, or orders individual variants.
     if any(
-        candidate.kind in _RESOLVING_EVIDENCE_KINDS
-        and candidate.contains(start_page, end_page)
-        for candidate in candidates
+        section.contains(start_page, end_page)
+        for section in find_resolving_evidence(artifacts.nodes)
     ):
         return []
+    candidates = find_variant_evidence_sections(artifacts.nodes)
 
     # The imperative phrasing is measured, not stylistic. Driving a live
     # Sonnet agent through the MCP server on the PSoC Control C3 datasheet,
@@ -1042,42 +1040,47 @@ class DatasheetTools:
         section = extract_section_text(artifacts.text_content, start_page, end_page)
         return "\n".join([header, *notes, section])
 
-    def variant_search_note(self, matches: list[TextSearchMatch]) -> str | None:
+    def variant_search_note(
+        self, query: str | list[str], matches: list[TextSearchMatch]
+    ) -> str | None:
         """Return one family-applicability caveat for an exposed search result.
 
         Kept out of ``search_text`` itself so the supported Python API retains
         its list return type. The agent-tool adapter has a response envelope
         where this can be attached once per call rather than repeated on every
         hit.
+
+        A hit needs the caveat unless it sits inside comparison, selection, or
+        ordering evidence, or was produced by a pattern naming one family
+        member (see ``is_exact_part_query``): that hit is the exact-part
+        evidence the note would otherwise tell the agent to go and search for.
         """
         artifacts = self._require_artifacts()
         variant = artifacts.json_data.get("multi_variant")
         if not variant or not matches:
             return None
 
-        candidates = find_variant_evidence_sections(artifacts.nodes, limit=None)
-        resolving = [
-            candidate
-            for candidate in candidates
-            if candidate.kind in _RESOLVING_EVIDENCE_KINDS
-        ]
-        if resolving and all(
-            any(
-                candidate.contains(match["page"], match["page"])
-                for candidate in resolving
-            )
-            for match in matches
-        ):
+        family = variant.get("family", "")
+        resolving = find_resolving_evidence(artifacts.nodes)
+
+        def needs_note(match: TextSearchMatch) -> bool:
+            # A single-string search leaves hits untagged; a list tags each.
+            pattern = match.get("pattern", query if isinstance(query, str) else "")
+            if is_exact_part_query(pattern, family):
+                return False
+            page = match["page"]
+            return not any(section.contains(page, page) for section in resolving)
+
+        if not any(needs_note(match) for match in matches):
             return None
 
-        family = variant.get("family", "")
         named = f" ({family})" if family else ""
         return (
             f"This datasheet covers a product family{named}. A search hit "
             "outside a part-specific comparison, selection, or ordering "
             "section shows that the family documentation names the term; it "
             "does not establish that every part has it. "
-            f"{_variant_action(candidates)}"
+            f"{_variant_action(find_variant_evidence_sections(artifacts.nodes))}"
         )
 
     def search_text(

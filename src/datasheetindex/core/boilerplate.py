@@ -76,8 +76,10 @@ _BOILERPLATE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         "ordering",
         re.compile(
             r"^("
-            r"ordering\s+(information|guide|details?|codes?)"
-            r"|order(ing)?\s+(information|number|numbers)"
+            # `scheme` for ST's "Ordering Information Scheme". Every plain
+            # spelling here is mirrored by `core.variants._ORDERING_EVIDENCE_RE`.
+            r"ordering\s+(information|guide|details?|codes?)(\s+scheme)?"
+            r"|order(ing)?\s+(information|numbers?|codes?)(\s+scheme)?"
             r"|part\s+(number|numbers|numbering)(\s+information)?"
             r"|marking\s+(information|codes?)"
             # `system` is optional because Microchip writes the full
@@ -86,7 +88,7 @@ _BOILERPLATE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
             # on every Microchip datasheet and left it inheriting the packaging
             # chapter's deprioritize hint.
             r"|product\s+(identification(\s+system)?|marking|naming)"
-            r"|device\s+(marking|ordering)"
+            r"|device\s+(marking|ordering(\s+information)?)"
             # Sibling of `device marking`. The legend maps package markings
             # back to part numbers, so it is per-part identifying information
             # -- it must ride `ordering`, the only category multi_variant

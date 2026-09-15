@@ -264,7 +264,7 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                     if tools.captions_blocked()
                     else _EMPTY_SEARCH_RASTER_NOTE
                 )
-            elif note := tools.variant_search_note(results):
+            elif note := tools.variant_search_note(args["query"], results):
                 payload["note"] = note
             return _ok(payload)
         except Exception as exc:

@@ -56,6 +56,7 @@ holds the actual question; the library supplies the cheap, certain half.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
@@ -212,9 +213,25 @@ _EVIDENCE_TABLE_PREFIX_RE = re.compile(r"^table\s+[a-z0-9]+(?:[.-][a-z0-9]+)*[\s
 # on ADS111x and MSP430 it points far past the real comparison table. Keep that
 # boilerplate classification in ``boilerplate.py`` without promoting every
 # spelling there into variant evidence.
+#
+# Narrower than the boilerplate `ordering` branch by *exclusion only*: every
+# plain ordering spelling there must match here too ("Ordering Code" on
+# RP2040, "How to Order", ST's "Ordering Information Scheme"), or a family
+# whose per-part table uses it loses both its lead and its note suppression.
+# tests/test_variants.py pins that subset relationship.
 _ORDERING_EVIDENCE_RE = re.compile(
-    r"^(?:ordering\s+(?:information|guide|details?)|"
-    r"order(?:ing)?\s+information|device\s+ordering)$"
+    r"^(?:order(?:ing)?\s+(?:information|guide|details?|codes?|numbers?)"
+    r"(?:\s+scheme)?"
+    r"|part\s+numbers?(?:\s+information)?"
+    r"|how\s+to\s+order"
+    r"|device\s+ordering(?:\s+information)?)$"
+)
+
+# Kinds whose title says the section distinguishes individual variants. A read
+# or search hit wholly inside one of these is already where the note would send
+# the agent; overview and nomenclature remain leads, not proof.
+RESOLVING_EVIDENCE_KINDS: frozenset[VariantEvidenceKind] = frozenset(
+    {"comparison", "selection", "ordering"}
 )
 
 
@@ -251,10 +268,52 @@ def find_variant_evidence_sections(
     candidates rather than one allegedly authoritative section: comparison
     tables beat ordering appendices when both exist, while documents with no
     recognizable section honestly return an empty list.
+
+    Nested candidates collapse to the higher-ranked one, which makes this a
+    *display* list. Do not test page containment against it: a "Selection
+    guide" subsection would hide the "Ordering information" chapter around it,
+    and a read of that chapter's table would be treated as outside evidence.
+    Use ``find_resolving_evidence`` for that.
     """
     if limit is not None and limit < 1:
         return []
 
+    result: list[VariantEvidenceSection] = []
+    for section in _ranked_evidence_candidates(nodes):
+        overlaps_existing = any(
+            (
+                existing.start_page <= section.start_page
+                and section.end_page <= existing.end_page
+            )
+            or (
+                section.start_page <= existing.start_page
+                and existing.end_page <= section.end_page
+            )
+            for existing in result
+        )
+        if overlaps_existing:
+            continue
+        result.append(section)
+        if limit is not None and len(result) == limit:
+            break
+    return result
+
+
+def find_resolving_evidence(nodes: list[TocNode]) -> list[VariantEvidenceSection]:
+    """Every comparison, selection, or ordering candidate, nested ones included.
+
+    The containment set behind note suppression. Unlike the display list it is
+    never de-duplicated, so a parent chapter survives beside its subsections.
+    """
+    return [
+        section
+        for section in _ranked_evidence_candidates(nodes)
+        if section.kind in RESOLVING_EVIDENCE_KINDS
+    ]
+
+
+def _ranked_evidence_candidates(nodes: list[TocNode]) -> list[VariantEvidenceSection]:
+    """All classified candidates, ordered by (rank, level, start page)."""
     candidates: list[tuple[int, int, int, VariantEvidenceSection]] = []
 
     def walk(children: list[TocNode], ancestors: tuple[str, ...]) -> None:
@@ -277,26 +336,58 @@ def find_variant_evidence_sections(
 
     walk(nodes, ())
     candidates.sort(key=lambda item: item[:3])
+    return [section for _, _, _, section in candidates]
 
-    result: list[VariantEvidenceSection] = []
-    for _, _, _, section in candidates:
-        overlaps_existing = any(
-            (
-                existing.start_page <= section.start_page
-                and section.end_page <= existing.end_page
+
+# A shared prefix shorter than this says nothing: "AD" joins ADS1113 to ADC12.
+_MIN_SHARED_PART_PREFIX = 4
+
+
+def is_exact_part_query(query: str, family: str) -> bool:
+    """Whether a search pattern names one member of ``family``, not the family.
+
+    A hit for such a query is where the part is explicitly named -- exactly
+    the evidence the family note asks the agent to go and find -- so repeating
+    the note on it contradicts the search the agent just ran.
+
+    Conservative by design, because the costs are asymmetric: a missed part
+    query costs one redundant note, while a feature term mistaken for a part
+    ("ADC12" on an MSP430 family) silently drops the caution on the hit most
+    likely to be misread. So the query must be a single part-shaped token and
+    must relate to a token of the detected family:
+
+    - it fits a wildcard family token (``OPA2340`` for ``OPAx340``);
+    - it is one of two or more listed tokens (``LM211`` in ``LM111, LM211``) --
+      with a single token, equality is the family name itself (``ESP32``);
+    - or it shares a 4+ character prefix with a family token and is at least
+      as long (``MSP430F5519`` for ``MSP430F552x``, ``PIC16F887`` for
+      ``PIC16F882/883/887``). The length floor keeps the bare base name
+      ``MSP430`` a family search.
+
+    A wildcard family token itself (``ADS111x``) is never an exact part.
+    """
+    query = query.strip()
+    if not _PART_TOKEN.fullmatch(query) or _is_wildcard_token(query):
+        return False
+
+    folded = query.casefold()
+    tokens = _PART_TOKEN.findall(family)
+    for token in tokens:
+        token_folded = token.casefold()
+        if _is_wildcard_token(token):
+            wildcard = "".join(
+                "[a-z0-9]{1,3}" if c == "x" else re.escape(c.casefold()) for c in token
             )
-            or (
-                section.start_page <= existing.start_page
-                and existing.end_page <= section.end_page
-            )
-            for existing in result
-        )
-        if overlaps_existing:
+            if re.fullmatch(wildcard, folded):
+                return True
+        if folded == token_folded:
+            if len(tokens) >= 2:
+                return True
             continue
-        result.append(section)
-        if limit is not None and len(result) == limit:
-            break
-    return result
+        shared = len(os.path.commonprefix([folded, token_folded]))
+        if shared >= _MIN_SHARED_PART_PREFIX and len(folded) >= len(token_folded):
+            return True
+    return False
 
 
 def _bounded(parts: list[str]) -> str:

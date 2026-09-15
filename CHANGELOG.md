@@ -23,8 +23,14 @@ All notable changes to this project will be documented in this file.
   comparison, selection, or ordering evidence now gets one top-level note:
   the family documentation naming a term does not prove every part has it.
   The note lists the same bounded navigation leads and requires an exact-part
-  search. It is omitted when a page-restricted search is already wholly inside
-  strong evidence. The supported Python `DatasheetTools.search_text()` API
+  search. It is omitted when every hit is already inside strong evidence, or
+  came from a pattern naming one member of the detected family (`ADS1113` on
+  ADS111x, `OPA2340` on OPAx340) -- that hit is the exact-part evidence the
+  note asks for, and repeating the instruction on it contradicts the search
+  the agent just ran. The part test is deliberately conservative: a
+  part-shaped feature term such as `ADC12`, or the bare family name, keeps the
+  note. In a multi-pattern search only the part pattern's hits are exempt.
+  The supported Python `DatasheetTools.search_text()` API
   remains a list and is unchanged; only the framework-neutral agent envelope
   gains the optional note.
 
@@ -44,7 +50,20 @@ All notable changes to this project will be documented in this file.
   comparison evidence. Package-marking legends and comparisons nested under
   migration, revision, or legacy ancestry are likewise excluded. Repeated
   headings at different page ranges remain distinct, while overlapping
-  parent/child candidates collapse.
+  parent/child candidates collapse in the displayed leads -- and **only**
+  there: note suppression tests containment against every comparison,
+  selection, and ordering candidate, so a "Selection guide" subsection cannot
+  hide the "Ordering information" chapter around it and put the note on a read
+  of that chapter's table.
+- **The evidence ordering pattern is narrower than the boilerplate one by
+  exclusion only.** Every plain ordering spelling the boilerplate classifier
+  accepts is also an evidence candidate -- "Ordering Code(s)", "Order numbers",
+  "How to order", "Part numbers" -- and a test pins that subset relationship,
+  since a heading missed here loses a family both its lead and its note
+  suppression. The boilerplate `ordering` branch also gains "Order codes", ST's
+  "Ordering Information Scheme", and "Device Ordering Information". On the
+  corpus this adds an "Ordering code" lead to the two Raspberry Pi documents,
+  neither a detected family, and changes nothing else.
 
 ### Validation
 - **The generalized behavior was exercised live, not only through fixtures.**
