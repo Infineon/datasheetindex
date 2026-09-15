@@ -41,6 +41,30 @@ def _make_pdf(path, text="Supply voltage 4.5V to 5.5V"):
     doc.close()
 
 
+def _family_search_pdf(path):
+    """A family datasheet with a family hit and a comparison-table hit."""
+    doc = pymupdf.open()
+    texts = [
+        "ADS111x family features include a programmable comparator.\n"
+        "ADS1113 is the base model.",
+        "Device Comparison\nADS1113 comparator: No",
+        "Mechanical, Packaging, and Orderable Information",
+    ]
+    for text in texts:
+        page = doc.new_page()
+        page.insert_text((72, 72), text)
+    doc.set_metadata({"title": "ADS111x Precision ADC"})
+    doc.set_toc(
+        [
+            [1, "Features", 1],
+            [1, "Device Comparison", 2],
+            [1, "Mechanical, Packaging, and Orderable Information", 3],
+        ]
+    )
+    doc.save(str(path))
+    doc.close()
+
+
 def _defs_by_name():
     return {d.name: d for d in create_datasheet_tool_defs()}
 
@@ -797,6 +821,73 @@ def test_search_note_is_absent_when_there_are_hits(tmp_path):
 
     assert payload["results"]
     assert "note" not in payload
+
+
+def test_family_search_returns_one_applicability_note(tmp_path):
+    pdf = tmp_path / "family.pdf"
+    _family_search_pdf(pdf)
+    defs = _defs_by_name()
+    _run(defs["build_datasheet"].handler, {"pdf_source": str(pdf)})
+
+    payload = json.loads(
+        _run(defs["search_text"].handler, {"query": "comparator"})["content"][0]["text"]
+    )
+
+    assert len(payload["results"]) == 2
+    note = payload["note"]
+    assert "does not establish that every part has it" in note
+    assert "Device Comparison" in note
+    assert "exact requested part number" in note
+    assert note.count("This datasheet covers a product family") == 1
+
+
+def test_family_search_inside_comparison_omits_the_note(tmp_path):
+    pdf = tmp_path / "family.pdf"
+    _family_search_pdf(pdf)
+    defs = _defs_by_name()
+    _run(defs["build_datasheet"].handler, {"pdf_source": str(pdf)})
+
+    payload = json.loads(
+        _run(
+            defs["search_text"].handler,
+            {"query": "comparator", "page": 2},
+        )["content"][0]["text"]
+    )
+
+    assert payload["results"]
+    assert "note" not in payload
+
+
+def test_family_search_for_the_exact_part_omits_the_note(tmp_path):
+    """The note asks for this search; repeating it on the result contradicts it."""
+    pdf = tmp_path / "family.pdf"
+    _family_search_pdf(pdf)
+    defs = _defs_by_name()
+    _run(defs["build_datasheet"].handler, {"pdf_source": str(pdf)})
+
+    payload = json.loads(
+        _run(defs["search_text"].handler, {"query": "ADS1113"})["content"][0]["text"]
+    )
+
+    assert payload["results"]
+    assert "note" not in payload
+
+
+def test_family_search_mixing_a_part_and_a_feature_keeps_the_note(tmp_path):
+    pdf = tmp_path / "family.pdf"
+    _family_search_pdf(pdf)
+    defs = _defs_by_name()
+    _run(defs["build_datasheet"].handler, {"pdf_source": str(pdf)})
+
+    payload = json.loads(
+        _run(
+            defs["search_text"].handler,
+            {"query": ["ADS1113", "family features"]},
+        )["content"][0]["text"]
+    )
+
+    assert {r["pattern"] for r in payload["results"]} == {"ADS1113", "family features"}
+    assert "does not establish that every part has it" in payload["note"]
 
 
 def test_search_note_is_absent_when_the_document_has_no_figures(tmp_path):

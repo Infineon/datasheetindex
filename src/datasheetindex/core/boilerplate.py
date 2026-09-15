@@ -76,17 +76,19 @@ _BOILERPLATE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         "ordering",
         re.compile(
             r"^("
-            r"ordering\s+(information|guide|details?|codes?)"
-            r"|order(ing)?\s+(information|number|numbers)"
+            # `scheme` for ST's "Ordering Information Scheme". Every plain
+            # spelling here is mirrored by `core.variants._ORDERING_EVIDENCE_RE`.
+            r"ordering\s+(information|guide|details?|codes?)(\s+scheme)?"
+            r"|order(ing)?\s+(information|numbers?|codes?)(\s+scheme)?"
             r"|part\s+(number|numbers|numbering)(\s+information)?"
             r"|marking\s+(information|codes?)"
             # `system` is optional because Microchip writes the full
             # "Product Identification System" and the pattern is anchored --
-            # without it the branch missed the per-part table on every
-            # Microchip datasheet, and `_ordering_section` aimed the
-            # multi-variant note at the package-marking legend instead.
+            # without it the branch missed the per-part identification section
+            # on every Microchip datasheet and left it inheriting the packaging
+            # chapter's deprioritize hint.
             r"|product\s+(identification(\s+system)?|marking|naming)"
-            r"|device\s+(marking|ordering)"
+            r"|device\s+(marking|ordering(\s+information)?)"
             # Sibling of `device marking`. The legend maps package markings
             # back to part numbers, so it is per-part identifying information
             # -- it must ride `ordering`, the only category multi_variant
@@ -98,9 +100,10 @@ _BOILERPLATE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
             # TI's compound chapter heading, and the two orderable-table
             # titles nested under it. `ordering` rather than `mechanical`
             # even though the drawings live there too: this is the branch
-            # `flag_boilerplate` suppresses on a family datasheet and the one
-            # `_ordering_section` looks for, and the per-part addendum is
-            # what both need to reach. Measured on 12 of 24 corpus documents.
+            # `flag_boilerplate` suppresses on a family datasheet. Variant
+            # evidence ranking deliberately uses a narrower ordering pattern:
+            # on ADS111x this appendix is not where feature differences live.
+            # Measured on 12 of 24 corpus documents.
             r"|mechanical,?\s+packaging,?\s+and\s+orderable\s+information"
             r"|orderable\s+information"
             r"|package\s+option\s+addendum"
@@ -240,10 +243,10 @@ def is_marking_legend(title: str) -> bool:
 
     These classify `ordering` -- correctly, they are per-part identifying
     information and `multi_variant` must lift them -- but they are *not* the
-    per-part parameter table, so `tools/bound._ordering_section` must never
-    aim the multi-variant note at one. Separate from ``classify_title``
-    because the two questions are different: what a section is, against
-    whether it is the section an agent should be sent to.
+    per-part parameter table, so ``core.variants`` excludes them from evidence
+    candidates. Separate from ``classify_title`` because the two questions are
+    different: what a section is, against whether it is a useful navigation
+    lead for feature applicability.
     """
     return bool(_MARKING_LEGEND_RE.match(_normalize_title(title)))
 

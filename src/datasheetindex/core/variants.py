@@ -56,12 +56,20 @@ holds the actual question; the library supplies the cheap, certain half.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     import pymupdf
+
+    from datasheetindex.models import TocNode
+
+from datasheetindex.core.boilerplate import (
+    _normalize_title,
+    is_marking_legend,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +125,307 @@ class VariantSignal:
 
     family: str
     rule: str
+
+
+VariantEvidenceKind = Literal["comparison", "selection", "ordering", "nomenclature"]
+
+
+@dataclass(frozen=True)
+class VariantEvidenceSection:
+    """A ToC section likely to distinguish members of a product family.
+
+    This is navigation evidence, not a claim that the section contains the
+    answer to any particular question. ``kind`` and ``reason`` expose the
+    deterministic title rule behind the ranking instead of inventing a
+    confidence score the corpus has not calibrated.
+    """
+
+    title: str
+    start_page: int
+    end_page: int
+    breadcrumb: str
+    kind: VariantEvidenceKind
+    reason: str
+
+    def contains(self, start_page: int, end_page: int) -> bool:
+        """Whether a requested range lies wholly inside this section."""
+        return start_page >= self.start_page and end_page <= self.end_page
+
+
+# A bare "Comparison" or "Selection" heading is not enough. Both kinds switch
+# the note off for reads inside them, which is the costly direction to err in,
+# and unqualified they as often compare topologies or select a filter mode
+# (Bosch "Filter selection", Microchip "Channel selection" are the corpus
+# shapes one word away). The only corpus bare "Comparison" sits under
+# "ESP32 Series Comparison", which qualifies on its own.
+_EVIDENCE_PATTERNS: list[tuple[VariantEvidenceKind, str, re.Pattern[str]]] = [
+    (
+        "comparison",
+        "comparison-title",
+        re.compile(
+            r"^(?:device|series|product|part|variant|family)\s+"
+            r"(?:feature\s+)?comparison(?:\s+table)?$"
+            r"|^[a-z0-9][a-z0-9-]*\s+series\s+comparison$"
+        ),
+    ),
+    (
+        "selection",
+        "selection-title",
+        re.compile(
+            r"^(?:(?:product|device|part|variant)\s+)?selection\s+(?:guide|table)$"
+            r"|^(?:product|device|part|variant)\s+selection$"
+            r"|^available\s+(?:devices?|options?|parts?|products?)$"
+            r"|^(?:product|device|part|variant)\s+"
+            r"(?:matrix|options?|variants?)$"
+        ),
+    ),
+    (
+        "nomenclature",
+        "nomenclature-title",
+        re.compile(
+            r"^(?:nomenclature|part\s+number\s+nomenclature|product\s+naming|"
+            r"part\s+numbering(?:\s+information)?|"
+            r"product\s+identification(?:\s+system)?)$"
+        ),
+    ),
+]
+
+# There is deliberately no `overview` kind. "Product Overview" / "Device
+# Overview" was ranked here once, and both corpus hits pointed at family-level
+# text -- ESP32's features list, PIC16F887's block diagrams and pinouts -- which
+# is the text the observed wrong answer was read from. A lead that sends the
+# agent there does harm; no lead degrades to the exact-part search.
+_EVIDENCE_RANK: dict[VariantEvidenceKind, int] = {
+    "comparison": 0,
+    "selection": 1,
+    "ordering": 2,
+    "nomenclature": 3,
+}
+
+# A comparison nested under one of these headings usually compares this family
+# with a predecessor or sibling, rather than comparing members of the family.
+_EVIDENCE_NEGATIVE_ANCESTRY = re.compile(
+    r"^(?:migrat|revision|legacy|related\s+products?|device\s+and\s+"
+    r"documentation\s+support)"
+)
+
+_EVIDENCE_TABLE_PREFIX_RE = re.compile(r"^table\s+[a-z0-9]+(?:[.-][a-z0-9]+)*[\s:.-]+")
+
+# A plain ordering chapter can carry a feature matrix (the motivating PSoC
+# document does). TI's broad mechanical/package addendum generally does not:
+# on ADS111x and MSP430 it points far past the real comparison table. Keep that
+# boilerplate classification in ``boilerplate.py`` without promoting every
+# spelling there into variant evidence.
+#
+# Narrower than the boilerplate `ordering` branch by *exclusion only*: every
+# plain ordering spelling there must match here too ("Ordering Code" on
+# RP2040, "How to Order", ST's "Ordering Information Scheme"), or a family
+# whose per-part table uses it loses both its lead and its note suppression.
+# tests/test_variants.py pins that subset relationship.
+_ORDERING_EVIDENCE_RE = re.compile(
+    r"^(?:order(?:ing)?\s+(?:information|guide|details?|codes?|numbers?)"
+    r"(?:\s+scheme)?"
+    r"|part\s+numbers?(?:\s+information)?"
+    r"|how\s+to\s+order"
+    r"|device\s+ordering(?:\s+information)?)$"
+)
+
+# Kinds whose title says the section distinguishes individual variants. A read
+# or search hit wholly inside one of these is already where the note would send
+# the agent; nomenclature remains a lead, not proof.
+RESOLVING_EVIDENCE_KINDS: frozenset[VariantEvidenceKind] = frozenset(
+    {"comparison", "selection", "ordering"}
+)
+
+
+def _classify_evidence_title(
+    title: str, ancestors: tuple[str, ...]
+) -> tuple[VariantEvidenceKind, str] | None:
+    """Classify one ToC title as variant evidence, if it is a useful candidate."""
+    normalized = _normalize_title(title)
+    normalized = _EVIDENCE_TABLE_PREFIX_RE.sub("", normalized, count=1)
+    if not normalized or any(
+        _EVIDENCE_NEGATIVE_ANCESTRY.match(parent) for parent in ancestors
+    ):
+        return None
+
+    # Marking legends identify a package but do not compare feature values.
+    if is_marking_legend(title):
+        return None
+
+    for kind, reason, pattern in _EVIDENCE_PATTERNS:
+        if pattern.match(normalized):
+            return kind, reason
+
+    if _ORDERING_EVIDENCE_RE.match(normalized):
+        return "ordering", "ordering-title"
+    return None
+
+
+def find_variant_evidence_sections(
+    nodes: list[TocNode], *, limit: int | None = 3
+) -> list[VariantEvidenceSection]:
+    """Return ranked ToC sections likely to carry per-variant evidence.
+
+    The ranking is title-only and deterministic. It deliberately returns
+    candidates rather than one allegedly authoritative section: comparison
+    tables beat ordering appendices when both exist, while documents with no
+    recognizable section honestly return an empty list.
+
+    Nested candidates collapse to the higher-ranked one, which makes this a
+    *display* list. Do not test page containment against it: a "Selection
+    guide" subsection would hide the "Ordering information" chapter around it,
+    and a read of that chapter's table would be treated as outside evidence.
+    Use ``find_resolving_evidence`` for that.
+    """
+    if limit is not None and limit < 1:
+        return []
+
+    result: list[VariantEvidenceSection] = []
+    for section in _ranked_evidence_candidates(nodes):
+        overlaps_existing = any(
+            (
+                existing.start_page <= section.start_page
+                and section.end_page <= existing.end_page
+            )
+            or (
+                section.start_page <= existing.start_page
+                and existing.end_page <= section.end_page
+            )
+            for existing in result
+        )
+        if overlaps_existing:
+            continue
+        result.append(section)
+        if limit is not None and len(result) == limit:
+            break
+    return result
+
+
+def find_resolving_evidence(nodes: list[TocNode]) -> list[VariantEvidenceSection]:
+    """Every comparison, selection, or ordering candidate, nested ones included.
+
+    The containment set behind note suppression. Unlike the display list it is
+    never de-duplicated, so a parent chapter survives beside its subsections.
+    """
+    return [
+        section
+        for section in _ranked_evidence_candidates(nodes)
+        if section.kind in RESOLVING_EVIDENCE_KINDS
+    ]
+
+
+def _ranked_evidence_candidates(nodes: list[TocNode]) -> list[VariantEvidenceSection]:
+    """All classified candidates, ordered by (rank, level, start page)."""
+    candidates: list[tuple[int, int, int, VariantEvidenceSection]] = []
+
+    def walk(children: list[TocNode], ancestors: tuple[str, ...]) -> None:
+        for node in children:
+            classified = _classify_evidence_title(node.title, ancestors)
+            if classified is not None:
+                kind, reason = classified
+                section = VariantEvidenceSection(
+                    title=node.title,
+                    start_page=node.start_page,
+                    end_page=node.end_page or node.start_page,
+                    breadcrumb=node.breadcrumb or node.title,
+                    kind=kind,
+                    reason=reason,
+                )
+                candidates.append(
+                    (_EVIDENCE_RANK[kind], node.level, node.start_page, section)
+                )
+            walk(node.nodes, (*ancestors, _normalize_title(node.title)))
+
+    walk(nodes, ())
+    candidates.sort(key=lambda item: item[:3])
+    return [section for _, _, _, section in candidates]
+
+
+# A shared prefix shorter than this says nothing: "AD" joins ADS1113 to ADC12.
+_MIN_SHARED_PART_PREFIX = 4
+
+
+def _wildcard_part_pattern(token: str) -> str:
+    """A regex for the parts a casefolded wildcard family token stands for.
+
+    An interior ``x`` may be empty, because TI's single-channel part drops the
+    channel digit: ``OPAx340`` covers OPA340 as well as OPA2340 and OPA4340.
+    A leading or trailing ``x`` may not. Empty there, ``ADS111x`` would admit
+    ``ADS111`` -- the family's base name, which is a family search.
+
+    Each wildcard is a capture group, so a caller can see what filled it.
+    """
+    pieces = []
+    for index, char in enumerate(token):
+        if char != "x":
+            pieces.append(re.escape(char))
+            continue
+        interior = token[:index].strip("x") and token[index + 1 :].strip("x")
+        pieces.append("([a-z0-9]{0,3})" if interior else "([a-z0-9]{1,3})")
+    return "".join(pieces)
+
+
+# A digit followed by X is a vendor's own family spelling -- PIC16F88X,
+# MSP430F55XX, ADS111X -- written in body text as well as titles. Uppercase, so
+# `_is_wildcard_token` (lowercase x only) does not see it, and casefolding
+# would otherwise let the prefix rule accept it as one part.
+_DIGIT_WILDCARD_RE = re.compile(r"[0-9]x", re.IGNORECASE)
+
+
+def is_exact_part_query(query: str, family: str) -> bool:
+    """Whether a search pattern names one member of ``family``, not the family.
+
+    A hit for such a query is where the part is explicitly named -- exactly
+    the evidence the family note asks the agent to go and find -- so repeating
+    the note on it contradicts the search the agent just ran.
+
+    Conservative by design, because the costs are asymmetric: a missed part
+    query costs one redundant note, while a feature term mistaken for a part
+    ("ADC12" on an MSP430 family) silently drops the caution on the hit most
+    likely to be misread. So the query must be a single part-shaped token and
+    must relate to a token of the detected family:
+
+    - it fits a wildcard family token (``OPA2340`` or ``OPA340`` for
+      ``OPAx340``, see ``_wildcard_part_pattern``);
+    - it is one of two or more listed tokens (``LM211`` in ``LM111, LM211``) --
+      with a single token, equality is the family name itself (``ESP32``);
+    - or it shares a 4+ character prefix with a family token and is at least
+      as long (``MSP430F5519`` for ``MSP430F552x``, ``PIC16F887`` for
+      ``PIC16F882/883/887``). The length floor keeps the bare base name
+      ``MSP430`` a family search.
+
+    A family spelling is never an exact part, in either case: the wildcard
+    token itself (``ADS111x``), a digit followed by X (``PIC16F88X``,
+    ``MSP430F55XX``), or an X standing in a wildcard position (``OPAX340``).
+    """
+    query = query.strip()
+    if (
+        not _PART_TOKEN.fullmatch(query)
+        or _is_wildcard_token(query)
+        or _DIGIT_WILDCARD_RE.search(query)
+    ):
+        return False
+
+    folded = query.casefold()
+    tokens = _PART_TOKEN.findall(family)
+    for token in tokens:
+        token_folded = token.casefold()
+        match = (
+            re.fullmatch(_wildcard_part_pattern(token_folded), folded)
+            if _is_wildcard_token(token)
+            else None
+        )
+        if match and not any("x" in filled for filled in match.groups()):
+            return True
+        if folded == token_folded:
+            if len(tokens) >= 2:
+                return True
+            continue
+        shared = len(os.path.commonprefix([folded, token_folded]))
+        if shared >= _MIN_SHARED_PART_PREFIX and len(folded) >= len(token_folded):
+            return True
+    return False
 
 
 def _bounded(parts: list[str]) -> str:

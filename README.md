@@ -339,11 +339,15 @@ tools for the bound PDF source:
   `=== Pages X-Y of N ===` for a range) followed by zero or more
   `=== NOTE: ... ===` lines -- when the range cuts content the publisher marked
   as continuing onto an adjacent page, and when the datasheet covers a product
-  family, in which case the note names the family and points at the per-part
-  ordering table; absence of a note is not a completeness guarantee
+  family, in which case the note names the family, suggests likely per-part
+  evidence, and requires an exact-part search; absence of a note is not a
+  completeness guarantee
 - `search_text` - find page-aware text snippets in the latest build (pass a
   single pattern or a list of patterns), even when labels wrap across lines or
   table values interrupt the phrase; each hit carries the section breadcrumb.
+  On a detected family, a successful search outside strong variant evidence
+  carries one top-level note that a family-level mention does not prove
+  applicability to every part.
   Searches the text layer only: when it finds nothing in a document that has
   raster figures, the result carries a `note` pointing at the `figures` digest
   and `inspect_page` (see "Figure indexing and captions")
@@ -483,19 +487,20 @@ explanation attached; the way to detect it is `toc_source`, which stays
 
 About half of datasheets describe a family of parts, and their body text
 describes the family: a features list or a peripheral section can name
-something a given part does not have, while the per-part answer sits in the
-selection or ordering table. An agent that misses this answers confidently and
+something a given part does not have. The per-part answer may sit in a device
+comparison, selection table, ordering table, overview, local availability note,
+or ordinary ratings table. An agent that misses this answers confidently and
 wrongly -- observed, and reproducible 9 times out of 9 before this existed.
 
 The library used to make it worse: `boilerplate_category: "ordering"` marks a
-section as one to *deprioritize*, and on a family datasheet that is the one
-section that can answer the question. Four things now address it:
+section as one to *deprioritize*, even though an ordering section can carry the
+per-part answer on a family datasheet. Six things now address it:
 
 1. **The `ordering` category is suppressed** when a family is detected, and
    only that category -- single-part datasheets are unchanged. TI's compound
    chapter heading ("Mechanical, Packaging, and Orderable Information") is
-   classified `ordering` rather than `mechanical` so that this suppression,
-   and the note in 3, reach the orderable addendum inside it.
+   still classified `ordering` rather than `mechanical`, so the orderable
+   addendum inside it is not marked skippable.
 2. **`multi_variant`** appears in the ToC JSON and in `build_datasheet`'s
    manifest, present only when detected:
 
@@ -503,13 +508,31 @@ section that can answer the question. Four things now address it:
    "multi_variant": { "family": "PSC3P5xD, PSC3M5xD", "rule": "wildcard" }
    ```
 
-3. **`get_section_text` prepends a note** when the range may describe the
-   family, naming the ordering section and suppressed inside it. It is phrased
-   as an instruction ("Do NOT report a per-part answer from the text below ...
-   Before answering, read *X*"), which is measured rather than stylistic: a
-   descriptive phrasing scored 1/10 against this one's 10/10.
-4. **A standing caution** in the `build_datasheet` and `get_section_text`
+3. **Likely evidence sections are ranked** from the ToC: comparison, selection,
+   plain ordering, then nomenclature. They are navigation leads, not claims
+   that a section contains the requested value. Misleading candidates such as
+   package-marking legends, migration comparisons, overview chapters (usually
+   family-level text), and TI's generic package/order appendix are not
+   promoted.
+4. **`get_section_text` prepends a directive note** when a range may describe
+   the family: do not report a per-part answer from that text alone; inspect
+   the ranked leads and search for the exact part. With no reliable lead, it
+   says only to search for the exact part rather than inventing a destination.
+5. **`search_text` returns one conditional top-level note** when hits occur
+   outside strong variant evidence. Hits for a pattern naming one family
+   member (`ADS1113` on ADS111x) do not trigger it, since that search is what
+   the note asks for. It is not repeated per hit and does not change the
+   Python API's list return type.
+6. **A standing caution** in the `build_datasheet` and `get_section_text`
    descriptions, phrased for every datasheet.
+
+The directive form remains measured: on the original PSoC case, a descriptive
+warning scored 1/10 and the explicit prohibition plus required next step scored
+10/10. The generalized behavior was then tested live with only the five MCP
+tools available: three runs each across Infineon, TI, Espressif, Microchip,
+Vishay, and a single-part Bosch control, with **21/21 correct answers** and no
+family warning on the control. This is a cross-vendor correctness check, not an
+A/B claim against the previous release.
 
 Detection reads the **title block** only -- page 1's largest-font text plus the
 PDF metadata title -- at a measured precision of 1.00 and recall of 0.85. So

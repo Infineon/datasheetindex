@@ -273,7 +273,7 @@ block diagram boxes.
 
 **`breadcrumb` semantics:** Pre-computed full ancestry path joined by `" > "`, including the node's own title. Lets downstream agents and RAG indexers see structural context without re-traversing parents. Computed once in `assign_breadcrumbs()` during `build_tree()`, so the LLM ToC fallback path gets it too. Omitted from JSON only when empty -- which happens for a bare `TocNode` constructed in isolation (e.g. legacy code) or a node with an empty title and no ancestry.
 
-**`boilerplate_category` semantics:** Title-pattern classification into one of seven categories -- `legal`, `ordering`, `mechanical`, `revision`, `contact`, `toc`, `glossary` -- so agents can deprioritize disclaimers, ordering tables, package drawings, revision histories, contact lists, ToC/index pages, and glossaries during navigation. `mechanical` and `ordering` are split rather than merged because they answer different questions -- "what are the package dimensions" against "which part number" -- and only `ordering` is per-variant authoritative, so only `ordering` is suppressed on a family datasheet. TI's compound chapter heading ("Mechanical, Packaging, and Orderable Information", 12 of 24 corpus documents) classifies as `ordering` for that reason: the orderable addendum inside it is what the suppression and `_ordering_section` must reach. Empty when the title doesn't match any known boilerplate pattern (the common case for substantive sections). Subsections of a boilerplate-flagged parent inherit the parent's category. No LLM call, no text scan -- title-only regex matching after normalization strips leading section numbering (`12.3.4`, `Appendix A:`, `Chapter 3`) and trailing punctuation. The agent can choose how strict to be: skip flagged sections entirely, scan them last, or ignore the field.
+**`boilerplate_category` semantics:** Title-pattern classification into one of seven categories -- `legal`, `ordering`, `mechanical`, `revision`, `contact`, `toc`, `glossary` -- so agents can deprioritize disclaimers, ordering tables, package drawings, revision histories, contact lists, ToC/index pages, and glossaries during navigation. `mechanical` and `ordering` are split rather than merged because they answer different questions -- "what are the package dimensions" against "which part number" -- and only `ordering` is suppressed on a family datasheet: it can contain a per-part feature table, so labelling it skippable is unsafe even though it is not guaranteed to answer a particular question. TI's compound chapter heading ("Mechanical, Packaging, and Orderable Information", 12 of 24 corpus documents) still classifies as `ordering`, because its orderable addendum is not ordinary mechanical data. It is deliberately **not** promoted by `find_variant_evidence_sections`, however: on ADS111x and MSP430 it points far past the real device-comparison evidence. Boilerplate classification and variant-evidence ranking answer different questions and do not share every title pattern. Empty when the title doesn't match any known boilerplate pattern (the common case for substantive sections). Subsections of a boilerplate-flagged parent inherit the category. No LLM call, no text scan -- title-only regex matching after normalization strips leading section numbering (`12.3.4`, `Appendix A:`, `Chapter 3`) and trailing punctuation. The agent can choose how strict to be: skip flagged sections entirely, scan them last, or ignore the field.
 
 **What's included (deterministic, no LLM needed):**
 - Hierarchical structure with node IDs and page ranges
@@ -1179,24 +1179,45 @@ A single PDF covers multiple product variants (e.g., TPS651/652/653, AD7606/7606
 
 The agent handles all five patterns through reasoning — it knows which product the user asked about and filters accordingly. For variant column tables, `inspect_page` is particularly useful since column alignment is often lost in raw text extraction.
 
-**What the library does to help, as of 0.37.0.** Reasoning only starts if the agent
+**What the library does to help.** Reasoning only starts if the agent
 realizes the document covers a family, and the observed failure is that it does not:
 asked whether one part had a peripheral, an agent answered from a family-level
 features section while the ordering table said no for that part. Worse, the library
 was steering it that way — `boilerplate_category: "ordering"` marks a section as
-*deprioritized*, and on a family datasheet that is the one authoritative section.
+*deprioritized*, and on that datasheet it held the part-specific answer.
 
-Four deterministic layers now address this, and the split between them is deliberate:
+Six deterministic layers now address this, and the split between them is deliberate:
 
 1. **The `ordering` category is suppressed** when a family is detected (`core/boilerplate.py`), and only that category. This removes a mis-steer rather than adding a reminder, and leaves the ~48% single-part documents untouched, where ordering really is boilerplate.
 2. **`multi_variant` is published** in the ToC JSON and in `get_artifact_manifest`, present only when detected, carrying the family text and the rule that matched.
-3. **`get_section_text` emits a read-time `=== NOTE ===`** naming the family and pointing at the ordering section — suppressed inside that section, where it would point at the current page. The build-time field alone is not enough: in the observed failure the agent already held the ToC, the ordering section and page 1, and still went wrong many turns later, at read time. The note is phrased as an instruction ("Do NOT report a per-part answer from the text below ... Before answering, read X"), which is measured rather than stylistic: against a live agent, n=10 per variant, a descriptive phrasing answered 1/10 and this one 10/10 (Fisher exact p < 0.001).
-4. **A standing caution** in the `build_datasheet` and `get_section_text` descriptions, phrased for every datasheet, because it is the floor for families the detector misses.
+3. **`find_variant_evidence_sections` ranks navigation candidates** from the ToC: comparison, selection, plain ordering, then nomenclature. These are leads, never claims that a section contains the requested value. Comparison and selection need a qualifier ("Device Comparison", "Selection Guide"), because both switch the note off and a bare heading is as often a topology comparison or a filter selection. Overview is deliberately not a kind: "Product Overview" / "Device Overview" was ranked during development, and both corpus hits (ESP32's features list, PIC16F887's block diagrams and pinouts) were exactly the family-level text the observed wrong answer came from. Comparison beats ordering on TI MSP430; Series Comparison wins on Espressif; plain Ordering Information remains the PSoC lead. A comparison under migration/revision ancestry and package-marking legends are excluded. TI's broad mechanical/package appendix is not promoted. Otherwise the ordering pattern accepts every plain ordering spelling the boilerplate classifier does ("Ordering Code", "How to order", "Part numbers"), and a test pins that. Duplicate parent/child candidates are collapsed and at most three are shown -- in the *displayed* leads only. Suppression below tests containment against every comparison/selection/ordering candidate (`find_resolving_evidence`), because a higher-ranked "Selection guide" subsection would otherwise hide the "Ordering information" chapter around it.
+4. **`get_section_text` emits a read-time `=== NOTE ===`** naming the family, listing those likely evidence sections, and requiring an exact-part search. It is suppressed only when the complete read is already inside a comparison, selection, or plain ordering candidate. A read inside a nomenclature section therefore still gets the note, so any lead containing the whole range is dropped from it (and, for the search note, any lead containing every hit that raised it) -- otherwise the note would send the agent to the text it is already reading. With no candidate (ADS111x and Vishay 1N400x in the corpus), it honestly gives only the exact-part fallback. The build-time field alone is not enough: the observed failure happened many turns later, at read time.
+5. **`search_text` attaches one conditional top-level note** when a successful search exposes any hit outside strong variant evidence. It never repeats the warning per hit, leaves the supported Python list return type unchanged, and omits the note when every hit is inside comparison/selection/ordering evidence or came from a pattern naming one family member (`is_exact_part_query`: `ADS1113` on ADS111x) -- such a hit is the exact-part evidence the note asks for. That test is conservative on purpose: a part-shaped feature term (`ADC12`) or the bare family name keeps the note, since a missed part costs one redundant note and a false match drops the caution on the hit most likely to be misread. This closes the shortcut where an agent answers directly from a family-level snippet without adding noise to every search.
+6. **A standing caution** in the `build_datasheet` and `get_section_text` descriptions, phrased for every datasheet, because it is the floor for families the detector misses.
+
+The explicit prohibition in the read-time note is measured rather than stylistic:
+against a live agent on the PSoC document, n=10 per variant, a descriptive phrasing
+answered 1/10 and the prohibition plus a required next step answered 10/10 (Fisher
+exact p < 0.001). That experiment named PSoC's ordering table. The generalized
+candidate ranking does **not** inherit the 10/10 claim. It was checked separately
+with Claude Sonnet 5, built-in tools disabled and only the five datasheet tools
+available: n=3 each for PSoC CORDIC/MOTIF, ADS1113 comparator/PGA, MSP430F5519
+ADC12_A, ESP32-S0WD core count, PIC16F883 PORTD, 1N4001 VRRM, and a single-part
+BME280 control. All 21 answers were correct; the control received no family warning.
+This is a cross-vendor correctness check, not an A/B comparison with the prior
+release. The boundary remains intentionally conservative: the library suggests
+where evidence may live, while the agent -- which holds the part number and
+question -- decides what answers it.
 
 Detection is **title-only**, and that is measured rather than assumed — precision
 1.00, recall 0.85 against hand-labelled ground truth over a 25-document corpus, at a
-52% base rate. Precision is the property that matters: a false positive costs noise,
-a false negative costs a confident wrong answer. Two alternatives were measured and
+52% base rate. **Recall is the property that matters**, and the asymmetry is
+measured: forcing the flag onto a single-part datasheet cost a tenth of a turn (6/6
+correct at 4.3 turns against 6/6 at 4.2 unflagged), while a false negative returns
+the unmodified library's behaviour, which answered the motivating per-part question
+0 times in 9. So the rules are conservative about *rejecting* a family, not about
+firing, and a miss degrades to the always-on caution in the tool descriptions rather
+than to silence. Two alternatives were measured and
 rejected. Page-1 **body** text recovers 2 real families out of 57 misses while
 dropping precision to ~0.41, because package order codes (`TXB0104RGY`), companion
 parts (`CC1190`) and tokens that are not part numbers at all (`RGB888`, `PT100`, pin
@@ -1758,8 +1779,15 @@ WHEN TEXT IS SUFFICIENT (no need to inspect):
 MULTI-PRODUCT DATASHEETS:
 Some datasheets cover a product family (e.g., TPS651/652/653) in one PDF.
 When extracting for a specific product:
-• Check early pages for an ordering table or product overview that maps
-  part numbers to their differences (often just a few parameters differ)
+• Do not report a per-part value from family-level text (features lists,
+  peripheral descriptions): it can name something the requested part lacks.
+  This holds whether or not build_datasheet reports multi_variant.
+• Look for part-specific evidence wherever it sits -- a device comparison or
+  selection table, ordering information, or a nomenclature section -- not
+  a product overview, which usually describes the family. These are leads, not guaranteed answers, and none of
+  them is reliably early or preferred.
+• Search for the exact part number and verify the value where that part is
+  explicitly named
 • In tables with variant columns, pick the column for the target product
 • In tables with conditional rows, filter by the target product name
 • If sections are split per variant (e.g., "6.1 AD7606 Specs"), navigate
