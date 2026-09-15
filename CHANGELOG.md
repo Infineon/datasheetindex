@@ -25,7 +25,7 @@ All notable changes to this project will be documented in this file.
   The note lists the same bounded navigation leads and requires an exact-part
   search. It is omitted when every hit is already inside strong evidence, or
   came from a pattern naming one member of the detected family (`ADS1113` on
-  ADS111x, `OPA2340` on OPAx340) -- that hit is the exact-part evidence the
+  ADS111x, `OPA340` or `OPA2340` on OPAx340) -- that hit is the exact-part evidence the
   note asks for, and repeating the instruction on it contradicts the search
   the agent just ran. The part test is deliberately conservative: a
   part-shaped feature term such as `ADC12`, or the bare family name, keeps the
@@ -41,7 +41,10 @@ All notable changes to this project will be documented in this file.
   is now to inspect ranked evidence and search for the exact part number.
   Suppression is limited to reads wholly inside comparison, selection, or
   plain ordering candidates; overview and nomenclature remain leads rather
-  than proof.
+  than proof. Because a read inside one of those still gets the note, a lead
+  that contains the whole requested range -- or every search hit that raised
+  the note -- is left out of it, so the agent is never sent to the family
+  overview it is already reading.
 - **Variant-evidence ranking is deliberately narrower than boilerplate
   classification.** TI's "Mechanical, Packaging, and Orderable Information"
   remains `boilerplate_category: "ordering"` so a family build does not mark

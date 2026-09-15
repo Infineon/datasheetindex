@@ -773,6 +773,74 @@ class TestNestedEvidenceKeepsItsParent:
         assert tools.variant_search_note("Body", tools.search_text("Body 75")) is None
 
 
+class TestLeadsNeverNameTheRangeBeingRead:
+    """Overview and nomenclature do not suppress the note, so they must not be
+    offered as the place to check while the agent is already reading them."""
+
+    def _tools(self):
+        from datasheetindex.models import DatasheetArtifacts
+        from datasheetindex.tools.bound import DatasheetTools
+
+        text = "\n".join(f"--- PAGE {n} ---\nBody {n}." for n in range(1, 61))
+        tools = DatasheetTools.__new__(DatasheetTools)
+        tools._artifacts = DatasheetArtifacts(
+            json_data={
+                "total_pages": 60,
+                "toc": [],
+                "figures": [],
+                "multi_variant": {"family": "PIC16F882/883", "rule": "slash-list"},
+            },
+            text_content=text,
+            nodes=[
+                TocNode(title="Product overview", level=1, start_page=3, end_page=4),
+                TocNode(title="Device Comparison", level=1, start_page=9, end_page=9),
+                TocNode(
+                    title="Product Identification System",
+                    level=1,
+                    start_page=50,
+                    end_page=52,
+                ),
+            ],
+        )
+        return tools
+
+    def test_a_read_inside_the_overview_does_not_name_the_overview(self):
+        from datasheetindex.tools.bound import DatasheetTools
+
+        out = DatasheetTools.get_section_text(self._tools(), 3, 3)
+        assert "Do NOT report a per-part answer" in out
+        assert '"Product overview"' not in out
+        assert '"Device Comparison" (page 9)' in out
+        assert '"Product Identification System" (page 50)' in out
+
+    def test_a_read_inside_nomenclature_does_not_name_it(self):
+        from datasheetindex.tools.bound import DatasheetTools
+
+        out = DatasheetTools.get_section_text(self._tools(), 50, 51)
+        assert '"Product Identification System"' not in out
+        assert '"Product overview" (page 3)' in out
+
+    def test_a_wide_read_spanning_a_lead_still_names_it(self):
+        from datasheetindex.tools.bound import DatasheetTools
+
+        out = DatasheetTools.get_section_text(self._tools(), 1, 20)
+        assert '"Product overview" (page 3)' in out
+
+    def test_search_hits_all_inside_the_overview_do_not_name_it(self):
+        tools = self._tools()
+        note = tools.variant_search_note("Body 3", tools.search_text("Body 3."))
+        assert note is not None
+        assert '"Product overview"' not in note
+        assert '"Device Comparison" (page 9)' in note
+
+    def test_search_hits_spread_beyond_a_lead_keep_it(self):
+        tools = self._tools()
+        hits = tools.search_text(["Body 3.", "Body 20."])
+        note = tools.variant_search_note(["Body 3.", "Body 20."], hits)
+        assert note is not None
+        assert '"Product overview" (page 3)' in note
+
+
 class TestExactPartQuery:
     """A search naming one family member is the evidence the note asks for."""
 
@@ -782,6 +850,8 @@ class TestExactPartQuery:
             ("ADS1113", "ADS111x"),
             ("ads1113", "ADS111x"),
             ("OPA2340", "OPAx340"),
+            # An interior x may be empty: TI's single-channel member.
+            ("OPA340", "OPAx340"),
             ("NE555", "xx555"),
             ("MSP430F5519", "MSP430F552x, MSP430F551x"),
             ("PIC16F887", "PIC16F882/883/884/886/887"),
@@ -801,6 +871,9 @@ class TestExactPartQuery:
             ("comparator", "ADS111x"),
             # The family itself, by name or by wildcard.
             ("ADS111x", "ADS111x"),
+            # A trailing or leading x may not be empty: that is the base name.
+            ("ADS111", "ADS111x"),
+            ("MSP430F552", "MSP430F552x, MSP430F551x"),
             ("ESP32", "ESP32"),
             ("MSP430", "MSP430F552x, MSP430F551x"),
             # Not a single token.

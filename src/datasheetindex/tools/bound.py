@@ -47,7 +47,6 @@ from datasheetindex.core.textfile import (
 )
 from datasheetindex.core.textfile import search_text as search_text_content
 from datasheetindex.core.variants import (
-    VariantEvidenceSection,
     find_resolving_evidence,
     find_variant_evidence_sections,
     is_exact_part_query,
@@ -380,8 +379,20 @@ def _continuation_notes(text_content: str, start_page: int, end_page: int) -> li
     return notes
 
 
-def _variant_action(candidates: list[VariantEvidenceSection]) -> str:
-    """A bounded next step that does not claim any candidate is authoritative."""
+def _variant_action(nodes: list[TocNode], start_page: int, end_page: int) -> str:
+    """A bounded next step that does not claim any candidate is authoritative.
+
+    A lead containing the whole range is left out. Only comparison, selection
+    and ordering sections suppress the note, so a read inside an overview or a
+    nomenclature section still gets one -- and naming that same section would
+    send the agent to the text it is already holding, which is family-level
+    text on exactly the documents this note is for.
+    """
+    candidates = [
+        candidate
+        for candidate in find_variant_evidence_sections(nodes, limit=None)
+        if not candidate.contains(start_page, end_page)
+    ]
     if not candidates:
         return (
             "Search for the exact requested part number and verify the value "
@@ -424,7 +435,6 @@ def _variant_note(
         for section in find_resolving_evidence(artifacts.nodes)
     ):
         return []
-    candidates = find_variant_evidence_sections(artifacts.nodes)
 
     # The imperative phrasing is measured, not stylistic. Driving a live
     # Sonnet agent through the MCP server on the PSoC Control C3 datasheet,
@@ -461,7 +471,7 @@ def _variant_note(
         f"report a per-part answer from the text below: it describes the "
         f"family, and a given part may not have what it names."
     )
-    note += f" {_variant_action(candidates)}"
+    note += f" {_variant_action(artifacts.nodes, start_page, end_page)}"
     return [note + " ==="]
 
 
@@ -1071,16 +1081,19 @@ class DatasheetTools:
             page = match["page"]
             return not any(section.contains(page, page) for section in resolving)
 
-        if not any(needs_note(match) for match in matches):
+        pages = [match["page"] for match in matches if needs_note(match)]
+        if not pages:
             return None
 
         named = f" ({family})" if family else ""
+        # A lead is dropped only when it holds every hit that raised the note,
+        # the search counterpart of a read wholly inside that section.
+        action = _variant_action(artifacts.nodes, min(pages), max(pages))
         return (
             f"This datasheet covers a product family{named}. A search hit "
             "outside a part-specific comparison, selection, or ordering "
             "section shows that the family documentation names the term; it "
-            "does not establish that every part has it. "
-            f"{_variant_action(find_variant_evidence_sections(artifacts.nodes))}"
+            f"does not establish that every part has it. {action}"
         )
 
     def search_text(

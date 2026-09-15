@@ -343,6 +343,24 @@ def _ranked_evidence_candidates(nodes: list[TocNode]) -> list[VariantEvidenceSec
 _MIN_SHARED_PART_PREFIX = 4
 
 
+def _wildcard_part_pattern(token: str) -> str:
+    """A regex for the parts a casefolded wildcard family token stands for.
+
+    An interior ``x`` may be empty, because TI's single-channel part drops the
+    channel digit: ``OPAx340`` covers OPA340 as well as OPA2340 and OPA4340.
+    A leading or trailing ``x`` may not. Empty there, ``ADS111x`` would admit
+    ``ADS111`` -- the family's base name, which is a family search.
+    """
+    pieces = []
+    for index, char in enumerate(token):
+        if char != "x":
+            pieces.append(re.escape(char))
+            continue
+        interior = token[:index].strip("x") and token[index + 1 :].strip("x")
+        pieces.append("[a-z0-9]{0,3}" if interior else "[a-z0-9]{1,3}")
+    return "".join(pieces)
+
+
 def is_exact_part_query(query: str, family: str) -> bool:
     """Whether a search pattern names one member of ``family``, not the family.
 
@@ -356,7 +374,8 @@ def is_exact_part_query(query: str, family: str) -> bool:
     likely to be misread. So the query must be a single part-shaped token and
     must relate to a token of the detected family:
 
-    - it fits a wildcard family token (``OPA2340`` for ``OPAx340``);
+    - it fits a wildcard family token (``OPA2340`` or ``OPA340`` for
+      ``OPAx340``, see ``_wildcard_part_pattern``);
     - it is one of two or more listed tokens (``LM211`` in ``LM111, LM211``) --
       with a single token, equality is the family name itself (``ESP32``);
     - or it shares a 4+ character prefix with a family token and is at least
@@ -374,12 +393,10 @@ def is_exact_part_query(query: str, family: str) -> bool:
     tokens = _PART_TOKEN.findall(family)
     for token in tokens:
         token_folded = token.casefold()
-        if _is_wildcard_token(token):
-            wildcard = "".join(
-                "[a-z0-9]{1,3}" if c == "x" else re.escape(c.casefold()) for c in token
-            )
-            if re.fullmatch(wildcard, folded):
-                return True
+        if _is_wildcard_token(token) and re.fullmatch(
+            _wildcard_part_pattern(token_folded), folded
+        ):
+            return True
         if folded == token_folded:
             if len(tokens) >= 2:
                 return True
