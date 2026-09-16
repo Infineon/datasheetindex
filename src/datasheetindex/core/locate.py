@@ -25,15 +25,19 @@ _Rect = tuple[float, float, float, float]
 
 
 class _Box(TypedDict):
-    pct: dict[str, float]  # {"top","bottom","left","right"}, clamped to 0.0-1.0
-    points: dict[str, float]  # {"x0","y0","x1","y1"}, raw PDF points, unclamped
+    # {"top","bottom","left","right"}, clamped to 0.0-1.0, of the *displayed*
+    # page (page.rect, what inspect_page crops) -- rotation applied.
+    pct: dict[str, float]
+    # {"x0","y0","x1","y1"}, raw PDF points, unclamped, in the page's
+    # *unrotated* coordinate space (get_text/search_for), top-left origin.
+    points: dict[str, float]
 
 
 class TextLocation(TypedDict):
     page: int  # 1-indexed
     match_method: str  # "search_for" | "tokens"
-    page_width: float  # PDF points
-    page_height: float  # PDF points
+    page_width: float  # PDF points, displayed page (rotation applied)
+    page_height: float  # PDF points, displayed page (rotation applied)
     region: _Box  # union of boxes; the inspect_page round-trip input
     boxes: list[_Box]  # >= 1; a multi-line match yields one box per line
     pattern: NotRequired[str]  # which query produced this hit (list queries only)
@@ -44,7 +48,9 @@ def _clamp01(value: float) -> float:
     return min(1.0, max(0.0, value))
 
 
-def _box_from_rect(rect: _Rect, page_rect: pymupdf.Rect) -> _Box:
+def _box_from_rect(
+    rect: _Rect, page_rect: pymupdf.Rect, rotation_matrix: pymupdf.Matrix
+) -> _Box:
     """Normalize a match rectangle against the page.
 
     ``pct`` is clamped to the page; ``points`` deliberately is not.
@@ -57,13 +63,24 @@ def _box_from_rect(rect: _Rect, page_rect: pymupdf.Rect) -> _Box:
     makes this function emit a region its own documented consumer rejects.
     Clamping keeps a genuine match usable instead of unrenderable.
 
+    The two are also in different spaces on a rotated page, deliberately.
+    ``search_for`` reports the unrotated page, and ``points`` keeps that: it is
+    what a PDF-native consumer (an annotation, or pdf.js's page transform, which
+    applies the rotation itself) expects. ``pct`` is mapped through
+    ``rotation_matrix`` first, because ``page.rect`` and ``inspect_page``
+    describe the displayed page; normalizing unrotated points against it put a
+    90-degree page's box on the wrong part of the page, or clamped it flat.
+
     ``points`` stays raw because it means something different: PDF-native
     coordinates for annotation and highlighting, where a glyph that really does
     cross the page edge should be described where it actually sits. So the
     ``pct * page_width == points - page_rect.x0`` identity holds for every box
-    inside the page and is intentionally broken for one that overflows.
+    inside an unrotated page and is intentionally broken for one that overflows.
     """
-    x0, y0, x1, y1 = rect
+    import pymupdf
+
+    displayed = pymupdf.Rect(rect) * rotation_matrix
+    x0, y0, x1, y1 = displayed.x0, displayed.y0, displayed.x1, displayed.y1
     width = page_rect.width
     height = page_rect.height
     return {
@@ -73,11 +90,13 @@ def _box_from_rect(rect: _Rect, page_rect: pymupdf.Rect) -> _Box:
             "top": _clamp01((y0 - page_rect.y0) / height),
             "bottom": _clamp01((y1 - page_rect.y0) / height),
         },
-        "points": {"x0": x0, "y0": y0, "x1": x1, "y1": y1},
+        "points": {"x0": rect[0], "y0": rect[1], "x1": rect[2], "y1": rect[3]},
     }
 
 
-def _union_region(boxes: list[_Box], page_rect: pymupdf.Rect) -> _Box:
+def _union_region(
+    boxes: list[_Box], page_rect: pymupdf.Rect, rotation_matrix: pymupdf.Matrix
+) -> _Box:
     return _box_from_rect(
         (
             min(b["points"]["x0"] for b in boxes),
@@ -86,6 +105,7 @@ def _union_region(boxes: list[_Box], page_rect: pymupdf.Rect) -> _Box:
             max(b["points"]["y1"] for b in boxes),
         ),
         page_rect,
+        rotation_matrix,
     )
 
 
@@ -225,7 +245,10 @@ def locate_text(
                 method = "tokens"
 
             for occurrence in occurrences:
-                boxes = [_box_from_rect(rect, page_rect) for rect in occurrence]
+                boxes = [
+                    _box_from_rect(rect, page_rect, page_obj.rotation_matrix)
+                    for rect in occurrence
+                ]
                 if not boxes:
                     continue
                 key = _dedup_key(page_number, boxes)
@@ -233,7 +256,9 @@ def locate_text(
                     continue
                 seen.add(key)
                 region = (
-                    boxes[0] if len(boxes) == 1 else _union_region(boxes, page_rect)
+                    boxes[0]
+                    if len(boxes) == 1
+                    else _union_region(boxes, page_rect, page_obj.rotation_matrix)
                 )
                 location: TextLocation = {
                     "page": page_number,

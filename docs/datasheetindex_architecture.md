@@ -1091,6 +1091,20 @@ result per match, each carrying `region` (a bounding rectangle) and `boxes`
 straight into `inspect_page(region=...)`) and raw, unclamped PDF points (for
 annotating the PDF directly), plus page dimensions.
 
+**The two coordinate forms live in different spaces on a rotated page, on
+purpose.** The percentages and `page_width`/`page_height` describe the
+*displayed* page (`page.rect`, rotation applied), because that is what
+`inspect_page` crops. The points stay in the *unrotated* space `search_for`
+reports, top-left origin relative to the CropBox, because a PDF-native
+consumer applies the rotation itself: pdf.js's page transform expects exactly
+these points, so rotating them here would rotate a highlight twice. Such a
+consumer must flip y against the CropBox (pdf.js `page.view[3] - y`,
+`page.view[0] + x`), not against `page_height`, which is the displayed height
+and wrong on any 90/270-degree or cropped page. Until 0.39.1 the percentages
+normalized unrotated points against the displayed page and were wrong on every
+rotated page; verified against real pdf.js at all four rotations, with and
+without a CropBox.
+
 **It is deliberately not exposed as an agent tool.** It was, until measurement
 showed the workflow does not pay off: a hit covers 0.07-0.58% of a page (a
 heading match is a 1.6%-tall sliver), so cropping `inspect_page` to it renders

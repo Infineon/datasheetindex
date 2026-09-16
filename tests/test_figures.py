@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from typing import cast
 
 import pymupdf
@@ -292,3 +293,29 @@ def test_blocked_captioning_is_published_in_the_json(tmp_path, monkeypatch):
         artifacts = idx.build(output_dir=str(tmp_path / "out"))
 
     assert artifacts.json_data["figure_captions_blocked"] is True
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_region_crops_the_image_on_a_rotated_page(rotation):
+    """get_image_info reports the unrotated page; the region is the displayed one.
+
+    On a rotated page an unconverted region cropped paper beside the image, and
+    the VLM captioning pass -- which renders exactly this region -- described
+    whatever happened to be there.
+    """
+    doc = _page_with_image(pymupdf.Rect(50, 88, 300, 300), page_size=(612, 792))
+    page = doc[0]
+    page.set_rotation(rotation)
+
+    entries, _ = raster_regions(page)
+    region = cast(dict[str, float], entries[0]["region"])
+    image = inspect_page(doc, 1, region=region, dpi=72)[0]["data"]
+    pix = pymupdf.Pixmap(base64.b64decode(image))
+    samples = pix.samples
+    red = sum(
+        1
+        for i in range(0, len(samples), pix.n)
+        if samples[i] > 200 and samples[i + 1] < 60 and samples[i + 2] < 60
+    )
+    assert red >= 0.9 * pix.width * pix.height
+    doc.close()
