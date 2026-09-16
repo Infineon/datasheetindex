@@ -69,7 +69,9 @@ def raster_regions(
     # default (0.93s vs 1.26s, 1.51s vs 1.66s), so there is no fast path worth
     # keeping for builds that will not caption.
     for info in page.get_image_info(xrefs=True):
-        visible = pymupdf.Rect(info["bbox"]) & rect
+        # get_image_info reports the unrotated page; page.rect -- and so
+        # inspect_page, and the captioning crop -- is the displayed page.
+        visible = (pymupdf.Rect(info["bbox"]) * page.rotation_matrix) & rect
         if visible.is_empty:
             continue
         area_pct = 100.0 * (visible.width * visible.height) / page_area

@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.39.1] - 2026-09-16
+
+### Fixed
+- **`locate_text` percentages on rotated pages.** `search_for` reports the
+  unrotated page, and its box was normalized against the displayed
+  `page.rect`, so on a 90-, 180- or 270-degree page `region["pct"]` pointed
+  at the wrong part of the page or clamped flat (49-84% off on a test page,
+  measured against pdf.js). It is now mapped through the page rotation first
+  and crops the match in `inspect_page`. `region["points"]` is unchanged and
+  stays in unrotated PDF space, which is what pdf.js's page transform expects.
+  A consumer that flips those points into PDF user space must flip against
+  the CropBox (`page.view`), not `page_height`; see the architecture doc.
+- **Raster figure `region` and `bbox` on rotated pages.** `get_image_info` has
+  the same unrotated/displayed mismatch, so a rotated page's figure region --
+  and the VLM captioning crop rendered from it -- could name the wrong area.
+  Latent on the 25-document corpus, whose 18 rotated pages carry no raster
+  images, but pinned by tests at all four rotations.
+
 ## [0.39.0] - 2026-09-15
 
 ### Added

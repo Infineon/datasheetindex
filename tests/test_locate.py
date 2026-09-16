@@ -257,3 +257,40 @@ def test_points_are_not_clamped():
 
     assert loc["region"]["points"]["y1"] > page_height
     assert loc["region"]["pct"]["bottom"] == 1.0
+
+
+def _ink(doc: pymupdf.Document, region: dict[str, float]) -> int:
+    """Dark pixels inspect_page renders for ``region`` on page 1."""
+    data = base64.b64decode(inspect_page(doc, 1, region=region, dpi=72)[0]["data"])
+    pix = pymupdf.Pixmap(data)
+    samples = pix.samples
+    return sum(1 for i in range(0, len(samples), pix.n) if samples[i] < 128)
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+@pytest.mark.parametrize("cropped", [False, True])
+def test_pct_crops_the_match_on_rotated_and_cropped_pages(rotation, cropped):
+    """``pct`` is displayed-page space; ``points`` stays unrotated PDF space.
+
+    Before the conversion a 90-degree page normalized unrotated points against
+    the rotated page.rect, so the region pointed at blank paper or clamped flat.
+    ``points`` must not move: pdf.js applies the page rotation to it itself, and
+    rotating it here would rotate a highlight twice.
+    """
+    doc = pymupdf.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((400, 700), "MARKERTEXT", fontsize=14)
+    if cropped:
+        page.set_cropbox(pymupdf.Rect(20, 30, 590, 770))
+    page.set_rotation(rotation)
+
+    (location,) = locate_text(doc, "MARKERTEXT", page=1)
+    region = location["region"]
+    (hit,) = doc[0].search_for("MARKERTEXT")
+    assert region["points"] == {"x0": hit.x0, "y0": hit.y0, "x1": hit.x1, "y1": hit.y1}
+    assert (location["page_width"], location["page_height"]) == (
+        doc[0].rect.width,
+        doc[0].rect.height,
+    )
+    assert _ink(doc, region["pct"]) > 0
+    doc.close()
