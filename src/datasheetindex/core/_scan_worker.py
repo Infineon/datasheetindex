@@ -31,10 +31,10 @@ import sys
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    if len(args) != 3:
+    if len(args) not in {3, 4}:
         print(
             "usage: python -m datasheetindex.core._scan_worker "
-            "<pdf_path> <total_pages> <out_json>",
+            "<pdf_path> <total_pages> <out_json> [regions]",
             file=sys.stderr,
         )
         return 2
@@ -42,12 +42,29 @@ def main(argv: list[str] | None = None) -> int:
     from datasheetindex.core.structure import _build_table_count_cache_pool
 
     pdf_path, total_pages, out_path = args[0], int(args[1]), args[2]
-    cache = _build_table_count_cache_pool(pdf_path, total_pages)
+    include_bboxes = len(args) == 4 and args[3] == "regions"
+    cache = _build_table_count_cache_pool(
+        pdf_path, total_pages, include_bboxes=include_bboxes
+    )
 
     # Keys are page indices; JSON object keys are always strings, and the
     # caller converts them back.
     with open(out_path, "w", encoding="utf-8") as handle:
-        json.dump({str(page): count for page, count in cache.items()}, handle)
+        if include_bboxes:
+            if not isinstance(cache, tuple):
+                raise RuntimeError("region scan returned counts without bboxes")
+            counts, bboxes = cache
+            json.dump(
+                {
+                    "counts": {str(page): count for page, count in counts.items()},
+                    "bboxes": {str(page): boxes for page, boxes in bboxes.items()},
+                },
+                handle,
+            )
+        else:
+            if isinstance(cache, tuple):
+                raise RuntimeError("count scan returned unexpected bboxes")
+            json.dump({str(page): count for page, count in cache.items()}, handle)
     return 0
 
 

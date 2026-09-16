@@ -26,6 +26,13 @@ from datasheetindex.core.annotations import (
     enrich_with_footnote_markers,
 )
 from datasheetindex.core.artifact_cache import atomic_write_text
+from datasheetindex.core.evidence import (
+    EVIDENCE_SCHEMA_VERSION,
+    EvidenceElement,
+    annotate_figure_entries,
+    link_to_toc,
+    section_elements,
+)
 from datasheetindex.core.figures import DEFAULT_MIN_AREA_PCT
 from datasheetindex.core.preamble import build_front_matter
 from datasheetindex.core.quality import assess_toc_quality
@@ -646,7 +653,13 @@ class DatasheetIndex:
         # before serialization, where an empty tree settles it regardless.
         toc_source = "pdf_outline" if nodes else "none"
         resolved_path = self._resolved_pdf_path
-        enrich_with_table_counts(nodes, doc, pdf_path=resolved_path)
+        table_regions: list[EvidenceElement] = []
+        enrich_with_table_counts(
+            nodes,
+            doc,
+            pdf_path=resolved_path,
+            table_regions=table_regions,
+        )
         t_tables = time.monotonic()
         logger.info("Table counting done in %.1fs", t_tables - t_text)
         enrich_with_continued_tables(nodes, text_content)
@@ -830,6 +843,19 @@ class DatasheetIndex:
             if caption_outcome.failed:
                 enrichment_notes.append("figure_caption_failed")
 
+            evidence_elements = link_to_toc(scan.evidence, nodes)
+            evidence_elements.extend(
+                section_elements(
+                    nodes,
+                    source_kind=(
+                        "generated" if toc_source == "llm_reconstructed" else "literal"
+                    ),
+                )
+            )
+            evidence_elements.extend(annotate_figure_entries(scan.figures))
+            evidence_elements.extend(table_regions)
+            link_to_toc(evidence_elements, nodes)
+
             logger.info("Total build time: %.1fs", time.monotonic() - t_start)
 
             # 7. Build JSON structure
@@ -852,6 +878,10 @@ class DatasheetIndex:
                 "toc_source": toc_source,
                 "toc": [node.to_dict() for node in nodes],
                 "figures": scan.figures,
+                "evidence": {
+                    "schema_version": EVIDENCE_SCHEMA_VERSION,
+                    "elements": evidence_elements,
+                },
                 "figures_excluded": {
                     "below_min_area_pct": scan.excluded_below_min_area,
                     "min_area_pct": DEFAULT_MIN_AREA_PCT,

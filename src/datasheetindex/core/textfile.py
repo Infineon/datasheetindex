@@ -6,7 +6,7 @@ import logging
 import os
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, NamedTuple, NotRequired, TypedDict
 
@@ -17,6 +17,7 @@ from datasheetindex.core._textmatch import (
     _TokenSpan,
     _translate_search_text,
 )
+from datasheetindex.core.evidence import EvidenceElement, text_element
 from datasheetindex.core.figures import (
     DEFAULT_MIN_AREA_PCT,
     caption_entries,
@@ -45,6 +46,7 @@ class TextSearchMatch(TypedDict):
     pattern: NotRequired[str]
     # Attached by the tool layer: ToC breadcrumb of the section containing the page.
     breadcrumb: NotRequired[str]
+    evidence: NotRequired[list[dict[str, object]]]
 
 
 _PAGE_MARKER_RE = re.compile(r"--- PAGE (\d+) ---")
@@ -265,6 +267,31 @@ def _extract_page_blocks(page: pymupdf.Page) -> list[tuple[str, bool]]:
     return [(b[_BLOCK_TEXT], _is_banded(b, page_height)) for b in _ordered_blocks(page)]
 
 
+_DEFAULT_EXTRACT_PAGE_BLOCKS = _extract_page_blocks
+
+
+def _extract_page_block_records(
+    page: pymupdf.Page,
+) -> list[tuple[tuple[Any, ...] | None, str, bool]]:
+    """Return ordered blocks with their geometry and furniture flag."""
+
+    ordered = _ordered_blocks(page)
+    if _extract_page_blocks is _DEFAULT_EXTRACT_PAGE_BLOCKS:
+        return [
+            (block, block[_BLOCK_TEXT], _is_banded(block, page.rect.height))
+            for block in ordered
+        ]
+
+    # Keep the existing test and extension seam: callers that replace
+    # _extract_page_blocks can inject synthetic text without geometry.
+    tagged = _extract_page_blocks(page)
+    records: list[tuple[tuple[Any, ...] | None, str, bool]] = []
+    for index, (text, banded) in enumerate(tagged):
+        block = ordered[index] if index < len(ordered) else None
+        records.append((block, text, banded))
+    return records
+
+
 def furniture_enabled_by_env() -> bool:
     """Whether DATASHEETINDEX_FURNITURE permits header/footer stripping.
 
@@ -311,6 +338,7 @@ class PageScan:
     text: str
     figures: list[dict[str, object]]
     excluded_below_min_area: int
+    evidence: list[EvidenceElement] = field(default_factory=list)
 
 
 def scan_pages(
@@ -333,7 +361,7 @@ def scan_pages(
     total_pages = len(doc)
     stripping = furniture_enabled_by_env()
 
-    page_blocks: list[list[tuple[str, bool]]] = []
+    page_blocks: list[list[tuple[tuple[Any, ...] | None, str, bool]]] = []
     page_keys: list[set[str]] = []
     page_rasters: list[list[dict[str, object]]] = []
     excluded = 0
@@ -341,12 +369,12 @@ def scan_pages(
     # Pass 1: read each page once.
     for page_idx in range(total_pages):
         page = doc[page_idx]
-        blocks = _extract_page_blocks(page)
+        blocks = _extract_page_block_records(page)
         page_blocks.append(blocks)
         page_keys.append(
             {
                 normalize_key(text)
-                for text, banded in blocks
+                for _, text, banded in blocks
                 if banded and is_candidate(text)
             }
             if stripping
@@ -363,24 +391,65 @@ def scan_pages(
     # always had, and build_datasheet publishes it.
     parts: list[str] = []
     figures: list[dict[str, object]] = []
+    evidence: list[EvidenceElement] = []
     dropped = 0
+    text_length = 0
 
     for page_idx, blocks in enumerate(page_blocks):
         page_num = page_idx + 1
-        kept: list[str] = []
-        for text, banded in blocks:
+        kept: list[tuple[tuple[Any, ...] | None, str]] = []
+        for block, text, banded in blocks:
             if _is_furniture_block(text, banded, furniture):
                 dropped += 1
                 continue
-            kept.append(text)
-        text = "\n".join(kept)
+            kept.append((block, text))
+        page_text = "\n".join(text for _, text in kept)
 
-        parts.append(f"--- PAGE {page_num} ---")
-        parts.append(text)
+        marker = f"--- PAGE {page_num} ---"
+        if parts:
+            text_length += 1
+        parts.append(marker)
+        text_length += len(marker)
+        if parts:
+            text_length += 1
+        page_text_start = text_length
+        parts.append(page_text)
+        text_length += len(page_text)
+
+        visible_text = page_text.lstrip("\r\n").rstrip()
+        visible_prefix = len(page_text) - len(page_text.lstrip("\r\n"))
+        visible_end = visible_prefix + len(visible_text)
+        local_offset = 0
+        page = doc[page_idx]
+        page_width = float(page.rect.width)
+        page_height = float(page.rect.height)
+        for ordinal, (block, block_text) in enumerate(kept):
+            if block is None:
+                continue
+            block_start = local_offset
+            block_end = block_start + len(block_text)
+            local_offset = block_end + 1
+            start = max(block_start, visible_prefix)
+            end = min(block_end, visible_end)
+            if start >= end:
+                continue
+            evidence.append(
+                text_element(
+                    element_id=f"p{page_num:04d}-text-{ordinal:03d}",
+                    page=page_num,
+                    canonical_start=page_text_start + start,
+                    canonical_end=page_text_start + end,
+                    page_start=start - visible_prefix,
+                    page_end=end - visible_prefix,
+                    bbox=block[:4],
+                    page_width=page_width,
+                    page_height=page_height,
+                )
+            )
 
         figures.extend(page_rasters[page_idx])
         # Captions read the column-aware text, never page.get_text().
-        figures.extend(caption_entries(page_num, text))
+        figures.extend(caption_entries(page_num, page_text))
 
     if furniture:
         logger.info(
@@ -394,6 +463,7 @@ def scan_pages(
         text="\n".join(parts),
         figures=figures,
         excluded_below_min_area=excluded,
+        evidence=evidence,
     )
 
 

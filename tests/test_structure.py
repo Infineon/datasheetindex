@@ -748,6 +748,18 @@ def test_real_pool_counts_tables(tmp_path):
     assert parallel == _expected_counts(pages)
 
 
+def test_real_pool_returns_table_bboxes(tmp_path):
+    pages = 13
+    pdf = tmp_path / "tables.pdf"
+    _write_table_pdf(pdf, pages=pages)
+
+    counts, bboxes = _build_table_count_cache_pool(str(pdf), pages, include_bboxes=True)
+
+    assert counts == _expected_counts(pages)
+    assert {page: len(boxes) for page, boxes in bboxes.items()} == counts
+    assert all(len(box) == 4 for boxes in bboxes.values() for box in boxes)
+
+
 def test_helper_counts_tables(tmp_path):
     """The Windows path, exercised on every platform.
 
@@ -766,6 +778,53 @@ def test_helper_counts_tables(tmp_path):
     )
 
 
+def test_helper_returns_table_bboxes(tmp_path):
+    pages = 13
+    pdf = tmp_path / "tables.pdf"
+    _write_table_pdf(pdf, pages=pages)
+
+    counts, bboxes = structure._build_table_count_cache_helper(
+        str(pdf), pages, include_bboxes=True
+    )
+
+    assert counts == _expected_counts(pages)
+    assert {page: len(boxes) for page, boxes in bboxes.items()} == counts
+    assert all(len(box) == 4 for boxes in bboxes.values() for box in boxes)
+
+
+@pytest.mark.parametrize("regions", [False, True])
+def test_scan_worker_preserves_count_and_region_payloads(
+    tmp_path, monkeypatch, regions
+):
+    from datasheetindex.core import _scan_worker
+
+    result = {0: 1, 1: 0}
+    bboxes = {0: [[1.0, 2.0, 3.0, 4.0]], 1: []}
+    if regions:
+        value: Any = (result, bboxes)
+    else:
+        value = result
+    monkeypatch.setattr(
+        structure,
+        "_build_table_count_cache_pool",
+        lambda path, pages, **kwargs: value,
+    )
+    output = tmp_path / "scan.json"
+    argv = ["doc.pdf", "2", str(output)]
+    if regions:
+        argv.append("regions")
+
+    assert _scan_worker.main(argv) == 0
+    payload = json.loads(output.read_text())
+    if regions:
+        assert payload == {
+            "counts": {"0": 1, "1": 0},
+            "bboxes": {"0": bboxes[0], "1": []},
+        }
+    else:
+        assert payload == {"0": 1, "1": 0}
+
+
 def test_helper_and_pool_agree(tmp_path):
     """The two parallel paths must be interchangeable, not merely both green.
 
@@ -779,6 +838,29 @@ def test_helper_and_pool_agree(tmp_path):
     assert structure._build_table_count_cache_helper(str(pdf), pages) == (
         structure._build_table_count_cache_pool(str(pdf), pages)
     )
+
+
+def test_parallel_regions_are_used_without_a_second_scan(monkeypatch):
+    pages = 12
+    doc = _blank_doc(pages)
+    try:
+        monkeypatch.setattr(
+            structure,
+            "_build_table_count_cache_parallel",
+            lambda path, total, **kwargs: (
+                dict.fromkeys(range(total), 1),
+                {page: [[10.0, 20.0, 30.0, 40.0]] for page in range(total)},
+            ),
+        )
+        regions = []
+        nodes = build_tree([[1, "S", 1]], total_pages=pages)
+        enrich_with_table_counts(nodes, doc, pdf_path="doc.pdf", table_regions=regions)
+    finally:
+        doc.close()
+
+    assert len(regions) == pages
+    assert regions[0]["element_id"] == "p0001-table-000"
+    assert nodes[0].table_count == pages
 
 
 def test_parallel_dispatches_by_platform(monkeypatch):

@@ -16,6 +16,8 @@ from importlib.metadata import Distribution
 from pathlib import Path
 from uuid import uuid4
 
+from datasheetindex.core.evidence import EVIDENCE_SCHEMA_VERSION
+
 logger = logging.getLogger(__name__)
 
 #: The sidecar's filename suffix, appended to the artifact stem.
@@ -165,6 +167,10 @@ class ArtifactRecord:
     #: ``figure_captions_pending``: it records what the build *achieved*, and
     #: the caller compares it against the environment it is running in now.
     toc_fallback_pending: bool = False
+    #: Artifact-local evidence records are part of the JSON deliverable. A
+    #: missing or older schema must rebuild rather than silently serving an
+    #: artifact that cannot be grounded.
+    evidence_schema_version: int = EVIDENCE_SCHEMA_VERSION
 
     def to_dict(self) -> dict:
         return {
@@ -181,6 +187,7 @@ class ArtifactRecord:
             "llm_enrichment_notes": list(self.llm_enrichment_notes),
             "figure_captions_pending": self.figure_captions_pending,
             "toc_fallback_pending": self.toc_fallback_pending,
+            "evidence_schema_version": self.evidence_schema_version,
         }
 
     @classmethod
@@ -214,6 +221,9 @@ class ArtifactRecord:
             llm_enrichment_notes=tuple(data["llm_enrichment_notes"]),
             figure_captions_pending=int(data.get("figure_captions_pending", 0)),
             toc_fallback_pending=bool(data.get("toc_fallback_pending", False)),
+            # A pre-evidence sidecar can still be inspected by callers, but
+            # version 0 is rejected by reuse_blocker below.
+            evidence_schema_version=int(data.get("evidence_schema_version", 0)),
         )
 
 
@@ -286,6 +296,8 @@ def reuse_blocker(
     """
     if record.datasheetindex_version != running_version:
         return "version_changed"
+    if record.evidence_schema_version != EVIDENCE_SCHEMA_VERSION:
+        return "evidence_schema_changed"
     if record.llm_enrichment_incomplete:
         return "llm_enrichment_incomplete"
     if dict(record.build_options) != dict(build_options):

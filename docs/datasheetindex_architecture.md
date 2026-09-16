@@ -76,6 +76,35 @@ Why not parse it programmatically? Because:
 
 The agent IS the LLM — let it reason about the preamble text directly.
 
+### Evidence index
+
+The JSON artifact also carries an additive `evidence` object with a
+`schema_version` and an `elements` list. It is a deterministic source index,
+not an extraction result or confidence score. Elements currently cover:
+
+- retained text blocks in the same column-aware order as the text artifact;
+- ToC sections, including their page ranges and breadcrumbs;
+- raster figures and text-layer figure captions; and
+- whole-table regions detected by PyMuPDF's classic table detector.
+
+Text elements use half-open character ranges into the complete page-matched
+text file and page-local ranges matching `search_text` offsets. They also carry
+1-indexed page numbers, PDF-point `bbox` coordinates, and normalized
+`region` coordinates with `left`, `right`, `top`, and `bottom` keys. The latter
+can be passed directly to `inspect_page(region=...)`. IDs are stable within one
+artifact generation, but are not promised to remain stable when a source PDF or
+build options change.
+
+`DatasheetTools.search_text(..., include_evidence=True)` joins each page-local
+hit to the elements it intersects. The framework-neutral agent tool enables
+this enrichment while the default Python search result remains backward
+compatible. `DatasheetTools.ground_span()` exposes the same deterministic join
+for downstream claim or citation code. A downstream agent can retain the
+returned `element_id` values on a claim, then render the associated page and
+region for review. Generated figure captions are marked separately from
+literal PDF content; table row/cell grounding and schema-driven extraction are
+deliberately outside this layer.
+
 #### Decisions already settled by measurement
 
 Every number in this subsection comes from one **21-document, 1047-page,

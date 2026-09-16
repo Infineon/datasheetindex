@@ -34,6 +34,7 @@ from datasheetindex.core.artifact_cache import (
     write_sidecar,
 )
 from datasheetindex.core.engine import layout_active, layout_engine
+from datasheetindex.core.evidence import ground_page_span
 from datasheetindex.core.locate import TextLocation
 from datasheetindex.core.locate import locate_text as locate_text_core
 from datasheetindex.core.structure import (
@@ -354,6 +355,38 @@ def _figure_digest(figures: object) -> dict[str, object]:
         "captioned": captioned,
         "pages_with_figures": len(pages),
         "pages": pages[:_MANIFEST_FIGURE_PAGES],
+        "truncated": len(pages) > _MANIFEST_FIGURE_PAGES,
+    }
+
+
+def _evidence_digest(evidence: object) -> dict[str, object]:
+    """Return bounded counts and page hints for the artifact evidence index."""
+
+    if not isinstance(evidence, dict):
+        return {"schema_version": None, "total": 0, "by_type": {}}
+    elements = evidence.get("elements")
+    if not isinstance(elements, list):
+        return {
+            "schema_version": evidence.get("schema_version"),
+            "total": 0,
+            "by_type": {},
+        }
+    by_type: dict[str, int] = {}
+    pages: set[int] = set()
+    for element in elements:
+        if not isinstance(element, dict):
+            continue
+        element_type = element.get("element_type")
+        page = element.get("page")
+        if isinstance(element_type, str):
+            by_type[element_type] = by_type.get(element_type, 0) + 1
+        if isinstance(page, int):
+            pages.add(page)
+    return {
+        "schema_version": evidence.get("schema_version"),
+        "total": len(elements),
+        "by_type": by_type,
+        "pages": sorted(pages)[:_MANIFEST_FIGURE_PAGES],
         "truncated": len(pages) > _MANIFEST_FIGURE_PAGES,
     }
 
@@ -987,6 +1020,7 @@ class DatasheetTools:
             "toc_source": artifacts.toc_source,
             "toc": artifacts.json_data.get("toc"),
             "figures": _figure_digest(artifacts.json_data.get("figures")),
+            "evidence": _evidence_digest(artifacts.json_data.get("evidence")),
         }
         # Only published when true, and only then does it cost tokens. The
         # digest above reports `raster` and `captioned` but never *why*
@@ -1102,6 +1136,7 @@ class DatasheetTools:
         page: int | None = None,
         case_sensitive: bool = False,
         max_results: int = 20,
+        include_evidence: bool = False,
     ) -> list[TextSearchMatch]:
         """Search the built page-matched text and return page-aware snippets.
 
@@ -1134,7 +1169,37 @@ class DatasheetTools:
                 breadcrumb = breadcrumb_by_page[page_number]
                 if breadcrumb:
                     match["breadcrumb"] = breadcrumb
+        evidence = artifacts.json_data.get("evidence")
+        if include_evidence and isinstance(evidence, dict):
+            elements = evidence.get("elements")
+            if isinstance(elements, list):
+                for match in matches:
+                    grounded = ground_page_span(
+                        elements,
+                        match["page"],
+                        match["start"],
+                        match["end"],
+                    )
+                    if grounded:
+                        match["evidence"] = grounded
         return matches
+
+    def ground_span(
+        self, *, page: int, start: int, end: int
+    ) -> list[dict[str, object]]:
+        """Ground a page-local text span against built artifact evidence."""
+
+        artifacts = self._require_artifacts()
+        total_pages = self._total_pages(artifacts)
+        if page < 1 or page > total_pages:
+            raise ValueError(f"page must be between 1 and {total_pages}")
+        evidence = artifacts.json_data.get("evidence")
+        if not isinstance(evidence, dict):
+            return []
+        elements = evidence.get("elements")
+        if not isinstance(elements, list):
+            return []
+        return ground_page_span(elements, page, start, end)
 
     def captions_blocked(self) -> bool:
         """True when this build's captioning failed permanently, for every figure.

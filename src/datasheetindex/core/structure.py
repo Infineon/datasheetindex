@@ -13,10 +13,14 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 from datasheetindex.core.boilerplate import flag_boilerplate
 from datasheetindex.core.engine import classic_tables
+from datasheetindex.core.evidence import (
+    EvidenceElement,
+    table_element,
+)
 from datasheetindex.core.textfile import extract_page_text, extract_section_text
 from datasheetindex.models import TocNode
 
@@ -26,6 +30,9 @@ if TYPE_CHECKING:
     import pymupdf
 
 logger = logging.getLogger(__name__)
+
+_TableCountArgs = tuple[str, int] | tuple[str, int, bool]
+_TableCountResult = tuple[int, int] | tuple[int, int, list[list[float]]]
 
 # Page-level find_tables() does not scale past a handful of processes, and each
 # worker costs real memory. Cap the fan-out so a large PDF on a many-core host
@@ -248,7 +255,52 @@ def find_breadcrumb_for_page(nodes: list[TocNode], page: int) -> str | None:
     return best.breadcrumb
 
 
-def _count_tables_on_page(args: tuple[str, int]) -> tuple[int, int]:
+def _append_table_regions(
+    doc: pymupdf.Document,
+    page_idx: int,
+    tables: Any,
+    output: list[EvidenceElement],
+) -> None:
+    """Append evidence regions from a table result already in hand."""
+
+    page = doc[page_idx]
+    for ordinal, table in enumerate(tables.tables):
+        bbox = getattr(table, "bbox", None)
+        if not bbox or len(bbox) != 4:
+            continue
+        output.append(
+            table_element(
+                element_id=f"p{page_idx + 1:04d}-table-{ordinal:03d}",
+                page=page_idx + 1,
+                bbox=bbox,
+                page_width=float(page.rect.width),
+                page_height=float(page.rect.height),
+            )
+        )
+
+
+def _append_bbox_regions(
+    doc: pymupdf.Document,
+    page_idx: int,
+    bboxes: list[list[float]],
+    output: list[EvidenceElement],
+) -> None:
+    """Append evidence regions from worker-returned table boxes."""
+
+    page = doc[page_idx]
+    for ordinal, bbox in enumerate(bboxes):
+        output.append(
+            table_element(
+                element_id=f"p{page_idx + 1:04d}-table-{ordinal:03d}",
+                page=page_idx + 1,
+                bbox=bbox,
+                page_width=float(page.rect.width),
+                page_height=float(page.rect.height),
+            )
+        )
+
+
+def _count_tables_on_page(args: _TableCountArgs) -> _TableCountResult:
     """Count tables on a single page. Runs in a subprocess.
 
     Each worker opens the PDF independently because PyMuPDF document
@@ -262,12 +314,20 @@ def _count_tables_on_page(args: tuple[str, int]) -> tuple[int, int]:
     """
     import pymupdf as _pymupdf
 
-    pdf_path, page_idx = args
+    pdf_path, page_idx, *options = args
+    include_bboxes = bool(options and options[0])
     doc = _pymupdf.open(pdf_path)
     try:
         with classic_tables():
             tables = doc[page_idx].find_tables()  # type: ignore[attr-defined]
-        return page_idx, len(tables.tables)
+        if not include_bboxes:
+            return page_idx, len(tables.tables)
+        bboxes = [
+            [float(value) for value in table.bbox]
+            for table in tables.tables
+            if getattr(table, "bbox", None) is not None and len(table.bbox) == 4
+        ]
+        return page_idx, len(tables.tables), bboxes  # type: ignore[return-value]
     finally:
         doc.close()
 
@@ -506,13 +566,40 @@ def _scan_timeout(total_pages: int) -> float:
     return min(max(120.0, float(total_pages)), _SCAN_TIMEOUT_CEILING_SECONDS)
 
 
-def _build_table_count_cache_pool(pdf_path: str, total_pages: int) -> dict[int, int]:
+@overload
+def _build_table_count_cache_pool(
+    pdf_path: str, total_pages: int, *, include_bboxes: Literal[False] = False
+) -> dict[int, int]: ...
+
+
+@overload
+def _build_table_count_cache_pool(
+    pdf_path: str, total_pages: int, *, include_bboxes: Literal[True]
+) -> tuple[dict[int, int], dict[int, list[list[float]]]]: ...
+
+
+@overload
+def _build_table_count_cache_pool(
+    pdf_path: str, total_pages: int, *, include_bboxes: bool
+) -> dict[int, int] | tuple[dict[int, int], dict[int, list[list[float]]]]: ...
+
+
+def _build_table_count_cache_pool(
+    pdf_path: str,
+    total_pages: int,
+    *,
+    include_bboxes: bool = False,
+) -> dict[int, int] | tuple[dict[int, int], dict[int, list[list[float]]]]:
     """Scan all pages for tables using a process pool in *this* process.
 
     Not used on Windows -- see :func:`_build_table_count_cache_helper`.
     """
     workers = min(_available_cpus(), total_pages, _MAX_PARALLEL_WORKERS)
-    args = [(pdf_path, i) for i in range(total_pages)]
+    args: list[_TableCountArgs]
+    if include_bboxes:
+        args = [(pdf_path, i, True) for i in range(total_pages)]
+    else:
+        args = [(pdf_path, i) for i in range(total_pages)]
     pool = concurrent.futures.ProcessPoolExecutor(
         max_workers=workers,
         initializer=_subprocess_init,
@@ -523,7 +610,7 @@ def _build_table_count_cache_pool(pdf_path: str, total_pages: int) -> dict[int, 
         # pool.map returns a LAZY iterator: consuming it after the block let
         # __exit__ run shutdown(wait=True) before a single result had been
         # read, so a stalled worker blocked in shutdown rather than raising.
-        cache = dict(
+        results = list(
             pool.map(_count_tables_on_page, args, timeout=_scan_timeout(total_pages))
         )
     except BaseException:
@@ -536,10 +623,39 @@ def _build_table_count_cache_pool(pdf_path: str, total_pages: int) -> dict[int, 
     # workers are idle. A worker wedging in its own atexit after returning
     # results would still block; that is accepted, not overlooked.
     pool.shutdown(wait=True)
-    return cache
+    if not include_bboxes:
+        count_results = cast(list[tuple[int, int]], results)
+        return {result[0]: result[1] for result in count_results}
+    region_results = cast(list[tuple[int, int, list[list[float]]]], results)
+    counts = {result[0]: result[1] for result in region_results}
+    bboxes = {result[0]: result[2] for result in region_results}
+    return counts, bboxes
 
 
-def _build_table_count_cache_helper(pdf_path: str, total_pages: int) -> dict[int, int]:
+@overload
+def _build_table_count_cache_helper(
+    pdf_path: str, total_pages: int, *, include_bboxes: Literal[False] = False
+) -> dict[int, int]: ...
+
+
+@overload
+def _build_table_count_cache_helper(
+    pdf_path: str, total_pages: int, *, include_bboxes: Literal[True]
+) -> tuple[dict[int, int], dict[int, list[list[float]]]]: ...
+
+
+@overload
+def _build_table_count_cache_helper(
+    pdf_path: str, total_pages: int, *, include_bboxes: bool
+) -> dict[int, int] | tuple[dict[int, int], dict[int, list[list[float]]]]: ...
+
+
+def _build_table_count_cache_helper(
+    pdf_path: str,
+    total_pages: int,
+    *,
+    include_bboxes: bool = False,
+) -> dict[int, int] | tuple[dict[int, int], dict[int, list[list[float]]]]:
     """Scan all pages by delegating to a stdio-detached child process.
 
     The Windows path. A pool created inside an MCP stdio server deadlocks
@@ -582,6 +698,7 @@ def _build_table_count_cache_helper(pdf_path: str, total_pages: int) -> dict[int
                     pdf_path,
                     str(total_pages),
                     out_path,
+                    *(("regions",) if include_bboxes else ()),
                 ],
                 stdin=subprocess.DEVNULL,
                 # Severing stdin/stdout is the whole point; do not "improve"
@@ -635,11 +752,12 @@ def _build_table_count_cache_helper(pdf_path: str, total_pages: int) -> dict[int
             )
 
         with open(out_path, encoding="utf-8") as handle:
-            counts = json.load(handle)
+            payload = json.load(handle)
 
     # int() on the value as well as the key: a non-int count would survive
     # into _apply_table_counts and fail there, outside the try that would
     # have fallen back.
+    counts = payload["counts"] if include_bboxes else payload
     cache = {int(page): int(count) for page, count in counts.items()}
     if len(cache) != total_pages:
         # Downstream, a missing page is indistinguishable from a page with no
@@ -648,12 +766,39 @@ def _build_table_count_cache_helper(pdf_path: str, total_pages: int) -> dict[int
         raise RuntimeError(
             f"scan worker returned {len(cache)} of {total_pages} page counts"
         )
-    return cache
+    if not include_bboxes:
+        return cache
+    bboxes = {
+        int(page): [[float(value) for value in bbox] for bbox in page_bboxes]
+        for page, page_bboxes in payload["bboxes"].items()
+    }
+    return cache, bboxes
+
+
+@overload
+def _build_table_count_cache_parallel(
+    pdf_path: str, total_pages: int, *, include_bboxes: Literal[False] = False
+) -> dict[int, int]: ...
+
+
+@overload
+def _build_table_count_cache_parallel(
+    pdf_path: str, total_pages: int, *, include_bboxes: Literal[True]
+) -> tuple[dict[int, int], dict[int, list[list[float]]]]: ...
+
+
+@overload
+def _build_table_count_cache_parallel(
+    pdf_path: str, total_pages: int, *, include_bboxes: bool
+) -> dict[int, int] | tuple[dict[int, int], dict[int, list[list[float]]]]: ...
 
 
 def _build_table_count_cache_parallel(
-    pdf_path: str, total_pages: int
-) -> dict[int, int]:
+    pdf_path: str,
+    total_pages: int,
+    *,
+    include_bboxes: bool = False,
+) -> dict[int, int] | tuple[dict[int, int], dict[int, list[list[float]]]]:
     """Scan all pages for tables in parallel, however that is safe here.
 
     Windows cannot pool from inside an MCP stdio server, so it delegates to a
@@ -661,12 +806,19 @@ def _build_table_count_cache_parallel(
     process cheaper, so it stays.
     """
     if _is_windows():
+        if include_bboxes:
+            return _build_table_count_cache_helper(
+                pdf_path, total_pages, include_bboxes=True
+            )
         return _build_table_count_cache_helper(pdf_path, total_pages)
+    if include_bboxes:
+        return _build_table_count_cache_pool(pdf_path, total_pages, include_bboxes=True)
     return _build_table_count_cache_pool(pdf_path, total_pages)
 
 
 def _build_table_count_cache_sequential(
     doc: pymupdf.Document,
+    table_regions: list[EvidenceElement] | None = None,
 ) -> dict[int, int]:
     """Scan all pages for tables sequentially (fallback).
 
@@ -678,6 +830,8 @@ def _build_table_count_cache_sequential(
         for page_idx in range(len(doc)):
             tables = doc[page_idx].find_tables()  # type: ignore[attr-defined]
             cache[page_idx] = len(tables.tables)
+            if table_regions is not None:
+                _append_table_regions(doc, page_idx, tables, table_regions)
     return cache
 
 
@@ -685,6 +839,7 @@ def enrich_with_table_counts(
     nodes: list[TocNode],
     doc: pymupdf.Document,
     pdf_path: str | None = None,
+    table_regions: list[EvidenceElement] | None = None,
 ) -> list[TocNode]:
     """Count tables on each node's page range using PyMuPDF find_tables().
 
@@ -708,6 +863,7 @@ def enrich_with_table_counts(
 
     total_pages = len(doc)
     cache: dict[int, int] | None = None
+    region_bboxes: dict[int, list[list[float]]] | None = None
 
     # Both parallel paths keep worker stdin/stdout off the parent's, so
     # parallelism is safe even when that stdout is an MCP JSON-RPC pipe.
@@ -721,7 +877,22 @@ def enrich_with_table_counts(
 
     if _can_parallel and pdf_path is not None:
         try:
-            cache = _build_table_count_cache_parallel(pdf_path, total_pages)
+            if table_regions is None:
+                scan = _build_table_count_cache_parallel(pdf_path, total_pages)
+            else:
+                scan = _build_table_count_cache_parallel(
+                    pdf_path, total_pages, include_bboxes=True
+                )
+            if table_regions is None:
+                if not isinstance(scan, dict):
+                    raise RuntimeError(
+                        "parallel table scan returned regions unexpectedly"
+                    )
+                cache = scan
+            else:
+                if not isinstance(scan, tuple):
+                    raise RuntimeError("parallel table scan returned no regions")
+                cache, region_bboxes = scan
         except Exception:
             # Warning, not debug: a pool that fails to start degrades silently
             # to a ~3x slower scan, and that invisibility is how the fan-out
@@ -732,7 +903,10 @@ def enrich_with_table_counts(
             )
 
     if cache is None:
-        cache = _build_table_count_cache_sequential(doc)
+        cache = _build_table_count_cache_sequential(doc, table_regions)
+    elif table_regions is not None and region_bboxes is not None:
+        for page_idx, bboxes in region_bboxes.items():
+            _append_bbox_regions(doc, page_idx, bboxes, table_regions)
 
     _apply_table_counts(nodes, cache, total_pages)
     return nodes

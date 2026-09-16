@@ -252,6 +252,7 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                 page=args.get("page"),
                 case_sensitive=args.get("case_sensitive", False),
                 max_results=args.get("max_results", 20),
+                include_evidence=True,
             )
             payload: dict[str, Any] = {"query": args["query"], "results": results}
             # The caveat is on this tool's description too, but a description is
@@ -368,7 +369,9 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                 "part lacks. Verify where the exact part is named; comparison, "
                 "selection, and ordering sections are leads, not guarantees. "
                 "'multi_variant' names a detected family; its absence does not "
-                "prove the document covers one part."
+                "prove the document covers one part.\n\n"
+                "The 'evidence' digest reports counts; hits link to regions "
+                "and sections."
             ),
             input_schema={
                 "type": "object",
@@ -500,7 +503,8 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                 "cannot be found here: the absence of a match does not prove the "
                 "document lacks the term. On an empty result, check the 'figures' "
                 "digest from build_datasheet for a page whose caption describes "
-                "what you want, then read it with inspect_page."
+                "what you want, then read it with inspect_page. Each hit also "
+                "carries evidence elements for exact source linkage."
             ),
             input_schema={
                 "type": "object",
