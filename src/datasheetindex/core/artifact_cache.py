@@ -16,8 +16,6 @@ from importlib.metadata import Distribution
 from pathlib import Path
 from uuid import uuid4
 
-from datasheetindex.core.evidence import EVIDENCE_SCHEMA_VERSION
-
 logger = logging.getLogger(__name__)
 
 #: The sidecar's filename suffix, appended to the artifact stem.
@@ -167,10 +165,11 @@ class ArtifactRecord:
     #: ``figure_captions_pending``: it records what the build *achieved*, and
     #: the caller compares it against the environment it is running in now.
     toc_fallback_pending: bool = False
-    #: Artifact-local evidence records are part of the JSON deliverable. A
-    #: missing or older schema must rebuild rather than silently serving an
-    #: artifact that cannot be grounded.
-    evidence_schema_version: int = EVIDENCE_SCHEMA_VERSION
+    #: The third deliverable, ``<stem>.evidence.jsonl``. ``None`` only on a
+    #: sidecar written before it existed, which ``reuse_blocker`` rejects
+    #: rather than serve an artifact that cannot be grounded.
+    evidence_name: str | None = None
+    evidence_sha256: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -181,13 +180,22 @@ class ArtifactRecord:
             "artifacts": {
                 "json": {"name": self.json_name, "sha256": self.json_sha256},
                 "text": {"name": self.text_name, "sha256": self.text_sha256},
+                **(
+                    {
+                        "evidence": {
+                            "name": self.evidence_name,
+                            "sha256": self.evidence_sha256,
+                        }
+                    }
+                    if self.evidence_name is not None
+                    else {}
+                ),
             },
             "toc_quality": dict(self.toc_quality),
             "llm_enrichment_incomplete": self.llm_enrichment_incomplete,
             "llm_enrichment_notes": list(self.llm_enrichment_notes),
             "figure_captions_pending": self.figure_captions_pending,
             "toc_fallback_pending": self.toc_fallback_pending,
-            "evidence_schema_version": self.evidence_schema_version,
         }
 
     @classmethod
@@ -205,6 +213,10 @@ class ArtifactRecord:
         defaulting to 0 / False reproduces exactly the reuse behaviour that
         artifact already had. Requiring them would instead log a
         diverged-shape warning on every pre-existing sidecar.
+
+        The ``evidence`` artifact is optional for the same reason, but it *is*
+        a deliverable: its absence is read back as ``None`` and rejected by
+        ``reuse_blocker``, never treated as a match.
         """
         artifacts = data["artifacts"]
         return cls(
@@ -221,9 +233,8 @@ class ArtifactRecord:
             llm_enrichment_notes=tuple(data["llm_enrichment_notes"]),
             figure_captions_pending=int(data.get("figure_captions_pending", 0)),
             toc_fallback_pending=bool(data.get("toc_fallback_pending", False)),
-            # A pre-evidence sidecar can still be inspected by callers, but
-            # version 0 is rejected by reuse_blocker below.
-            evidence_schema_version=int(data.get("evidence_schema_version", 0)),
+            evidence_name=artifacts.get("evidence", {}).get("name"),
+            evidence_sha256=artifacts.get("evidence", {}).get("sha256"),
         )
 
 
@@ -296,8 +307,8 @@ def reuse_blocker(
     """
     if record.datasheetindex_version != running_version:
         return "version_changed"
-    if record.evidence_schema_version != EVIDENCE_SCHEMA_VERSION:
-        return "evidence_schema_changed"
+    if record.evidence_name is None or record.evidence_sha256 is None:
+        return "evidence_missing"
     if record.llm_enrichment_incomplete:
         return "llm_enrichment_incomplete"
     if dict(record.build_options) != dict(build_options):

@@ -5,37 +5,47 @@ All notable changes to this project will be documented in this file.
 ## [0.40.0] - 2026-09-16
 
 ### Added
-- **An artifact evidence index for source grounding.** The ToC JSON gains an
-  additive `evidence` object (`schema_version`, `elements`): a deterministic
-  source index, not an extraction result or confidence score. Elements cover
-  retained text blocks in the text artifact's column-aware order, ToC
-  sections with their page ranges, raster figures and text-layer figure
-  captions, and whole-table regions from the classic table detector. Text
-  elements carry half-open ranges into both the whole text file and the page
-  (matching `search_text` offsets), a PDF-point `bbox`, and a normalized
-  `region` that `inspect_page(region=...)` accepts directly. Every page
-  element is linked to its section's `node_id` and `breadcrumb`. Generated
-  figure captions and LLM-reconstructed sections are marked
-  `source_kind: "generated"`, apart from literal PDF content.
+- **An evidence index for source grounding, written to its own
+  `<stem>.evidence.jsonl`.** A deterministic source index for code that links a
+  claim back to the PDF -- a citation overlay, a review UI -- not an extraction
+  result and not an agent tool. One record per line, in page order: every
+  non-blank text block with its own `text`, half-open `text_range` (whole text
+  file) and `page_text_range` (the offsets `search_text` reports); every ToC
+  section with inclusive `start_page`/`end_page`; raster figures and text-layer
+  figure captions; and whole-table regions from the classic detector. Each
+  carries a `bbox` in PDF points and a normalized `region` that
+  `inspect_page(region=...)` accepts, plus its section's `node_id` and
+  `breadcrumb`. `source_kind` separates `generated` (LLM-reconstructed
+  sections, VLM captions) from `literal` PDF content. JSON Lines, so `grep` for
+  a phrase returns its geometry and section directly. The ToC JSON gains only a
+  pointer, `"evidence": {"schema_version": 1, "path": ...}`; inline, the index
+  made it 40-50x larger (25 MB on the ESP32 reference manual).
 - **`DatasheetTools.search_text(..., include_evidence=True)`** attaches the
-  intersecting elements to each hit, and **`DatasheetTools.ground_span()`**
-  exposes the same join for downstream claim and citation code.
-- **The agent `search_text` tool takes the same `include_evidence` parameter,
-  default false.** Opt-in because each record repeats geometry and the
-  breadcrumb per hit -- a few thousand tokens on a 20-hit search.
-- **An `evidence` digest in the `build_datasheet` manifest:** `schema_version`,
-  `total`, and counts `by_type`. No page list, since nearly every page carries
-  a text block and one would only restate the page count.
+  intersecting records to each hit, and **`DatasheetTools.ground_span()`**
+  returns them for any page-local span. The file is loaded on first use,
+  indexed by page, and refused if its bytes changed since the build.
+- **`DatasheetArtifacts.evidence_path`**, and an `EVIDENCE:` line in
+  `datasheetindex build` output.
 
 ### Changed
-- **Page-to-section linkage has one tie-break.** The new
-  `structure.find_node_for_page` returns the deepest covering section, the
-  first in document order when siblings overlap on a page; both
-  `find_breadcrumb_for_page` and evidence linking use it, so a search hit and
-  its evidence never name different sections.
-- **The artifact reuse sidecar records `evidence_schema_version`.** An
-  artifact built before the evidence index, or under an older schema, is
-  rebuilt rather than served without grounding (`evidence_schema_changed`).
+- **The artifact-reuse sidecar records the evidence file's name and hash.**
+  A sidecar without one, or an evidence file that is missing or edited, is
+  rebuilt (`evidence_missing`, `evidence_unreadable`, `evidence_hash_mismatch`).
+- **Page-to-section linkage has one tie-break.** `structure.find_node_for_page`
+  returns the deepest covering section, the first in document order when
+  siblings overlap on a page; `find_breadcrumb_for_page` and evidence linking
+  both use it.
+- **The agent tool surface is unchanged.** Text-block regions are the size of
+  the `locate_text` hits that were removed from it, and grounding every hit
+  made `search_text` payloads 2.6x larger with no measured agent benefit.
+
+### Fixed
+- **Raster figure regions on rotated pages.** `get_image_info` reports the
+  unrotated page while `inspect_page` crops the displayed one, so on a rotated
+  page a figure's `region` and `bbox` named the wrong area -- and the VLM
+  captioned whatever that area held. Regions are now mapped through the page's
+  rotation; all 718 text, table and figure regions on the corpus's 18 rotated
+  pages crop rendered content. `locate_text` still reports unrotated points.
 
 ## [0.39.0] - 2026-09-15
 

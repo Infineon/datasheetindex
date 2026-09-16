@@ -123,6 +123,11 @@ class DatasheetArtifacts:
 
     json_path: Path | None = None
     text_path: Path | None = None
+    # ``<stem>.evidence.jsonl``. Loaded on demand, never into ``json_data``, and
+    # checked against ``evidence_sha256`` when it is: a lazy read happens long
+    # after the build, so it must not trust whatever is on disk by then.
+    evidence_path: Path | None = None
+    evidence_sha256: str | None = None
     json_data: dict = field(default_factory=dict)
     text_content: str = ""
     toc_quality: TocQuality | None = None

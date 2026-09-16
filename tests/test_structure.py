@@ -1109,6 +1109,29 @@ def test_helper_rejects_a_short_result(monkeypatch):
         structure._build_table_count_cache_helper("doc.pdf", 20)
 
 
+def test_helper_rejects_regions_that_do_not_cover_the_counts(monkeypatch):
+    """A truncated region payload must not drop tables behind correct counts."""
+
+    class _Proc:
+        def __init__(self, cmd, **kwargs):
+            self.returncode = 0
+            with open(cmd[-2], "w", encoding="utf-8") as handle:
+                json.dump(
+                    {"counts": {"0": 1, "1": 1}, "bboxes": {"0": [[0, 0, 1, 1]]}},
+                    handle,
+                )
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+        def kill(self):
+            pass
+
+    monkeypatch.setattr(structure.subprocess, "Popen", _Proc)
+    with pytest.raises(RuntimeError, match="inconsistent with counts"):
+        structure._build_table_count_cache_helper("doc.pdf", 2, include_bboxes=True)
+
+
 def test_helper_refuses_a_frozen_interpreter(monkeypatch):
     """`-m` against a frozen host re-runs the app itself, which for a frozen
     MCP server means starting a second server."""

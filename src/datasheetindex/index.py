@@ -25,13 +25,15 @@ from datasheetindex.core.annotations import (
     enrich_with_cross_references,
     enrich_with_footnote_markers,
 )
-from datasheetindex.core.artifact_cache import atomic_write_text
+from datasheetindex.core.artifact_cache import atomic_write_text, sha256_text
 from datasheetindex.core.evidence import (
     EVIDENCE_SCHEMA_VERSION,
     EvidenceElement,
-    annotate_figure_entries,
+    evidence_file_name,
+    figure_elements,
     link_to_toc,
     section_elements,
+    serialize_evidence,
 )
 from datasheetindex.core.figures import DEFAULT_MIN_AREA_PCT
 from datasheetindex.core.preamble import build_front_matter
@@ -843,17 +845,17 @@ class DatasheetIndex:
             if caption_outcome.failed:
                 enrichment_notes.append("figure_caption_failed")
 
-            evidence_elements = link_to_toc(scan.evidence, nodes)
-            evidence_elements.extend(
-                section_elements(
+            evidence_elements: list[EvidenceElement] = [
+                *scan.evidence,
+                *section_elements(
                     nodes,
                     source_kind=(
                         "generated" if toc_source == "llm_reconstructed" else "literal"
                     ),
-                )
-            )
-            evidence_elements.extend(annotate_figure_entries(scan.figures))
-            evidence_elements.extend(table_regions)
+                ),
+                *figure_elements(scan.figures),
+                *table_regions,
+            ]
             link_to_toc(evidence_elements, nodes)
 
             logger.info("Total build time: %.1fs", time.monotonic() - t_start)
@@ -878,9 +880,10 @@ class DatasheetIndex:
                 "toc_source": toc_source,
                 "toc": [node.to_dict() for node in nodes],
                 "figures": scan.figures,
+                # A pointer, not the index: see core/evidence.py.
                 "evidence": {
                     "schema_version": EVIDENCE_SCHEMA_VERSION,
-                    "elements": evidence_elements,
+                    "path": evidence_file_name(pdf_name),
                 },
                 "figures_excluded": {
                     "below_min_area_pct": scan.excluded_below_min_area,
@@ -914,6 +917,7 @@ class DatasheetIndex:
 
             json_path = out / f"{pdf_name}.json"
             text_path = out / f"{pdf_name}.txt"
+            evidence_path = out / evidence_file_name(pdf_name)
 
             # Atomic: temp then os.replace, so a crashed or failing build leaves
             # the previous generation intact rather than a truncated file. It
@@ -926,10 +930,14 @@ class DatasheetIndex:
                 json_path, json.dumps(json_data, indent=2, ensure_ascii=False)
             )
             atomic_write_text(text_path, text_content)
+            evidence_text = serialize_evidence(evidence_elements)
+            atomic_write_text(evidence_path, evidence_text)
 
             return DatasheetArtifacts(
                 json_path=json_path,
                 text_path=text_path,
+                evidence_path=evidence_path,
+                evidence_sha256=sha256_text(evidence_text),
                 json_data=json_data,
                 text_content=text_content,
                 toc_quality=toc_quality,

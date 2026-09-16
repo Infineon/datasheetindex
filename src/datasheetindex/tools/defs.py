@@ -252,7 +252,6 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                 page=args.get("page"),
                 case_sensitive=args.get("case_sensitive", False),
                 max_results=args.get("max_results", 20),
-                include_evidence=args.get("include_evidence", False),
             )
             payload: dict[str, Any] = {"query": args["query"], "results": results}
             # The caveat is on this tool's description too, but a description is
@@ -369,8 +368,7 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                 "part lacks. Verify where the exact part is named; comparison, "
                 "selection, and ordering sections are leads, not guarantees. "
                 "'multi_variant' names a detected family; its absence does not "
-                "prove the document covers one part.\n\n"
-                "The 'evidence' digest counts source elements by type."
+                "prove the document covers one part."
             ),
             input_schema={
                 "type": "object",
@@ -526,14 +524,6 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                     "max_results": {
                         "type": "integer",
                         "description": "Default 20.",
-                    },
-                    "include_evidence": {
-                        "type": "boolean",
-                        "description": (
-                            "Default false. Attach the source text blocks "
-                            "(bounding box, section) to each hit, for citing "
-                            "exact provenance. Costs tokens on every hit."
-                        ),
                     },
                 },
                 "required": ["query"],

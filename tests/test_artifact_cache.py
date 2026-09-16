@@ -324,6 +324,8 @@ def make_record(**overrides) -> ArtifactRecord:
         json_sha256="b" * 64,
         text_name="ds.txt",
         text_sha256="c" * 64,
+        evidence_name="ds.evidence.jsonl",
+        evidence_sha256="d" * 64,
         toc_quality={
             "score": 0.62,
             "entry_count": 2,

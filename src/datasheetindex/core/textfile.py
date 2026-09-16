@@ -17,7 +17,11 @@ from datasheetindex.core._textmatch import (
     _TokenSpan,
     _translate_search_text,
 )
-from datasheetindex.core.evidence import EvidenceElement, text_element
+from datasheetindex.core.evidence import (
+    EvidenceElement,
+    displayed_bbox,
+    text_element,
+)
 from datasheetindex.core.figures import (
     DEFAULT_MIN_AREA_PCT,
     caption_entries,
@@ -424,11 +428,14 @@ def scan_pages(
         page_width = float(page.rect.width)
         page_height = float(page.rect.height)
         for ordinal, (block, block_text) in enumerate(kept):
-            if block is None:
-                continue
+            # Advance before any skip: every later block's offsets depend on it.
             block_start = local_offset
             block_end = block_start + len(block_text)
             local_offset = block_end + 1
+            # A whitespace-only block can never be a search hit, so it
+            # grounds nothing and would only pad the index.
+            if block is None or not block_text.strip():
+                continue
             start = max(block_start, visible_prefix)
             end = min(block_end, visible_end)
             if start >= end:
@@ -441,7 +448,8 @@ def scan_pages(
                     canonical_end=page_text_start + end,
                     page_start=start - visible_prefix,
                     page_end=end - visible_prefix,
-                    bbox=block[:4],
+                    text=page_text[start:end],
+                    bbox=displayed_bbox(block[:4], page),
                     page_width=page_width,
                     page_height=page_height,
                 )

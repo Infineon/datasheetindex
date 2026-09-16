@@ -106,6 +106,7 @@ def _run_build(args: argparse.Namespace) -> int:
 
     print(f"JSON: {artifacts.json_path}")
     print(f"TEXT: {artifacts.text_path}")
+    print(f"EVIDENCE: {artifacts.evidence_path}")
     return 0
 
 

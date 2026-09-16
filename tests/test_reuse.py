@@ -214,6 +214,7 @@ def test_a_build_writes_a_sidecar_beside_the_deliverables(tmp_path, toc_pdf):
     assert sidecar.exists()
     assert sorted(p.name for p in out.iterdir()) == [
         "ds.build.json",
+        "ds.evidence.jsonl",
         "ds.json",
         "ds.txt",
     ]
@@ -839,6 +840,9 @@ def test_reuse_preserves_the_toc_source(tmp_path, toc_pdf, not_editable, build_s
         ("truncated_artifact", "text_hash_mismatch"),
         ("same_size_text_edit", "text_hash_mismatch"),
         ("mixed_generation", "json_hash_mismatch"),
+        ("missing_evidence", "evidence_unreadable"),
+        ("edited_evidence", "evidence_hash_mismatch"),
+        ("pre_evidence_sidecar", "evidence_missing"),
         ("incomplete_flag", "llm_enrichment_incomplete"),
         ("corrupt_sidecar", "no_sidecar"),
     ],
@@ -894,6 +898,18 @@ def test_invalidation_rebuilds_for_the_right_reason(
         payload["total_pages"] = 999
         first.json_path.write_text(
             json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+    elif mutate == "missing_evidence":
+        assert first.evidence_path is not None
+        first.evidence_path.unlink()
+    elif mutate == "edited_evidence":
+        assert first.evidence_path is not None
+        first.evidence_path.write_text("{}", encoding="utf-8")
+    elif mutate == "pre_evidence_sidecar":
+        record = json.loads(sidecar.read_text(encoding="utf-8"))
+        del record["artifacts"]["evidence"]
+        sidecar.write_text(
+            json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8"
         )
     elif mutate == "incomplete_flag":
         record = json.loads(sidecar.read_text(encoding="utf-8"))
@@ -1266,9 +1282,11 @@ def test_switching_back_to_a_prior_document_reuses_its_artifacts(
 
     assert sorted(p.name for p in out.iterdir()) == [
         "ds.build.json",
+        "ds.evidence.jsonl",
         "ds.json",
         "ds.txt",
         "other.build.json",
+        "other.evidence.jsonl",
         "other.json",
         "other.txt",
     ]
@@ -1622,6 +1640,8 @@ def test_a_missing_llm_client_no_longer_blocks_reuse(tmp_path):
         json_sha256="x",
         text_name="a.txt",
         text_sha256="y",
+        evidence_name="a.evidence.jsonl",
+        evidence_sha256="z",
         toc_quality={},
         toc_fallback_pending=True,
     )
@@ -1658,6 +1678,8 @@ def test_a_transient_llm_failure_still_blocks_reuse(tmp_path):
         json_sha256="x",
         text_name="a.txt",
         text_sha256="y",
+        evidence_name="a.evidence.jsonl",
+        evidence_sha256="z",
         toc_quality={},
         llm_enrichment_incomplete=True,
         llm_enrichment_notes=("toc_fallback_raised",),

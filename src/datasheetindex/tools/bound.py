@@ -34,7 +34,7 @@ from datasheetindex.core.artifact_cache import (
     write_sidecar,
 )
 from datasheetindex.core.engine import layout_active, layout_engine
-from datasheetindex.core.evidence import ground_page_span
+from datasheetindex.core.evidence import ground_page_span, parse_evidence
 from datasheetindex.core.locate import TextLocation
 from datasheetindex.core.locate import locate_text as locate_text_core
 from datasheetindex.core.structure import (
@@ -359,32 +359,6 @@ def _figure_digest(figures: object) -> dict[str, object]:
     }
 
 
-def _evidence_digest(evidence: object) -> dict[str, object]:
-    """Return element counts for the artifact evidence index.
-
-    Deliberately no page list: nearly every page carries a text block, so one
-    would only restate the page count. Every branch returns the same keys.
-    """
-
-    schema_version = (
-        evidence.get("schema_version") if isinstance(evidence, dict) else None
-    )
-    elements = evidence.get("elements") if isinstance(evidence, dict) else None
-    if not isinstance(elements, list):
-        elements = []
-    by_type: dict[str, int] = {}
-    for element in elements:
-        if isinstance(element, dict) and isinstance(
-            element_type := element.get("element_type"), str
-        ):
-            by_type[element_type] = by_type.get(element_type, 0) + 1
-    return {
-        "schema_version": schema_version,
-        "total": len(elements),
-        "by_type": by_type,
-    }
-
-
 def _continuation_notes(text_content: str, start_page: int, end_page: int) -> list[str]:
     """Notes for content the requested range cuts at either boundary.
 
@@ -509,6 +483,11 @@ class DatasheetTools:
         self._index = DatasheetIndex(pdf_path)
         self._artifacts: DatasheetArtifacts | None = None
         self._build_options: _BuildOptions | None = None
+        # Keyed on the artifacts object it was loaded for, so a rebuild can
+        # never serve the previous generation's elements.
+        self._evidence_cache: (
+            tuple[DatasheetArtifacts, dict[int, list[dict[str, object]]]] | None
+        ) = None
 
     def __enter__(self) -> DatasheetTools:
         return self
@@ -531,6 +510,7 @@ class DatasheetTools:
         self._index.close()
         self._artifacts = None
         self._build_options = None
+        self._evidence_cache = None
 
     def inspect_page(
         self,
@@ -713,6 +693,8 @@ class DatasheetTools:
             and self._artifacts.json_path.exists()
             and self._artifacts.text_path is not None
             and self._artifacts.text_path.exists()
+            and self._artifacts.evidence_path is not None
+            and self._artifacts.evidence_path.exists()
             # Pending captions are not a defect, so the artifact above is
             # complete and every check so far has passed it. They become a
             # reason to rebuild only once vision capability actually exists --
@@ -867,6 +849,17 @@ class DatasheetTools:
         if sha256_text(text_content) != record.text_sha256:
             logger.debug("Not reusing on-disk artifacts: %s", "text_hash_mismatch")
             return None
+        # Hashed, not parsed: the index is large and read only on demand, where
+        # ``_evidence_by_page`` re-checks the bytes it actually reads.
+        evidence_path = directory / str(record.evidence_name)
+        try:
+            evidence_sha256 = sha256_file(evidence_path)
+        except OSError:
+            logger.debug("Not reusing on-disk artifacts: %s", "evidence_unreadable")
+            return None
+        if evidence_sha256 != record.evidence_sha256:
+            logger.debug("Not reusing on-disk artifacts: %s", "evidence_hash_mismatch")
+            return None
 
         try:
             json_data = json.loads(json_text)
@@ -899,6 +892,8 @@ class DatasheetTools:
         return DatasheetArtifacts(
             json_path=json_path,
             text_path=text_path,
+            evidence_path=evidence_path,
+            evidence_sha256=evidence_sha256,
             json_data=json_data,
             text_content=text_content,
             toc_quality=toc_quality,
@@ -950,7 +945,11 @@ class DatasheetTools:
             )
             return
         try:
-            if artifacts.json_path is None or artifacts.text_path is None:
+            if (
+                artifacts.json_path is None
+                or artifacts.text_path is None
+                or artifacts.evidence_path is None
+            ):
                 return
             source_path = Path(self._index._resolve_pdf_source())
             if sha256_file(source_path) != source_sha256:
@@ -971,6 +970,8 @@ class DatasheetTools:
                 json_sha256=sha256_file(artifacts.json_path),
                 text_name=artifacts.text_path.name,
                 text_sha256=sha256_file(artifacts.text_path),
+                evidence_name=artifacts.evidence_path.name,
+                evidence_sha256=sha256_file(artifacts.evidence_path),
                 toc_quality=quality.to_dict() if quality is not None else {},
                 llm_enrichment_incomplete=artifacts.llm_enrichment_incomplete,
                 llm_enrichment_notes=artifacts.llm_enrichment_notes,
@@ -1014,7 +1015,6 @@ class DatasheetTools:
             "toc_source": artifacts.toc_source,
             "toc": artifacts.json_data.get("toc"),
             "figures": _figure_digest(artifacts.json_data.get("figures")),
-            "evidence": _evidence_digest(artifacts.json_data.get("evidence")),
         }
         # Only published when true, and only then does it cost tokens. The
         # digest above reports `raster` and `captioned` but never *why*
@@ -1163,19 +1163,17 @@ class DatasheetTools:
                 breadcrumb = breadcrumb_by_page[page_number]
                 if breadcrumb:
                     match["breadcrumb"] = breadcrumb
-        evidence = artifacts.json_data.get("evidence")
-        if include_evidence and isinstance(evidence, dict):
-            elements = evidence.get("elements")
-            if isinstance(elements, list):
-                for match in matches:
-                    grounded = ground_page_span(
-                        elements,
-                        match["page"],
-                        match["start"],
-                        match["end"],
-                    )
-                    if grounded:
-                        match["evidence"] = grounded
+        if include_evidence and matches:
+            by_page = self._evidence_by_page()
+            for match in matches:
+                grounded = ground_page_span(
+                    by_page.get(match["page"], ()),
+                    match["page"],
+                    match["start"],
+                    match["end"],
+                )
+                if grounded:
+                    match["evidence"] = grounded
         return matches
 
     def ground_span(
@@ -1187,13 +1185,37 @@ class DatasheetTools:
         total_pages = self._total_pages(artifacts)
         if page < 1 or page > total_pages:
             raise ValueError(f"page must be between 1 and {total_pages}")
-        evidence = artifacts.json_data.get("evidence")
-        if not isinstance(evidence, dict):
-            return []
-        elements = evidence.get("elements")
-        if not isinstance(elements, list):
-            return []
-        return ground_page_span(elements, page, start, end)
+        return ground_page_span(
+            self._evidence_by_page().get(page, ()), page, start, end
+        )
+
+    def _evidence_by_page(self) -> dict[int, list[dict[str, object]]]:
+        """The evidence index grouped by page, loaded once per artifact generation.
+
+        Raises when the file is missing or no longer the one this build wrote,
+        rather than grounding against another generation's offsets.
+        """
+        artifacts = self._require_artifacts()
+        if self._evidence_cache is not None and self._evidence_cache[0] is artifacts:
+            return self._evidence_cache[1]
+        if artifacts.evidence_path is None:
+            raise RuntimeError("These artifacts carry no evidence index; rebuild.")
+        content = read_artifact_text(artifacts.evidence_path)
+        if (
+            artifacts.evidence_sha256 is not None
+            and sha256_text(content) != artifacts.evidence_sha256
+        ):
+            raise RuntimeError(
+                f"{artifacts.evidence_path} changed after it was built; rebuild "
+                "with force_rebuild=True."
+            )
+        by_page: dict[int, list[dict[str, object]]] = {}
+        for element in parse_evidence(content):
+            page = element.get("page")
+            if isinstance(page, int):
+                by_page.setdefault(page, []).append(element)
+        self._evidence_cache = (artifacts, by_page)
+        return by_page
 
     def captions_blocked(self) -> bool:
         """True when this build's captioning failed permanently, for every figure.

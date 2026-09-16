@@ -26,6 +26,10 @@ rejected on them — lives in
 1. **Enriched ToC JSON** - Hierarchical section tree with page ranges, table hints, pre-computed breadcrumbs, boilerplate flags (revision history, disclaimers, package drawings, etc.), a page-marked preamble (pages 1-2 raw text, with per-page signals in `preamble_pages`) for agent orientation, and a `figures` array indexing every raster image placement and text-layer figure caption (see "Figure indexing and captions" below)
 2. **Page-matched text file** - Full document text with `--- PAGE N ---` markers aligned to the JSON, with column-aware reading order for two-column layouts (running headers and footers are omitted; set `DATASHEETINDEX_FURNITURE=0` to keep them)
 
+A build also writes `<stem>.evidence.jsonl`, a source index for code that has
+to link an answer back to the PDF (see [Evidence for citations](#evidence-for-citations)).
+It is not part of the agent's tool surface.
+
 All page numbers are **1-indexed** across the JSON, the text file markers, and
 `inspect_page(page=...)`.
 
@@ -633,6 +637,29 @@ batch_result = build_batch(
 In batch mode, output filenames are suffixed as needed to keep them unique when
 multiple inputs would otherwise resolve to the same stem.
 
+### Evidence for citations
+
+`<stem>.evidence.jsonl` holds one record per line -- text blocks (with their
+text), sections, figures and table regions -- each with a `bbox`, a normalized
+`region` that `inspect_page(region=...)` accepts, and its section's
+`breadcrumb`. Join it to search hits, or ground any span:
+
+```python
+from datasheetindex import DatasheetTools
+
+with DatasheetTools("datasheet.pdf") as tools:
+    tools.build_datasheet(output_dir="output")
+    for hit in tools.search_text("supply current", include_evidence=True):
+        for record in hit.get("evidence", []):
+            print(hit["page"], record["element_id"], record.get("region"))
+    records = tools.ground_span(page=12, start=0, end=40)
+```
+
+Or read it with no library at all: `grep "supply current"
+output/datasheet.evidence.jsonl` returns whole records. The format, the
+coordinate conventions and the measurements behind them are in
+[the architecture doc](./docs/datasheetindex_architecture.md#evidence-index-a-python-api-artifact).
+
 ## CLI
 
 ```bash
@@ -673,6 +700,7 @@ src/datasheetindex/
         textfile.py        # PDF -> page-matched text file (column-aware)
         _textmatch.py      # Shared dash/token normalization + matcher
         locate.py          # locate_text: text -> bounding-box coordinates
+        evidence.py        # Evidence index records, JSONL format, grounding joins
         figures.py         # raster_regions: exact raster placements, clipped
                             #   to the page and normalized for inspect_page
         preamble.py        # Page-marked front matter + per-page signals

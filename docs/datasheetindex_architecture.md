@@ -76,43 +76,6 @@ Why not parse it programmatically? Because:
 
 The agent IS the LLM — let it reason about the preamble text directly.
 
-### Evidence index
-
-The JSON artifact also carries an additive `evidence` object with a
-`schema_version` and an `elements` list. It is a deterministic source index,
-not an extraction result or confidence score. Elements currently cover:
-
-- retained text blocks in the same column-aware order as the text artifact;
-- ToC sections, including their page ranges and breadcrumbs;
-- raster figures and text-layer figure captions; and
-- whole-table regions detected by PyMuPDF's classic table detector.
-
-Text elements use half-open character ranges into the complete page-matched
-text file and page-local ranges matching `search_text` offsets. The whole-file
-ranges index the file as written, so read it with newline translation disabled
-(`read_text(encoding="utf-8", newline="")`): extracted text can contain
-carriage returns (1 of 25 corpus documents), and universal-newline mode
-rewrites them and shifts every later offset. They also carry
-1-indexed page numbers, PDF-point `bbox` coordinates, and normalized
-`region` coordinates with `left`, `right`, `top`, and `bottom` keys. The latter
-can be passed directly to `inspect_page(region=...)`. IDs are stable within one
-artifact generation, but are not promised to remain stable when a source PDF or
-build options change.
-
-`DatasheetTools.search_text(..., include_evidence=True)` joins each page-local
-hit to the elements it intersects. It is opt-in on both surfaces: the agent
-tool exposes the same `include_evidence` parameter, default false, because each
-record repeats geometry and the breadcrumb on every hit -- a few thousand
-tokens on a 20-hit search that the agent rarely needs. Elements and search hits
-resolve their section through one function, `find_node_for_page`, so a hit and
-its evidence never name different sections. The `build_datasheet` manifest
-carries only element counts by type; a page list would name nearly every page. `DatasheetTools.ground_span()` exposes the same deterministic join
-for downstream claim or citation code. A downstream agent can retain the
-returned `element_id` values on a claim, then render the associated page and
-region for review. Generated figure captions are marked separately from
-literal PDF content; table row/cell grounding and schema-driven extraction are
-deliberately outside this layer.
-
 #### Decisions already settled by measurement
 
 Every number in this subsection comes from one **21-document, 1047-page,
@@ -1059,6 +1022,93 @@ constants above read as decisions rather than taste.
   LLM in the path of a deliverable that must build with no credentials.
 
 ---
+
+### Evidence index (a Python API artifact)
+
+A build writes a third file, `<stem>.evidence.jsonl`, beside the ToC JSON and
+the text file. It is a deterministic **source index** for code that has to link
+a claim back to where the PDF says it -- a citation overlay, a reviewer UI --
+not an extraction result, a confidence score, or an agent tool. The ToC JSON
+carries only a pointer: `"evidence": {"schema_version": 1, "path":
+"<stem>.evidence.jsonl"}`.
+
+**Format.** JSON Lines: a header line (`format`, `schema_version`,
+`element_count`), then one element per line in page order -- within a page, the
+sections starting on it, its text blocks in the text artifact's column-aware
+reading order, text-layer figure captions, raster figures, then tables. Element
+types:
+
+- `text_block` -- every retained, non-blank block, with its own `text`,
+  `text_range` (half-open, into the whole text file), `page_text_range`
+  (half-open, the same offsets `search_text` reports), `bbox` and `region`;
+- `section` -- one per ToC node, with inclusive `start_page` / `end_page`;
+- `figure` / `figure_caption` -- the `figures` index, copied rather than
+  referenced so the file reads on its own (caption entries have no geometry);
+- `table` -- whole-table regions from the classic detector. No cells and no text
+  range, so `ground_span` never returns one.
+
+Every page element carries the `node_id` and `breadcrumb` of its section,
+resolved by `find_node_for_page` -- the same function behind `search_text`'s
+breadcrumb, so a hit and its evidence never name different sections.
+`source_kind` is `generated` for LLM-reconstructed sections and VLM captions,
+`literal` for everything read from the PDF.
+
+**Geometry.** `bbox` is `[x0, y0, x1, y1]` in PDF points in the **displayed**
+page space -- the space of `page.rect`, `find_tables()` and `inspect_page` --
+and `region` is that box normalized to `page.rect`, so it can be passed straight
+to `inspect_page(region=...)`. `get_text()` and `get_image_info()` report the
+*unrotated* page, so their boxes are mapped through `page.rotation_matrix`
+first. A zero-area block (a control-character glyph) has no `region`.
+
+**Access.** `DatasheetTools.search_text(..., include_evidence=True)` attaches the
+intersecting records to each hit, and `DatasheetTools.ground_span(page=, start=,
+end=)` returns them for any page-local span. Both load the file on first use,
+index it by page, and refuse a file whose bytes no longer match the build's
+hash rather than ground against another generation's offsets. Reading it
+directly needs no library: `grep` a phrase and the matching line already names
+its page, box and section. Anyone slicing the text file by `text_range` must read
+it with `newline=""` -- extracted text can contain carriage returns, and
+universal-newline mode shifts every later offset.
+
+**IDs** (`p0005-text-003`, `p0012-table-000`, `section-0007`) are a pure
+function of the PDF bytes, the package version and the build options, and a
+rebuild reproduces the file byte-for-byte. Section IDs on an
+`llm_reconstructed` ToC inherit that ToC's nondeterminism. Persist
+`(page, bbox)` alongside an ID if it must survive a version upgrade.
+
+#### Decisions already settled by measurement
+
+Measured on the 25-document public corpus (3,397 pages, 125,369 elements),
+captions off.
+
+- **Its own file, not a ToC JSON key.** Inline, the index made the ToC JSON
+  40-50x larger (`ti_tlv9061` 60 KB to 2.4 MB; `esp32_trm` to 25 MB) and
+  turned the agent-readable navigation tree into something neither an agent nor
+  a person can open, while every artifact reuse parsed all of it. Separate, the
+  ToC JSON totals 2.6 MB across the corpus and the evidence 65 MB, read only by
+  a caller that asks for grounding. Reuse hashes it without parsing it.
+- **JSON Lines with the text inline.** A single compact JSON document is one
+  line, so `grep` returns the whole file. One record per line (median 407-566
+  bytes) makes each record addressable by `grep`, `sed -n` or a streaming
+  reader, and carrying `text` means a phrase finds its geometry directly instead
+  of via offsets. The cost is the text again: 6.0 MB across the corpus, under a
+  tenth of the file.
+- **Not on the agent tool surface.** Text-block regions have a median area of
+  0.13% and 0.63% of the page on the two documents sampled (TLV9061, PSC3), the scale of the `locate_text` hits that were removed
+  from the tool surface because cropping to them rendered little but the query
+  string. `include_evidence` roughly tripled `search_text` payloads (2.6x) with
+  no measured agent benefit -- a hit already has `page`, offsets and
+  `breadcrumb`, enough to cite. A manifest digest of element counts was dropped
+  for the same reason: the counts are almost all text blocks, i.e. the page
+  count again. Re-adding either needs an agent A/B, not a cost estimate.
+- **Rotation is converted, and pinned.** Before the conversion, text regions on
+  a 90-degree page cropped blank paper or were dropped outright; raster figure
+  regions (and so the VLM caption crop) had the same defect since 0.25.0. All
+  718 text, table and figure regions on the corpus's 18 rotated pages now crop
+  rendered content. `locate_text` still reports unrotated points: its overlay
+  consumer draws them, so changing it is that consumer's decision.
+- **Whitespace-only blocks are skipped.** They can never be a search hit, so
+  they ground nothing; one Bosch datasheet had 519 of them.
 
 ## Agent Tools
 

@@ -781,6 +781,14 @@ def _build_table_count_cache_helper(
         int(page): [[float(value) for value in bbox] for bbox in page_bboxes]
         for page, page_bboxes in payload["bboxes"].items()
     }
+    # Same reasoning as the count check: a truncated payload would silently
+    # drop table regions while the counts still look right.
+    if set(bboxes) != set(cache) or any(
+        len(bboxes[page]) > cache[page] for page in cache
+    ):
+        raise RuntimeError(
+            "scan worker returned table regions inconsistent with counts"
+        )
     return cache, bboxes
 
 

@@ -1,9 +1,30 @@
-"""Artifact-local source evidence and deterministic grounding helpers."""
+"""Artifact-local source evidence and deterministic grounding helpers.
+
+Evidence is written to its own ``<stem>.evidence.jsonl`` next to the ToC JSON,
+never into it: one record per text block makes the index 40-50x the size of
+the navigation tree, which must stay small enough for an agent to read.
+
+The file is JSON Lines so that it can be navigated without parsing all of it:
+a header line, then one element per line in page order (sections, text blocks
+in reading order, figures, tables). ``grep`` for a phrase or an ``element_id``
+returns whole records, and each text block carries its own ``text``, so a hit
+already names its geometry and section without slicing the text artifact by
+offset.
+
+Geometry convention, for every element type: ``bbox`` is ``[x0, y0, x1, y1]``
+in PDF points in the *displayed* (rotated) page space -- the space of
+``page.rect``, ``find_tables()`` and ``inspect_page`` -- and ``region`` is that
+box normalized to ``page.rect``. Text ranges are half-open ``{start, end}``
+character offsets; page numbers are 1-indexed and inclusive.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
+
+if TYPE_CHECKING:
+    import pymupdf
 
 EVIDENCE_SCHEMA_VERSION = 1
 
@@ -23,14 +44,85 @@ class EvidenceElement(TypedDict, total=False):
     page: int
     text_range: EvidenceRange
     page_text_range: EvidenceRange
-    page_range: EvidenceRange
+    start_page: int
+    end_page: int
     bbox: list[float]
     region: dict[str, float]
     breadcrumb: str
     node_id: str
     source_kind: str
+    text: str
     caption: str
     caption_source: str
+
+
+EVIDENCE_FORMAT = "datasheetindex-evidence"
+
+#: Within a page: the section a reader enters first, then its text in reading
+#: order, then the figures and tables drawn on it.
+_TYPE_ORDER = {"section": 0, "text_block": 1, "figure_caption": 2, "figure": 3}
+
+
+def evidence_file_name(stem: str) -> str:
+    """The evidence artifact's file name, beside ``<stem>.json``."""
+
+    return f"{stem}.evidence.jsonl"
+
+
+def serialize_evidence(elements: Iterable[EvidenceElement]) -> str:
+    """Render the evidence file: a header line, then one element per line."""
+
+    import json
+
+    ordered = sorted(
+        elements,
+        key=lambda element: (
+            element.get("page", 0),
+            _TYPE_ORDER.get(element.get("element_type", ""), len(_TYPE_ORDER)),
+            element.get("element_id", ""),
+        ),
+    )
+    header = {
+        "format": EVIDENCE_FORMAT,
+        "schema_version": EVIDENCE_SCHEMA_VERSION,
+        "element_count": len(ordered),
+    }
+    lines = [header, *ordered]
+    return "".join(
+        json.dumps(line, ensure_ascii=False, separators=(",", ":")) + "\n"
+        for line in lines
+    )
+
+
+def parse_evidence(content: str) -> list[dict[str, Any]]:
+    """Read ``serialize_evidence`` output back; raises on a foreign file."""
+
+    import json
+
+    lines = content.splitlines()
+    header = json.loads(lines[0]) if lines else {}
+    if header.get("format") != EVIDENCE_FORMAT:
+        raise ValueError("not a datasheetindex evidence file")
+    if header.get("schema_version") != EVIDENCE_SCHEMA_VERSION:
+        raise ValueError(
+            f"evidence schema {header.get('schema_version')} is not "
+            f"{EVIDENCE_SCHEMA_VERSION}"
+        )
+    return [json.loads(line) for line in lines[1:] if line]
+
+
+def displayed_bbox(bbox: Sequence[float], page: pymupdf.Page) -> list[float]:
+    """Map an unrotated-page box (``get_text``, ``get_image_info``) to page.rect space.
+
+    Identity on an unrotated page. On a rotated one the raw box names a
+    different part of the rendered page -- or none of it -- so a region built
+    from it crops the wrong area in ``inspect_page``.
+    """
+
+    import pymupdf
+
+    rect = pymupdf.Rect(bbox) * page.rotation_matrix
+    return [rect.x0, rect.y0, rect.x1, rect.y1]
 
 
 def _range(start: int, end: int) -> EvidenceRange:
@@ -65,16 +157,22 @@ def text_element(
     canonical_end: int,
     page_start: int,
     page_end: int,
+    text: str,
     bbox: Sequence[float],
     page_width: float,
     page_height: float,
 ) -> EvidenceElement:
-    """Build an evidence record for one retained, ordered text block."""
+    """Build an evidence record for one retained, ordered text block.
+
+    ``text`` is exactly the artifact slice ``text_range`` names; it is carried
+    so the record can be found and read on its own.
+    """
 
     element: EvidenceElement = {
         "element_id": element_id,
         "element_type": "text_block",
         "page": page,
+        "text": text,
         "text_range": _range(canonical_start, canonical_end),
         "page_text_range": _range(page_start, page_end),
         "bbox": [float(value) for value in bbox],
@@ -182,29 +280,33 @@ def section_elements(
 
     def walk(items: Iterable[Any]) -> None:
         for node in items:
-            element: EvidenceElement = {
-                "element_id": f"section-{node.node_id}",
-                "element_type": "section",
-                "page": node.start_page,
-                "source_kind": source_kind,
-                "node_id": node.node_id,
-                "breadcrumb": node.breadcrumb,
-            }
-            element["page_range"] = {
-                "start": node.start_page,
-                "end": node.end_page,
-            }
-            elements.append(element)
+            elements.append(
+                {
+                    "element_id": f"section-{node.node_id}",
+                    "element_type": "section",
+                    "page": node.start_page,
+                    "start_page": node.start_page,
+                    "end_page": node.end_page,
+                    "source_kind": source_kind,
+                    "node_id": node.node_id,
+                    "breadcrumb": node.breadcrumb,
+                }
+            )
             walk(getattr(node, "nodes", ()))
 
     walk(nodes)
     return elements
 
 
-def annotate_figure_entries(
-    figures: list[dict[str, object]],
+def figure_elements(
+    figures: Iterable[Mapping[str, object]],
 ) -> list[EvidenceElement]:
-    """Assign deterministic evidence IDs to the existing figure digest."""
+    """Evidence records for the figure index, leaving ``figures`` untouched.
+
+    The records are self-contained -- the evidence file is read on its own --
+    so they repeat the figure's geometry and caption. Text-layer caption
+    entries have no geometry, and their records carry none.
+    """
 
     counters: dict[tuple[int, str], int] = {}
     elements: list[EvidenceElement] = []
@@ -216,18 +318,15 @@ def annotate_figure_entries(
         key = (page, kind)
         ordinal = counters.get(key, 0)
         counters[key] = ordinal + 1
-        element_type = "figure" if kind == "raster" else "figure_caption"
-        figure["element_id"] = f"p{page:04d}-{kind}-{ordinal:03d}"
-        figure["source_kind"] = (
-            "generated"
-            if figure.get("caption_source") in {"generated", "llm"}
-            else "literal"
-        )
         record: EvidenceElement = {
-            "element_id": str(figure["element_id"]),
-            "element_type": element_type,
+            "element_id": f"p{page:04d}-{kind}-{ordinal:03d}",
+            "element_type": "figure" if kind == "raster" else "figure_caption",
             "page": page,
-            "source_kind": str(figure["source_kind"]),
+            "source_kind": (
+                "generated"
+                if figure.get("caption_source") in {"generated", "llm"}
+                else "literal"
+            ),
         }
         bbox = figure.get("bbox")
         if isinstance(bbox, list) and all(

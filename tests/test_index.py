@@ -1521,7 +1521,11 @@ def test_no_temp_files_are_left_in_the_output_directory(tmp_path):
     finally:
         idx.close()
 
-    assert sorted(p.name for p in out.iterdir()) == ["ds.json", "ds.txt"]
+    assert sorted(p.name for p in out.iterdir()) == [
+        "ds.evidence.jsonl",
+        "ds.json",
+        "ds.txt",
+    ]
 
 
 def test_a_failed_text_write_leaves_the_previous_generation_readable(
