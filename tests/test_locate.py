@@ -259,12 +259,34 @@ def test_points_are_not_clamped():
     assert loc["region"]["pct"]["bottom"] == 1.0
 
 
-def _ink(doc: pymupdf.Document, region: dict[str, float]) -> int:
-    """Dark pixels inspect_page renders for ``region`` on page 1."""
-    data = base64.b64decode(inspect_page(doc, 1, region=region, dpi=72)[0]["data"])
-    pix = pymupdf.Pixmap(data)
+def _ink_box_pct(page: pymupdf.Page) -> dict[str, float]:
+    """Where dark pixels actually land on the rendered page, as fractions.
+
+    Derived from the rendering, not from ``rotation_matrix``, so the check
+    cannot pass by mirroring the implementation's own transform.
+    """
+    pix = page.get_pixmap(dpi=72)
+    n, width = pix.n, pix.width
     samples = pix.samples
-    return sum(1 for i in range(0, len(samples), pix.n) if samples[i] < 128)
+    xs: list[int] = []
+    ys: list[int] = []
+    for i in range(0, len(samples), n):
+        if samples[i] < 128:
+            pixel = i // n
+            xs.append(pixel % width)
+            ys.append(pixel // width)
+    return {
+        "left": min(xs) / pix.width,
+        "right": (max(xs) + 1) / pix.width,
+        "top": min(ys) / pix.height,
+        "bottom": (max(ys) + 1) / pix.height,
+    }
+
+
+#: The glyph box search_for reports carries the font's ascender/descender and
+#: side bearings around the inked pixels; a region more than this far out on any
+#: side is the wrong size, not padding.
+_MAX_PAD_POINTS = 8.0
 
 
 @pytest.mark.parametrize("rotation", [0, 90, 180, 270])
@@ -292,5 +314,17 @@ def test_pct_crops_the_match_on_rotated_and_cropped_pages(rotation, cropped):
         doc[0].rect.width,
         doc[0].rect.height,
     )
-    assert _ink(doc, region["pct"]) > 0
+    pct = region["pct"]
+    ink = _ink_box_pct(doc[0])
+    width, height = doc[0].rect.width, doc[0].rect.height
+    # Contains the text (1pt of rasterization slack)...
+    assert pct["left"] <= ink["left"] + 1 / width
+    assert pct["top"] <= ink["top"] + 1 / height
+    assert pct["right"] >= ink["right"] - 1 / width
+    assert pct["bottom"] >= ink["bottom"] - 1 / height
+    # ...and is not much bigger than it.
+    assert ink["left"] - pct["left"] <= _MAX_PAD_POINTS / width
+    assert ink["top"] - pct["top"] <= _MAX_PAD_POINTS / height
+    assert pct["right"] - ink["right"] <= _MAX_PAD_POINTS / width
+    assert pct["bottom"] - ink["bottom"] <= _MAX_PAD_POINTS / height
     doc.close()
