@@ -360,34 +360,28 @@ def _figure_digest(figures: object) -> dict[str, object]:
 
 
 def _evidence_digest(evidence: object) -> dict[str, object]:
-    """Return bounded counts and page hints for the artifact evidence index."""
+    """Return element counts for the artifact evidence index.
 
-    if not isinstance(evidence, dict):
-        return {"schema_version": None, "total": 0, "by_type": {}}
-    elements = evidence.get("elements")
+    Deliberately no page list: nearly every page carries a text block, so one
+    would only restate the page count. Every branch returns the same keys.
+    """
+
+    schema_version = (
+        evidence.get("schema_version") if isinstance(evidence, dict) else None
+    )
+    elements = evidence.get("elements") if isinstance(evidence, dict) else None
     if not isinstance(elements, list):
-        return {
-            "schema_version": evidence.get("schema_version"),
-            "total": 0,
-            "by_type": {},
-        }
+        elements = []
     by_type: dict[str, int] = {}
-    pages: set[int] = set()
     for element in elements:
-        if not isinstance(element, dict):
-            continue
-        element_type = element.get("element_type")
-        page = element.get("page")
-        if isinstance(element_type, str):
+        if isinstance(element, dict) and isinstance(
+            element_type := element.get("element_type"), str
+        ):
             by_type[element_type] = by_type.get(element_type, 0) + 1
-        if isinstance(page, int):
-            pages.add(page)
     return {
-        "schema_version": evidence.get("schema_version"),
+        "schema_version": schema_version,
         "total": len(elements),
         "by_type": by_type,
-        "pages": sorted(pages)[:_MANIFEST_FIGURE_PAGES],
-        "truncated": len(pages) > _MANIFEST_FIGURE_PAGES,
     }
 
 

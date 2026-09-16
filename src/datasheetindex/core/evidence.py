@@ -144,28 +144,28 @@ def ground_page_span(
 def link_to_toc(
     elements: list[EvidenceElement], nodes: Iterable[Any]
 ) -> list[EvidenceElement]:
-    """Attach each page element to its deepest containing ToC node."""
+    """Attach each page element to its deepest containing ToC node.
 
-    flat_nodes: list[Any] = []
+    Uses ``structure.find_node_for_page`` so an element and a ``search_text``
+    hit on the same page always name the same section.
+    """
 
-    def walk(items: Iterable[Any]) -> None:
-        for node in items:
-            flat_nodes.append(node)
-            walk(getattr(node, "nodes", ()))
+    # Deferred: structure imports this module at load time.
+    from datasheetindex.core.structure import find_node_for_page
 
-    walk(nodes)
+    node_list = list(nodes)
+    node_by_page: dict[int, Any] = {}
     for element in elements:
         if element.get("element_type") == "section":
             continue
         page = element.get("page")
         if not isinstance(page, int):
             continue
-        containing = [
-            node for node in flat_nodes if node.start_page <= page <= node.end_page
-        ]
-        if not containing:
+        if page not in node_by_page:
+            node_by_page[page] = find_node_for_page(node_list, page)
+        node = node_by_page[page]
+        if node is None:
             continue
-        node = max(containing, key=lambda item: (item.level, item.start_page))
         if node.breadcrumb:
             element["breadcrumb"] = node.breadcrumb
         if node.node_id:

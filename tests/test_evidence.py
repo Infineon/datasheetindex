@@ -3,6 +3,7 @@ from __future__ import annotations
 import pymupdf
 
 from datasheetindex.core.evidence import (
+    EvidenceElement,
     annotate_figure_entries,
     ground_page_span,
     ground_range,
@@ -138,3 +139,46 @@ def test_evidence_regions_are_clipped_to_page_bounds():
         "top": 0.975,
         "bottom": 1.0,
     }
+
+
+def test_evidence_and_search_breadcrumb_agree_on_overlapping_siblings():
+    """Siblings covering the same page must resolve to one section everywhere.
+
+    3.1 covers pages 4-5 and 3.2 starts on page 5: a search hit on page 5 and
+    an evidence record on page 5 must name the same (first, in document order)
+    section, or one hit would cite two sections.
+    """
+    from datasheetindex.core.structure import find_breadcrumb_for_page
+
+    first = TocNode(
+        title="3.1",
+        level=2,
+        start_page=4,
+        end_page=5,
+        node_id="0002",
+        breadcrumb="3 > 3.1",
+    )
+    second = TocNode(
+        title="3.2",
+        level=2,
+        start_page=5,
+        end_page=6,
+        node_id="0003",
+        breadcrumb="3 > 3.2",
+    )
+    parent = TocNode(
+        title="3",
+        level=1,
+        start_page=4,
+        end_page=6,
+        node_id="0001",
+        breadcrumb="3",
+        nodes=[first, second],
+    )
+    elements: list[EvidenceElement] = [
+        {"element_id": "p0005-text-000", "element_type": "text", "page": 5}
+    ]
+    link_to_toc(elements, [parent])
+
+    assert elements[0]["breadcrumb"] == find_breadcrumb_for_page([parent], 5)
+    assert elements[0]["node_id"] == "0002"

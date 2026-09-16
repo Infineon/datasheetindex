@@ -252,7 +252,7 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                 page=args.get("page"),
                 case_sensitive=args.get("case_sensitive", False),
                 max_results=args.get("max_results", 20),
-                include_evidence=True,
+                include_evidence=args.get("include_evidence", False),
             )
             payload: dict[str, Any] = {"query": args["query"], "results": results}
             # The caveat is on this tool's description too, but a description is
@@ -370,8 +370,7 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                 "selection, and ordering sections are leads, not guarantees. "
                 "'multi_variant' names a detected family; its absence does not "
                 "prove the document covers one part.\n\n"
-                "The 'evidence' digest reports counts; hits link to regions "
-                "and sections."
+                "The 'evidence' digest counts source elements by type."
             ),
             input_schema={
                 "type": "object",
@@ -503,8 +502,7 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                 "cannot be found here: the absence of a match does not prove the "
                 "document lacks the term. On an empty result, check the 'figures' "
                 "digest from build_datasheet for a page whose caption describes "
-                "what you want, then read it with inspect_page. Each hit also "
-                "carries evidence elements for exact source linkage."
+                "what you want, then read it with inspect_page."
             ),
             input_schema={
                 "type": "object",
@@ -528,6 +526,14 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                     "max_results": {
                         "type": "integer",
                         "description": "Default 20.",
+                    },
+                    "include_evidence": {
+                        "type": "boolean",
+                        "description": (
+                            "Default false. Attach the source text blocks "
+                            "(bounding box, section) to each hit, for citing "
+                            "exact provenance. Costs tokens on every hit."
+                        ),
                     },
                 },
                 "required": ["query"],

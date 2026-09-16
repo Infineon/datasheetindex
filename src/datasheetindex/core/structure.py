@@ -224,18 +224,17 @@ def assign_breadcrumbs(nodes: list[TocNode], parent_path: str = "") -> None:
             assign_breadcrumbs(node.nodes, node.breadcrumb)
 
 
-def find_breadcrumb_for_page(nodes: list[TocNode], page: int) -> str | None:
-    """Return the breadcrumb of the deepest ToC section containing ``page``.
-
-    Walks the enriched ``TocNode`` tree and returns the ``breadcrumb`` of the
-    most specific node whose ``[start_page, end_page]`` range covers ``page``.
-    Returns ``None`` when no section covers the page or no covering node carries
-    a breadcrumb.
+def find_node_for_page(nodes: list[TocNode], page: int) -> TocNode | None:
+    """Return the deepest ToC node whose ``[start_page, end_page]`` covers ``page``.
 
     When sibling sections have overlapping ranges that cover the same page at
     the same depth (e.g. siblings sharing a start page), the first one in
     document order wins -- a nested child is strictly deeper than its parent, so
     "most specific" still selects the deepest covering section.
+
+    This is the single tie-break for page-to-section linkage: search hit
+    breadcrumbs and evidence records (``evidence.link_to_toc``) both go through
+    it, so one hit can never name two different sections.
     """
     best: TocNode | None = None
 
@@ -250,6 +249,16 @@ def find_breadcrumb_for_page(nodes: list[TocNode], page: int) -> str | None:
                 _walk(node.nodes)
 
     _walk(nodes)
+    return best
+
+
+def find_breadcrumb_for_page(nodes: list[TocNode], page: int) -> str | None:
+    """Return the breadcrumb of the deepest ToC section containing ``page``.
+
+    Returns ``None`` when no section covers the page or the covering node
+    carries no breadcrumb. Tie-breaking is that of ``find_node_for_page``.
+    """
+    best = find_node_for_page(nodes, page)
     if best is None or not best.breadcrumb:
         return None
     return best.breadcrumb

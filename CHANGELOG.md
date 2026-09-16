@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.40.0] - 2026-09-16
+
+### Added
+- **An artifact evidence index for source grounding.** The ToC JSON gains an
+  additive `evidence` object (`schema_version`, `elements`): a deterministic
+  source index, not an extraction result or confidence score. Elements cover
+  retained text blocks in the text artifact's column-aware order, ToC
+  sections with their page ranges, raster figures and text-layer figure
+  captions, and whole-table regions from the classic table detector. Text
+  elements carry half-open ranges into both the whole text file and the page
+  (matching `search_text` offsets), a PDF-point `bbox`, and a normalized
+  `region` that `inspect_page(region=...)` accepts directly. Every page
+  element is linked to its section's `node_id` and `breadcrumb`. Generated
+  figure captions and LLM-reconstructed sections are marked
+  `source_kind: "generated"`, apart from literal PDF content.
+- **`DatasheetTools.search_text(..., include_evidence=True)`** attaches the
+  intersecting elements to each hit, and **`DatasheetTools.ground_span()`**
+  exposes the same join for downstream claim and citation code.
+- **The agent `search_text` tool takes the same `include_evidence` parameter,
+  default false.** Opt-in because each record repeats geometry and the
+  breadcrumb per hit -- a few thousand tokens on a 20-hit search.
+- **An `evidence` digest in the `build_datasheet` manifest:** `schema_version`,
+  `total`, and counts `by_type`. No page list, since nearly every page carries
+  a text block and one would only restate the page count.
+
+### Changed
+- **Page-to-section linkage has one tie-break.** The new
+  `structure.find_node_for_page` returns the deepest covering section, the
+  first in document order when siblings overlap on a page; both
+  `find_breadcrumb_for_page` and evidence linking use it, so a search hit and
+  its evidence never name different sections.
+- **The artifact reuse sidecar records `evidence_schema_version`.** An
+  artifact built before the evidence index, or under an older schema, is
+  rebuilt rather than served without grounding (`evidence_schema_changed`).
+
 ## [0.39.0] - 2026-09-15
 
 ### Added

@@ -88,7 +88,11 @@ not an extraction result or confidence score. Elements currently cover:
 - whole-table regions detected by PyMuPDF's classic table detector.
 
 Text elements use half-open character ranges into the complete page-matched
-text file and page-local ranges matching `search_text` offsets. They also carry
+text file and page-local ranges matching `search_text` offsets. The whole-file
+ranges index the file as written, so read it with newline translation disabled
+(`read_text(encoding="utf-8", newline="")`): extracted text can contain
+carriage returns (1 of 25 corpus documents), and universal-newline mode
+rewrites them and shifts every later offset. They also carry
 1-indexed page numbers, PDF-point `bbox` coordinates, and normalized
 `region` coordinates with `left`, `right`, `top`, and `bottom` keys. The latter
 can be passed directly to `inspect_page(region=...)`. IDs are stable within one
@@ -96,9 +100,13 @@ artifact generation, but are not promised to remain stable when a source PDF or
 build options change.
 
 `DatasheetTools.search_text(..., include_evidence=True)` joins each page-local
-hit to the elements it intersects. The framework-neutral agent tool enables
-this enrichment while the default Python search result remains backward
-compatible. `DatasheetTools.ground_span()` exposes the same deterministic join
+hit to the elements it intersects. It is opt-in on both surfaces: the agent
+tool exposes the same `include_evidence` parameter, default false, because each
+record repeats geometry and the breadcrumb on every hit -- a few thousand
+tokens on a 20-hit search that the agent rarely needs. Elements and search hits
+resolve their section through one function, `find_node_for_page`, so a hit and
+its evidence never name different sections. The `build_datasheet` manifest
+carries only element counts by type; a page list would name nearly every page. `DatasheetTools.ground_span()` exposes the same deterministic join
 for downstream claim or citation code. A downstream agent can retain the
 returned `element_id` values on a claim, then render the associated page and
 region for review. Generated figure captions are marked separately from
