@@ -1122,10 +1122,24 @@ code, not an agent decision, which is why the method stays and the tool does not
 Matching is hybrid: `page.search_for` on the verbatim query (fast path), with a
 normalized word-level fallback (`page.get_text("words")`) that tolerates the
 dash/case/whitespace variation endemic to datasheets (`-0.3` vs `−0.3`, `±2%`).
-The fast path returns one result per rectangle it finds (a single-line hit is
-one single-box result); the normalized fallback groups a multi-line match's
-words by `(block_no, line_no)` into a single result whose `region` is their
-union.
+Both paths return one result per *occurrence*. That is not free on the fast
+path: `search_for` returns one rectangle per line fragment, so a phrase that
+wraps, a table row (one rectangle per cell) or text broken by a sub- or
+superscript (`R_DS(on)`, `XHP™3`) comes back as several rectangles for a
+single match, with nothing saying which belong together. They are grouped by
+counting glyphs: a hit covers exactly the query's non-whitespace characters,
+since MuPDF matches case-insensitively and lets any whitespace run match any
+other. A count that does not line up falls back to one result per rectangle.
+Until 0.39.2 every rectangle was its own result, so one match arrived as 3-10
+tied candidates, and a consumer that declines ties -- datasheet-agent's source
+grounding does -- dropped it. Re-grounding datasheet-agent's production cache
+(10,390 targets) with the fix, plus the matching consumer change (score every
+box, highlight their union), placed 90 more, lost 7, and changed 914 boxes,
+none of which covered less of their quote than before. The normalized fallback groups a
+multi-line match's words by `(block_no, line_no)`. Either way a multi-line
+result's `region` is the union of its `boxes`, which spans several lines: a
+consumer that wants one line must pick from `boxes`, not snap `region` to a
+line.
 
 It is stateless: the direct `DatasheetTools(pdf).locate_text(...)` Python API
 works off the live PDF with no `build_datasheet` call. A document must first be loaded via `DatasheetTools(pdf)` or `build_datasheet`

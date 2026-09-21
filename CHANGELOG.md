@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.39.2] - 2026-09-21
+
+### Fixed
+- **`locate_text` reported one match as several occurrences.** `search_for`
+  returns one rectangle per line fragment, and the fast path turned each into
+  its own result. A phrase that wraps, a table row (one rectangle per cell) or
+  text broken by a sub- or superscript (`R_DS(on)`, `XHP™3`) therefore came
+  back as 3-10 results for a single match, capped by `max_results`, and a
+  consumer that declines ties dropped it. The rectangles are now grouped into
+  one result per occurrence, by counting the glyphs each covers against the
+  query; a count that does not line up keeps the old one-per-rectangle
+  behaviour. A multi-line result's `region` is the union of its `boxes`, so a
+  consumer that wants one line must pick from `boxes`. Re-grounding
+  datasheet-agent's production cache with this and its matching consumer
+  change (score every box, highlight their union): 90 more targets placed, 7
+  lost, and none of the 914 changed boxes covers less of its quote.
+
 ## [0.39.1] - 2026-09-16
 
 ### Fixed

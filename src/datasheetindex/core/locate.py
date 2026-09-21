@@ -110,8 +110,51 @@ def _union_region(
 
 
 def _search_for_occurrences(page: pymupdf.Page, query: str) -> list[list[_Rect]]:
-    """Fast path: each verbatim ``search_for`` hit rect is one single-box occurrence."""
-    return [[(r.x0, r.y0, r.x1, r.y1)] for r in page.search_for(query)]
+    """Fast path: verbatim ``search_for`` hits, one list of rects per occurrence.
+
+    ``search_for`` returns one rect per line fragment of a hit, not one per hit:
+    a phrase that wraps, a table row (one rect per cell) or a sub/superscript
+    (``R_DS(on)``, a trademark sign) comes back as several consecutive rects.
+    Reporting each as its own occurrence turned one match into a tie. PyMuPDF
+    does not say which rects belong together, so they are grouped by counting:
+    a hit covers exactly the query's non-whitespace characters, because MuPDF's
+    search matches case-insensitively and lets any whitespace run match any
+    other. When the count does not line up, fall back to one rect per
+    occurrence -- the pre-grouping behaviour, never worse than before.
+    """
+    rects = [(r.x0, r.y0, r.x1, r.y1) for r in page.search_for(query)]
+    per_rect = [[rect] for rect in rects]
+    if len(rects) < 2:
+        return per_rect
+    target = sum(1 for ch in query if not ch.isspace())
+    centers = _glyph_centers(page)
+    occurrences: list[list[_Rect]] = []
+    current: list[_Rect] = []
+    count = 0
+    for rect in rects:
+        x0, y0, x1, y1 = rect
+        current.append(rect)
+        count += sum(1 for cx, cy in centers if x0 <= cx < x1 and y0 <= cy < y1)
+        if count == target:
+            occurrences.append(current)
+            current, count = [], 0
+        elif count > target:
+            return per_rect
+    return per_rect if current else occurrences
+
+
+def _glyph_centers(page: pymupdf.Page) -> list[tuple[float, float]]:
+    """Centre point of every non-whitespace glyph on the page (unrotated space)."""
+    centers: list[tuple[float, float]] = []
+    for block in page.get_text("rawdict")["blocks"]:
+        for line in block.get("lines", ()):
+            for span in line["spans"]:
+                for char in span["chars"]:
+                    if char["c"].isspace():
+                        continue
+                    x0, y0, x1, y1 = char["bbox"]
+                    centers.append(((x0 + x1) / 2, (y0 + y1) / 2))
+    return centers
 
 
 def _group_words_by_line(words: list[tuple]) -> list[_Rect]:

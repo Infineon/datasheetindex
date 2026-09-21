@@ -197,6 +197,47 @@ def test_repeated_single_line_string_yields_one_result_per_occurrence():
     assert xs[0] < xs[1]
 
 
+def test_wrapped_search_for_hit_is_one_occurrence():
+    # search_for returns one rect per line fragment of a single hit. A phrase
+    # wrapping onto the next line comes back as two rects, which used to be
+    # reported as two occurrences -- a tie that made callers decline a match
+    # that exists exactly once. Table rows (one rect per cell) and sub- or
+    # superscripts (R_DS(on), a trademark sign) split the same way.
+    doc = _doc_with([(72, 72, "alpha beta"), (72, 94, "gamma")])
+    assert len(doc[0].search_for("beta gamma")) == 2  # the split being fixed
+    results = locate_text(doc, "beta gamma", page=1)
+    doc.close()
+
+    assert len(results) == 1
+    loc = results[0]
+    assert loc["match_method"] == "search_for"
+    assert len(loc["boxes"]) == 2
+    assert loc["region"]["points"]["y0"] == pytest.approx(
+        min(b["points"]["y0"] for b in loc["boxes"])
+    )
+    assert loc["region"]["points"]["y1"] == pytest.approx(
+        max(b["points"]["y1"] for b in loc["boxes"])
+    )
+
+
+def test_two_wrapped_hits_stay_two_occurrences():
+    # Grouping must split at hit boundaries, not merge every rect on the page.
+    doc = _doc_with(
+        [
+            (72, 72, "alpha beta"),
+            (72, 94, "gamma"),
+            (72, 160, "alpha beta"),
+            (72, 182, "gamma"),
+        ]
+    )
+    results = locate_text(doc, "beta gamma", page=1)
+    doc.close()
+
+    assert len(results) == 2
+    assert [len(loc["boxes"]) for loc in results] == [2, 2]
+    assert results[0]["region"]["points"]["y1"] < results[1]["region"]["points"]["y0"]
+
+
 def _doc_overflowing_bottom() -> pymupdf.Document:
     """A glyph whose descender crosses the bottom page edge."""
     doc = pymupdf.open()
