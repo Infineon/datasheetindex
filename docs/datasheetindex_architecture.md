@@ -1129,7 +1129,12 @@ superscript (`R_DS(on)`, `XHP™3`) comes back as several rectangles for a
 single match, with nothing saying which belong together. They are grouped by
 counting glyphs: a hit covers exactly the query's non-whitespace characters,
 since MuPDF matches case-insensitively and lets any whitespace run match any
-other. A count that does not line up falls back to one result per rectangle.
+other, and a closed group must also hold exactly the query's glyphs (a
+case-folded multiset: one hit through a table steps up and down through
+stacked cells, so neither reading order nor position is a usable guard). A
+check that fails falls back to one result per rectangle. The shared text page
+uses `search_for`'s own default flags; `TEXTFLAGS_SEARCH` splits ligatures,
+which changes what matches.
 Until 0.39.2 every rectangle was its own result, so one match arrived as 3-10
 tied candidates, and a consumer that declines ties -- datasheet-agent's source
 grounding does -- dropped it. Re-grounding datasheet-agent's production cache

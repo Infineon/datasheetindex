@@ -8,7 +8,8 @@ round-trip) and raw, unclamped PDF points (for PDF-native annotation).
 
 from __future__ import annotations
 
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
+from collections import Counter
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, NotRequired, TypedDict
 
@@ -120,47 +121,67 @@ def _search_for_occurrences(page: pymupdf.Page, query: str) -> list[list[_Rect]]
     does not say which rects belong together, so they are grouped by counting:
     a hit covers exactly the query's non-whitespace characters, because MuPDF's
     search matches case-insensitively and lets any whitespace run match any
-    other. When the count does not line up, fall back to one rect per
+    other. A group that closes on the count must also hold exactly the query's
+    glyphs (case-folded, as a multiset -- a table row's cells need not come in
+    reading order). When either check fails, fall back to one rect per
     occurrence -- the pre-grouping behaviour, never worse than before.
     """
     import pymupdf
 
     # One text page serves the search and the glyph count: search_for would
     # otherwise build its own, and a second extraction per page made a
-    # whole-document scan of a repeated term ~9x slower.
-    textpage = page.get_textpage(flags=pymupdf.TEXTFLAGS_SEARCH)
+    # whole-document scan of a repeated term ~9x slower. Its flags must be
+    # search_for's own defaults (as of PyMuPDF 1.28): TEXTFLAGS_SEARCH splits
+    # ligatures, which changes what matches and leaves zero-width glyphs.
+    textpage = page.get_textpage(
+        flags=pymupdf.TEXT_DEHYPHENATE
+        | pymupdf.TEXT_PRESERVE_WHITESPACE
+        | pymupdf.TEXT_PRESERVE_LIGATURES
+        | pymupdf.TEXT_MEDIABOX_CLIP
+    )
     rects = [
         (r.x0, r.y0, r.x1, r.y1) for r in page.search_for(query, textpage=textpage)
     ]
     per_rect = [[rect] for rect in rects]
     if len(rects) < 2:
         return per_rect
-    target = sum(1 for ch in query if not ch.isspace())
-    centers = _glyph_centers(textpage)
-    center_ys = [cy for cy, _cx in centers]
+    wanted = Counter(ch.casefold() for ch in query if not ch.isspace())
+    target = sum(wanted.values())
+    glyphs = _glyph_centers(textpage)
+    glyph_ys = [cy for cy, _cx, _ch in glyphs]
     occurrences: list[list[_Rect]] = []
     current: list[_Rect] = []
-    count = 0
+    seen: Counter[str] = Counter()
     for rect in rects:
         x0, y0, x1, y1 = rect
         current.append(rect)
-        band = centers[bisect_left(center_ys, y0) : bisect_left(center_ys, y1)]
-        count += sum(1 for _cy, cx in band if x0 <= cx < x1)
+        # Closed on both edges: a zero-width glyph (a combining mark) sits
+        # exactly on the rect's edge, and missing it undercounts.
+        band = glyphs[bisect_left(glyph_ys, y0) : bisect_right(glyph_ys, y1)]
+        seen.update(ch.casefold() for _cy, cx, ch in band if x0 <= cx <= x1)
+        count = seen.total()
         if count == target:
+            # Undercounts summed across hits can reach the target by chance;
+            # the glyphs then are not the query's. Position is no guard: one
+            # hit through a table steps up and down through stacked cells, and
+            # prose can wrap past a figure.
+            if seen != wanted:
+                return per_rect
             occurrences.append(current)
-            current, count = [], 0
+            current, seen = [], Counter()
         elif count > target:
             return per_rect
     return per_rect if current else occurrences
 
 
-def _glyph_centers(textpage: pymupdf.TextPage) -> list[tuple[float, float]]:
-    """``(y, x)`` centre of every non-whitespace glyph, sorted by y (unrotated space).
+def _glyph_centers(textpage: pymupdf.TextPage) -> list[tuple[float, float, str]]:
+    """``(y, x, char)`` at every non-whitespace glyph's centre, sorted by y.
 
-    Sorted so each hit rect counts only the glyphs in its own band -- a dense
-    page otherwise compared every rect against every glyph.
+    Coordinates are unrotated page space, like ``search_for``. Sorted so each
+    hit rect reads only the glyphs in its own band -- a dense page otherwise
+    compared every rect against every glyph.
     """
-    centers: list[tuple[float, float]] = []
+    centers: list[tuple[float, float, str]] = []
     for block in textpage.extractRAWDICT()["blocks"]:
         for line in block.get("lines", ()):
             for span in line["spans"]:
@@ -168,7 +189,7 @@ def _glyph_centers(textpage: pymupdf.TextPage) -> list[tuple[float, float]]:
                     if char["c"].isspace():
                         continue
                     x0, y0, x1, y1 = char["bbox"]
-                    centers.append(((y0 + y1) / 2, (x0 + x1) / 2))
+                    centers.append(((y0 + y1) / 2, (x0 + x1) / 2, char["c"]))
     centers.sort()
     return centers
 

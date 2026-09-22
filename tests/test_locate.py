@@ -238,6 +238,58 @@ def test_two_wrapped_hits_stay_two_occurrences():
     assert results[0]["region"]["points"]["y1"] < results[1]["region"]["points"]["y0"]
 
 
+def _ligature_doc() -> pymupdf.Document:
+    # insert_htmlbox shapes "ff" into a ligature glyph. Split into letters,
+    # every letter after the first is zero-width and sits on the hit's right
+    # edge -- the input that once let two paragraphs' hits merge into one.
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_htmlbox(pymupdf.Rect(72, 72, 500, 120), "the staff")
+    page.insert_htmlbox(pymupdf.Rect(72, 300, 500, 340), "other staff here")
+    return doc
+
+
+def test_search_keeps_search_for_default_ligature_handling():
+    # The shared text page must use search_for's own default flags, which keep
+    # ligatures whole: a query inside a ligature is not a verbatim hit, so it
+    # falls through to the token path exactly as before grouping existed.
+    doc = _ligature_doc()
+    staff = locate_text(doc, "staff", page=1)
+    ff = locate_text(doc, "ff", page=1)
+    doc.close()
+
+    assert [loc["match_method"] for loc in staff] == ["tokens", "tokens"]
+    assert ff == []
+
+
+def test_grouping_rejects_a_group_whose_glyphs_are_not_the_query(monkeypatch):
+    # Defence in depth: a group closes on a glyph count, and an undercount
+    # (zero-width glyphs) summed across hits once merged two matches. Fake
+    # that -- 3 of 6 glyphs seen per "needle" hit -- and the group's glyphs,
+    # "nee" + "nee", are not the query, so both hits stay separate.
+    import datasheetindex.core.locate as locate_module
+
+    doc = _doc_with([(72, 72, "needle"), (72, 400, "needle")])
+    rects = doc[0].search_for("needle")
+    assert len(rects) == 2
+
+    def undercounted(textpage):
+        centers = []
+        for r in rects:
+            cy = (r.y0 + r.y1) / 2
+            centers += [
+                (cy, r.x0 + (r.x1 - r.x0) * f, ch)
+                for f, ch in ((0.2, "n"), (0.4, "e"), (0.6, "e"))
+            ]
+        return sorted(centers)
+
+    monkeypatch.setattr(locate_module, "_glyph_centers", undercounted)
+    results = locate_text(doc, "needle", page=1)
+    doc.close()
+
+    assert [len(loc["boxes"]) for loc in results] == [1, 1]
+
+
 def _doc_overflowing_bottom() -> pymupdf.Document:
     """A glyph whose descender crosses the bottom page edge."""
     doc = pymupdf.open()
