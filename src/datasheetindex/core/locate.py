@@ -8,6 +8,7 @@ round-trip) and raw, unclamped PDF points (for PDF-native annotation).
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, NotRequired, TypedDict
 
@@ -122,19 +123,29 @@ def _search_for_occurrences(page: pymupdf.Page, query: str) -> list[list[_Rect]]
     other. When the count does not line up, fall back to one rect per
     occurrence -- the pre-grouping behaviour, never worse than before.
     """
-    rects = [(r.x0, r.y0, r.x1, r.y1) for r in page.search_for(query)]
+    import pymupdf
+
+    # One text page serves the search and the glyph count: search_for would
+    # otherwise build its own, and a second extraction per page made a
+    # whole-document scan of a repeated term ~9x slower.
+    textpage = page.get_textpage(flags=pymupdf.TEXTFLAGS_SEARCH)
+    rects = [
+        (r.x0, r.y0, r.x1, r.y1) for r in page.search_for(query, textpage=textpage)
+    ]
     per_rect = [[rect] for rect in rects]
     if len(rects) < 2:
         return per_rect
     target = sum(1 for ch in query if not ch.isspace())
-    centers = _glyph_centers(page)
+    centers = _glyph_centers(textpage)
+    center_ys = [cy for cy, _cx in centers]
     occurrences: list[list[_Rect]] = []
     current: list[_Rect] = []
     count = 0
     for rect in rects:
         x0, y0, x1, y1 = rect
         current.append(rect)
-        count += sum(1 for cx, cy in centers if x0 <= cx < x1 and y0 <= cy < y1)
+        band = centers[bisect_left(center_ys, y0) : bisect_left(center_ys, y1)]
+        count += sum(1 for _cy, cx in band if x0 <= cx < x1)
         if count == target:
             occurrences.append(current)
             current, count = [], 0
@@ -143,17 +154,22 @@ def _search_for_occurrences(page: pymupdf.Page, query: str) -> list[list[_Rect]]
     return per_rect if current else occurrences
 
 
-def _glyph_centers(page: pymupdf.Page) -> list[tuple[float, float]]:
-    """Centre point of every non-whitespace glyph on the page (unrotated space)."""
+def _glyph_centers(textpage: pymupdf.TextPage) -> list[tuple[float, float]]:
+    """``(y, x)`` centre of every non-whitespace glyph, sorted by y (unrotated space).
+
+    Sorted so each hit rect counts only the glyphs in its own band -- a dense
+    page otherwise compared every rect against every glyph.
+    """
     centers: list[tuple[float, float]] = []
-    for block in page.get_text("rawdict")["blocks"]:
+    for block in textpage.extractRAWDICT()["blocks"]:
         for line in block.get("lines", ()):
             for span in line["spans"]:
                 for char in span["chars"]:
                     if char["c"].isspace():
                         continue
                     x0, y0, x1, y1 = char["bbox"]
-                    centers.append(((x0 + x1) / 2, (y0 + y1) / 2))
+                    centers.append(((y0 + y1) / 2, (x0 + x1) / 2))
+    centers.sort()
     return centers
 
 
