@@ -1134,12 +1134,12 @@ Until 0.39.2 every rectangle was its own result, so one match arrived as 3-10
 tied candidates, and a consumer that declines ties -- datasheet-agent's source
 grounding does -- dropped it. Re-grounding datasheet-agent's production cache
 (10,390 targets) with the fix, plus the matching consumer change (score every
-box, highlight their union), placed 90 more, lost 7, and changed 914 boxes,
-none of which covered less of their quote than before. The normalized fallback groups a
-multi-line match's words by `(block_no, line_no)`. Either way a multi-line
-result's `region` is the union of its `boxes`, which spans several lines: a
-consumer that wants one line must pick from `boxes`, not snap `region` to a
-line.
+box, highlight the union of a verbatim match's boxes), placed 90 more, lost 7,
+and changed 713 boxes, none of which covered less of their quote than before.
+The normalized fallback groups a multi-line match's words by
+`(block_no, line_no)`. Either way a multi-line result's `region` is the union
+of its `boxes`, which spans several lines: a consumer that wants one line must
+pick from `boxes`, not snap `region` to a line.
 
 It is stateless: the direct `DatasheetTools(pdf).locate_text(...)` Python API
 works off the live PDF with no `build_datasheet` call. A document must first be loaded via `DatasheetTools(pdf)` or `build_datasheet`

@@ -16,8 +16,9 @@ All notable changes to this project will be documented in this file.
   behaviour. A multi-line result's `region` is the union of its `boxes`, so a
   consumer that wants one line must pick from `boxes`. Re-grounding
   datasheet-agent's production cache with this and its matching consumer
-  change (score every box, highlight their union): 90 more targets placed, 7
-  lost, and none of the 914 changed boxes covers less of its quote.
+  change (score every box, highlight the union of a verbatim match's boxes):
+  90 more targets placed, 7 lost, and none of the 713 changed boxes covers
+  less of its quote.
 
 ## [0.39.1] - 2026-09-16
 
