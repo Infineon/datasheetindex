@@ -2,6 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.39.2] - 2026-09-22
+
+### Fixed
+- **`locate_text` reported one match as several occurrences.** `search_for`
+  returns one rectangle per line fragment, and the fast path turned each into
+  its own result. A phrase that wraps, a table row (one rectangle per cell) or
+  text broken by a sub- or superscript (`R_DS(on)`, `XHP™3`) therefore came
+  back as 3-10 results for a single match, capped by `max_results`, and a
+  consumer that declines ties dropped it. The rectangles are now grouped into
+  one result per occurrence, by counting the glyphs each covers against the
+  query; a count that does not line up keeps the old one-per-rectangle
+  behaviour. A multi-line result's `region` is the union of its `boxes`, so a
+  consumer that wants one line must pick from `boxes`. Re-grounding
+  datasheet-agent's production cache with this and its matching consumer
+  change (score every box, highlight the union of a verbatim match's boxes):
+  90 more targets placed, 7 lost, and none of the 713 changed boxes covers
+  less of its quote.
+
+### Changed
+- **Dependency refresh across the lock (`uv lock --upgrade`), and the
+  pre-commit hooks with it.** `openai` 3.10.0 -> 3.17.0, `claude-agent-sdk`
+  0.2.152 -> 0.2.157, `onnxruntime` 1.29.0 -> 1.30.0, `ruff` 0.16.6 -> 0.16.8,
+  `ty` 0.0.79 -> 0.0.83, `uvicorn` 0.52.4 -> 0.53.0, plus `filelock`,
+  `httpcore2`, `httpx2`, `idna`, `jiter`, `networkx`, `platformdirs`,
+  `protobuf`, `pyjwt`, `python-discovery`, `regex`, `urllib3` and
+  `virtualenv` by a patch or minor. No major boundary is crossed and no
+  declared constraint in `pyproject.toml` changes. `mcp`, `pymupdf`,
+  `pymupdf-layout` and `pymupdf4llm` do not move. Hooks: `uv-pre-commit`
+  0.12.11 -> 0.12.17, `ruff-pre-commit` v0.16.6 -> v0.16.8, `ty-pre-commit`
+  v0.0.79 -> v0.0.83, matching the locked dev versions.
+- **Verified on four lanes.** Default `uv sync`: 1132 passed / 9 skipped.
+  `[llm]` extra plus the `sdk` group, which exercises `openai` and
+  `claude-agent-sdk`: 1142 passed / 1 skipped. `[layout]` extra, the real ONNX
+  engine: 1137 passed / 8 skipped. `mcp` 1.x in a throwaway venv (1.30.0,
+  `Server.list_tools` asserted present): 1132 passed / 9 skipped.
+  `pre-commit run --all-files` passes, leaving `uv.lock` unchanged.
+
 ## [0.39.1] - 2026-09-16
 
 ### Fixed
