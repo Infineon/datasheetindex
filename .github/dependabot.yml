@@ -1,0 +1,62 @@
+# Dependabot version and security updates.
+#
+# Version updates are batched monthly into one PR per ecosystem and wait out a
+# cooldown, so a release that is yanked or compromised in its first days never
+# reaches a PR. Security updates ignore the cooldown and the schedule.
+
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: monthly
+    # Lock-only, never touching pyproject.toml. The default for a library
+    # widens or raises declared requirements, and the [mcp] extra is unbounded
+    # on purpose: a lower bound of mcp>=2 strands every consumer still held
+    # under the 1.x/2.x boundary by its own dependency graph.
+    versioning-strategy: lockfile-only
+    cooldown:
+      default-days: 14
+    groups:
+      uv:
+        applies-to: version-updates
+        patterns: ["*"]
+      uv-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  # The benchmark is a separate uv project whose archived results were computed
+  # under its lock, so it takes security updates only (open-pull-requests-limit:
+  # 0 disables version updates, not security updates).
+  - package-ecosystem: uv
+    directory: /benchmark
+    schedule:
+      interval: monthly
+    versioning-strategy: lockfile-only
+    open-pull-requests-limit: 0
+    groups:
+      benchmark-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 14
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # ruff, ty and uv are also locked in the dev group; keep the hook revs and
+  # the locked versions in step when merging either PR.
+  - package-ecosystem: pre-commit
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 14
+    groups:
+      pre-commit:
+        patterns: ["*"]
