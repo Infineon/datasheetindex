@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import importlib
 import threading
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
 
@@ -54,7 +54,7 @@ _MISSING = _missing_hook
 
 
 @contextmanager
-def classic_tables() -> Iterator[None]:
+def classic_tables() -> Generator[None]:
     """Pin ``find_tables()`` to PyMuPDF's classic detector for the duration."""
     with _LAYOUT_LOCK:
         saved = getattr(pymupdf, "_get_layout", _MISSING)
@@ -71,7 +71,7 @@ def classic_tables() -> Iterator[None]:
 
 
 @contextmanager
-def layout_engine() -> Iterator[Any]:
+def layout_engine() -> Generator[Any]:
     """Import ``pymupdf4llm`` under the lock and yield it, hook installed.
 
     Raises ``ImportError`` when the optional ``[layout]`` extra is absent.

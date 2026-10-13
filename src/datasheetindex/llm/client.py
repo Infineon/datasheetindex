@@ -14,7 +14,7 @@ import os
 import ssl
 import time
 import weakref
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Protocol, cast
@@ -199,7 +199,7 @@ def _raise_if_tls_verification_failed(exc: Exception) -> None:
 
 
 @contextmanager
-def _naming_tls_failures() -> Iterator[None]:
+def _naming_tls_failures() -> Generator[None]:
     """Wrap a gateway call so a certificate failure arrives as a named error.
 
     Every call shape -- text, structured and vision -- reaches the gateway
