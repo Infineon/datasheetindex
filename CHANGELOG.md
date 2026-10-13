@@ -16,6 +16,21 @@ All notable changes to this project will be documented in this file.
   pytest reports a skipped module as a pass. All five are required checks on
   `main`. The tests that need vendor PDFs absent from the repository still
   skip there, as they do in any clean checkout.
+- **Dependabot updates and a PR dependency review.** `.github/dependabot.yml`
+  opens one grouped PR per month for uv, GitHub Actions and pre-commit, once a
+  release is 14 days old. uv updates are lockfile-only, so the deliberately
+  unbounded `[mcp]` extra never gains a bound; `benchmark/` takes security
+  updates only. A `dependency review` job fails any PR that adds a dependency
+  with a known vulnerability of moderate severity or higher.
+
+### Security
+- **`pyjwt` 2.14.0 -> 2.15.1** (via the refresh below) closes
+  GHSA-x33g-cr3x-6449 and GHSA-42vr-xj54-vc7v. **`urllib3` 2.7.0 -> 2.8.0 in
+  `benchmark/uv.lock`** closes GHSA-8988-9cw3-xx77, GHSA-vxq7-64xx-v4gw and
+  GHSA-gh4c-6fx4-qh6g. Both are lock changes, which the published wheel does
+  not carry: `pyjwt` arrives only through the `[mcp]` extra's `mcp`, and an
+  installer resolves it fresh, while `urllib3` is only in the separate
+  benchmark project.
 
 ### Changed
 - **Dependency refresh across the lock (`uv lock --upgrade`), and the
