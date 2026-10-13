@@ -2,6 +2,49 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.40.0] - 2026-10-13
+
+### Added
+- **GitHub Actions CI** (`.github/workflows/ci.yml`). GitHub previously ran no
+  tests, only CodeQL, so a change reached `main` having passed nothing but the
+  contributor's local hooks. Five lanes now run on every pull request and push
+  to `main`: `unit` (default `uv sync`), `layout` (the real ONNX engine),
+  `sdk` (the real `claude-agent-sdk`), `mcp 1.x` (the 1.x branch of
+  `_build_mcp_server`, still reachable because the `[mcp]` extra is unbounded)
+  and `no mcp` (the build CLI without the optional extra). Every lane that
+  depends on an optional install asserts the install took effect first, since
+  pytest reports a skipped module as a pass. All five are required checks on
+  `main`. The tests that need vendor PDFs absent from the repository still
+  skip there, as they do in any clean checkout.
+
+### Changed
+- **Dependency refresh across the lock (`uv lock --upgrade`), and the
+  pre-commit hooks with it.** `mcp` 2.2.0 -> 2.3.0, `openai` 3.17.0 -> 3.29.0,
+  `claude-agent-sdk` 0.2.157 -> 0.2.165, `onnxruntime` 1.30.0 -> 1.31.0,
+  `pydantic` 2.13.5 -> 2.14.1, `ruff` 0.16.8 -> 0.17.0, `ty` 0.0.83 -> 0.0.86,
+  `starlette` 1.6.0 -> 1.8.0, `uvicorn` 0.53.0 -> 0.54.0, plus
+  `charset-normalizer`, `cryptography`, `httpcore2`, `httpx2`, `identify`,
+  `iniconfig`, `mcp-types`, `nodeenv`, `numpy`, `opentelemetry-api`,
+  `platformdirs`, `pre-commit`, `pycparser`, `pydantic-core`, `pyjwt`,
+  `python-discovery`, `python-dotenv`, `regex`, `rpds-py`, `sse-starlette`,
+  `truststore`, `typer` and `virtualenv` by a patch or minor. `filelock`
+  crosses a major (3.32.7 -> 4.1.1), but only as a dependency of `pre-commit`
+  in the dev group; nothing at runtime moves a major. No declared constraint
+  in `pyproject.toml` changes. `pymupdf`, `pymupdf-layout` and `pymupdf4llm`
+  do not move. Hooks: `uv-pre-commit` 0.12.17 -> 0.13.0, `ruff-pre-commit`
+  v0.16.8 -> v0.17.0, `ty-pre-commit` v0.0.83 -> v0.0.86, matching the locked
+  dev versions.
+- **`@contextmanager` functions are annotated `-> Generator[...]`.** ty 0.0.86
+  deprecates the `-> Iterator[...]` form; `engine.classic_tables`,
+  `engine.layout_engine` and `client._naming_tls_failures` are updated. No
+  behaviour change.
+- **Verified on four lanes.** Default `uv sync`: 1132 passed / 9 skipped.
+  `[llm]` extra plus the `sdk` group, which exercises `openai` and
+  `claude-agent-sdk`: 1142 passed / 1 skipped. `[layout]` extra, the real ONNX
+  engine: 1137 passed / 8 skipped. `mcp` 1.x (1.30.0, `Server.list_tools`
+  asserted present): 1132 passed / 9 skipped. `pre-commit run --all-files`
+  passes.
+
 ## [0.39.2] - 2026-09-22
 
 ### Fixed
