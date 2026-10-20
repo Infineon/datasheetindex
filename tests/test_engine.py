@@ -236,19 +236,31 @@ def test_layout_engine_keeps_quad_corrections_on_for_every_thread(monkeypatch):
     assert not _quad_corrections_unset()
 
 
-def test_importing_the_package_resets_quad_corrections():
-    """By the time anything here runs, the import-time reset has happened.
+@pytest.mark.parametrize(
+    "entry_point",
+    [
+        # A reader whose own imports never name engine.py: the reset reaches it
+        # through datasheetindex.core/__init__.py, and only through that.
+        "import datasheetindex.core.textfile",
+        "from datasheetindex import DatasheetIndex",
+        "from datasheetindex import DatasheetTools",
+    ],
+)
+def test_every_page_reading_entry_point_resets_quad_corrections(entry_point):
+    """By the time any page is read, the import-time reset has happened.
 
     PyMuPDF 2.x turns the flag on while `import pymupdf` runs, so a process
     that never touched layout_engine() would otherwise read every page with it
     on. Asserted in a fresh interpreter, since this one has been through every
-    other test's toggling.
+    other test's toggling. The package root itself no longer implies the reset
+    (it resolves its exports lazily, see datasheetindex/__init__.py), so this
+    pins the entry points a host actually reads pages through.
     """
     import subprocess
     import sys
 
     code = (
-        "import pymupdf, datasheetindex; "
+        f"import pymupdf; {entry_point}; "
         "assert not pymupdf.TOOLS.unset_quad_corrections()"
     )
     proc = subprocess.run(

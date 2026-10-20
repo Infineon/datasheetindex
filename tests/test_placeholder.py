@@ -28,3 +28,17 @@ def test_tools_package_dir_lists_the_lazy_reexports():
 
     assert dir(tools) == sorted(tools.__all__)
     assert "DatasheetTools" in dir(tools)
+
+
+def test_root_package_resolves_every_export():
+    """The root resolves its exports lazily, so a bad entry fails on access.
+
+    With eager imports a typo or a moved name broke `import datasheetindex`
+    itself; now it would pass import and fail a user's `from datasheetindex
+    import X`. Touch every name, and keep dir() listing them.
+    """
+    import datasheetindex
+
+    for name in datasheetindex.__all__:
+        assert getattr(datasheetindex, name) is not None, name
+    assert dir(datasheetindex) == sorted(datasheetindex.__all__)

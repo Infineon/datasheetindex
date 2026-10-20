@@ -35,6 +35,12 @@ a stale ``None`` while ``pymupdf4llm._use_layout`` stays ``True``.
 ``page.layout_information``, and raises ``TypeError`` -- permanently, since the
 module is cached.
 
+Table-scan worker processes are the one exception to this module's
+ownership: ``datasheetindex._scan_worker.skip_layout_engine`` blocks
+``pymupdf.layout`` and ``pymupdf4llm`` in ``sys.modules`` before PyMuPDF is
+imported there, so neither global is ever set in them. It cannot live here,
+because importing this module imports PyMuPDF.
+
 Nesting :func:`layout_engine` inside :func:`classic_tables` on one thread is
 silently wrong rather than loud: the lock is re-entrant so it will not
 deadlock, and the invariant check below reinstalls the hook. No such path

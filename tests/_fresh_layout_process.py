@@ -9,8 +9,8 @@ through ``layout_engine()``.
 
 What this proves, precisely:
 
-* importing the package resets the quad-corrections flag that pymupdf4llm set,
-  and leaves the layout hook PyMuPDF installed alone;
+* importing DatasheetTools resets the quad-corrections flag that pymupdf4llm
+  set, and leaves the layout hook PyMuPDF installed alone;
 * a build in that process reports the *classic* counts, and afterwards the hook
   is the very callable it was and the flag is still off -- so the build's
   classic_tables() round-trip restored both;
