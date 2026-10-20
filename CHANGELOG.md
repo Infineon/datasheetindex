@@ -22,6 +22,14 @@ All notable changes to this project will be documented in this file.
   `find_tables(use_layout=False)` does not protect against this, which is why
   the guard is a context manager and not a keyword.
 
+- **`extract_table_markdown` writes nothing to stdout.** pymupdf4llm 2.0's
+  layout parser probes for an OCR backend on every call and, with none
+  installed, prints a blank line, "=== Document parser messages ===" and
+  "Warning: RapidOCR is missing..." to stdout -- the MCP stdio transport's
+  JSON-RPC wire. The call now passes `use_ocr=False` (layout branch only, like
+  `header`/`footer`). No OCR backend is a dependency of this package, so the
+  markdown is unchanged: identical on the PSoC 6 pages checked.
+
 ### Changed
 - **PyMuPDF 2.0 (`pymupdf>=2.0`).** The full wheel now bundles `pymupdf4llm`
   and the ONNX layout engine and requires onnxruntime, numpy and networkx

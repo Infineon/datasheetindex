@@ -894,8 +894,11 @@ def test_extract_table_markdown_passes_layout_kwargs_only_on_the_layout_branch(
 
     assert ("header" in seen) is expect_furniture, seen
     assert ("footer" in seen) is expect_furniture, seen
+    # Layout-only too: the classic renderer would print a notice naming it.
+    assert ("use_ocr" in seen) is expect_furniture, seen
     if expect_furniture:
         assert seen["header"] is False and seen["footer"] is False, seen
+        assert seen["use_ocr"] is False, seen
     # The keywords the classic renderer does accept are passed either way.
     assert seen["pages"] == [0] and seen["show_progress"] is False, seen
 

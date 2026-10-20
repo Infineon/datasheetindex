@@ -422,3 +422,22 @@ def test_layout_use_leaves_later_classic_reads_unchanged():
         assert read(doc[9]) == before
     finally:
         doc.close()
+
+
+def test_extract_table_markdown_writes_nothing_to_stdout(mixed_pdf, capfd):
+    """stdout is the MCP stdio transport's JSON-RPC wire.
+
+    pymupdf4llm 2.0's layout parser probes for an OCR backend on every call
+    and, finding none, ends with a bare ``print()`` and two
+    ``pymupdf.message()`` lines ("=== Document parser messages ===", "Warning:
+    RapidOCR is missing...") -- all on stdout, and unconditional when no OCR
+    package is installed. ``capfd`` rather than ``capsys``: the leak is a
+    property of the process's stdout, whatever object ``sys.stdout`` is.
+    """
+    from datasheetindex.tools.bound import DatasheetTools
+
+    with DatasheetTools(str(mixed_pdf)) as tools:
+        markdown = tools.extract_table_markdown(1)
+
+    assert "|" in markdown
+    assert capfd.readouterr().out == ""
