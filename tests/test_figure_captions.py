@@ -75,6 +75,7 @@ def _doc_with_images(count, *, pages=1):
             top = 50 + i * 30
             page.insert_image(
                 pymupdf.Rect(50, top, 500, top + 25),
+                keep_proportion=False,
                 pixmap=_distinct_pixmap(page_index * count + i),
             )
     return doc
@@ -92,7 +93,9 @@ def _doc_with_one_shrinking_image_per_page(pages):
     for index in range(pages):
         page = doc.new_page(width=595, height=842)
         page.insert_image(
-            pymupdf.Rect(50, 50, 550 - index * 60, 400), pixmap=_distinct_pixmap(index)
+            pymupdf.Rect(50, 50, 550 - index * 60, 400),
+            keep_proportion=False,
+            pixmap=_distinct_pixmap(index),
         )
     return doc
 
@@ -109,7 +112,7 @@ def _doc_with_single_raster(paint):
     pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 1000, 1000))
     paint(pix)
     page = doc.new_page(width=595, height=842)
-    page.insert_image(pymupdf.Rect(50, 50, 500, 400), pixmap=pix)
+    page.insert_image(pymupdf.Rect(50, 50, 500, 400), keep_proportion=False, pixmap=pix)
     return doc
 
 
@@ -180,9 +183,21 @@ def test_cap_keeps_the_largest_regions_and_discloses_the_rest():
     # Three regions of strictly decreasing area, and three distinct pictures --
     # one pixmap placed three times is one picture, which the cap now counts
     # once (see test_the_cap_counts_distinct_images_not_placements).
-    page.insert_image(pymupdf.Rect(50, 50, 550, 400), pixmap=_distinct_pixmap(0))
-    page.insert_image(pymupdf.Rect(50, 420, 400, 600), pixmap=_distinct_pixmap(1))
-    page.insert_image(pymupdf.Rect(50, 620, 250, 700), pixmap=_distinct_pixmap(2))
+    page.insert_image(
+        pymupdf.Rect(50, 50, 550, 400),
+        keep_proportion=False,
+        pixmap=_distinct_pixmap(0),
+    )
+    page.insert_image(
+        pymupdf.Rect(50, 420, 400, 600),
+        keep_proportion=False,
+        pixmap=_distinct_pixmap(1),
+    )
+    page.insert_image(
+        pymupdf.Rect(50, 620, 250, 700),
+        keep_proportion=False,
+        pixmap=_distinct_pixmap(2),
+    )
     figures = _figures(doc)
     vision = RecordingVision()
     outcome = caption_figures_in_place(
@@ -393,7 +408,9 @@ def test_the_figures_array_is_not_reordered():
         # Area grows with the page number, so candidate order is the reverse of
         # document order.
         page.insert_image(
-            pymupdf.Rect(50, 50, 200 + index * 150, 400), pixmap=_distinct_pixmap(index)
+            pymupdf.Rect(50, 50, 200 + index * 150, 400),
+            keep_proportion=False,
+            pixmap=_distinct_pixmap(index),
         )
     figures = _figures(doc)
     before = [f["page"] for f in figures]
@@ -485,7 +502,9 @@ def _doc_with_one_image_repeated(*, pages):
     pix = _content_pixmap()
     for _ in range(pages):
         page = doc.new_page(width=595, height=842)
-        page.insert_image(pymupdf.Rect(50, 50, 550, 400), pixmap=pix)
+        page.insert_image(
+            pymupdf.Rect(50, 50, 550, 400), keep_proportion=False, pixmap=pix
+        )
     return doc
 
 
@@ -522,7 +541,9 @@ def test_the_cap_counts_distinct_images_not_placements():
     doc = _doc_with_one_image_repeated(pages=3)
     page = doc.new_page(width=595, height=842)
     page.insert_image(
-        pymupdf.Rect(50, 450, 500, 700), pixmap=_content_pixmap((9, 9, 9))
+        pymupdf.Rect(50, 450, 500, 700),
+        keep_proportion=False,
+        pixmap=_content_pixmap((9, 9, 9)),
     )
     figures = _figures(doc)
     vision = RecordingVision()
@@ -551,7 +572,11 @@ def test_excluded_above_max_counts_placements_denied_a_caption():
     page = doc.new_page(width=595, height=842)
     # Strictly larger, so it sorts ahead and the repeated image is what the
     # cap of 1 drops.
-    page.insert_image(pymupdf.Rect(20, 20, 575, 800), pixmap=_content_pixmap((9, 9, 9)))
+    page.insert_image(
+        pymupdf.Rect(20, 20, 575, 800),
+        keep_proportion=False,
+        pixmap=_content_pixmap((9, 9, 9)),
+    )
     figures = _figures(doc)
     vision = RecordingVision()
     outcome = caption_figures_in_place(

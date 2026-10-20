@@ -1,6 +1,7 @@
 """Tests that exercise the real ML layout engine.
 
-Skipped unless the optional [layout] extra is installed. Everything else in the
+Skipped unless ``pymupdf.layout`` is importable, which it is with the full
+``pymupdf`` 2.x wheel and is not with ``pymupdf-lite``. Everything else in the
 suite verifies the guard against a fake hook; these are the only tests that
 would notice pymupdf4llm changing _use_layout, use_layout(), or the shape of
 page.layout_information.
@@ -119,9 +120,9 @@ def test_classic_tables_pins_the_real_engine(mixed_pdf):
     The layout engine finds [2,3,2,3,2,3] on this fixture; the classic detector
     finds [1,2,1,2,1,2]. Inside classic_tables() we must see the latter.
     """
-    # Activates the hook for this process. Not resolvable by ty in the default
-    # lane, where the [layout] extra is deliberately excluded from dev deps.
-    import pymupdf4llm  # noqa: F401  # ty: ignore[unresolved-import]
+    # Already imported by `import pymupdf` under PyMuPDF 2.x; kept so the
+    # assertion below names the module the hook comes from.
+    import pymupdf4llm  # noqa: F401
 
     assert pymupdf._get_layout is not None, "layout hook should be active"
     assert _classic_counts(mixed_pdf) == _expected_classic_counts(PAGES)
@@ -164,9 +165,9 @@ def test_fresh_process_build_then_extract_table_markdown(mixed_pdf, tmp_path):
     Drives DatasheetTools.build_datasheet and .extract_table_markdown, not the
     engine primitives, so a regression in that wiring fails here.
 
-    Cannot be asserted in-process: tests/test_defs.py imports pymupdf4llm and
-    sorts before this file, so the precondition is already gone by the time
-    pytest reaches us. A subprocess is the only durable guarantee.
+    Cannot be asserted in-process: the state under test is what ``import
+    pymupdf`` leaves behind, and other tests have been through layout_engine()
+    long before pytest reaches us. A subprocess is the only durable guarantee.
 
     See the helper's docstring for what this does and does not prove -- notably,
     the permanent-TypeError corruption is a thread interleaving and is guarded
@@ -207,7 +208,7 @@ def test_extract_table_markdown_drops_the_running_header_and_footer(
     parameters exist names that cause instead of leaving a maintainer to
     debug headers that came back.
     """
-    import pymupdf4llm  # ty: ignore[unresolved-import]
+    import pymupdf4llm
 
     params = inspect.signature(pymupdf4llm._layout_to_markdown).parameters
     assert {"header", "footer"} <= set(params), (
@@ -317,7 +318,7 @@ def test_dropped_blocks_agree_with_the_layout_model():
     if not pdf.exists():
         pytest.skip("bundled PSoC datasheet not present")
 
-    from pymupdf.layout.DocumentLayoutAnalyzer import get_model  # ty: ignore
+    from pymupdf.layout.DocumentLayoutAnalyzer import get_model
 
     model = get_model()
     doc = pymupdf.open(str(pdf))
@@ -379,3 +380,45 @@ def test_dropped_blocks_agree_with_the_layout_model():
         f"Below 0.95 this is a detector defect -- fix the detector rather "
         f"than lowering the bar. Disagreements: {disagreements}"
     )
+
+
+@pytest.mark.real_pdf
+def test_layout_use_leaves_later_classic_reads_unchanged():
+    """A layout call must not change what the next classic read returns.
+
+    pymupdf4llm unsets quad corrections while it is imported, and PyMuPDF 2.x
+    imports it with ``import pymupdf``. Left on, the flag rewrote classic cell
+    text on 2,058 of 3,961 corpus pages and shifted text-block coordinates on
+    484 -- and on 1.28.2 it switched on at a long-lived server's first
+    extract_table_markdown, so every later build in that process differed.
+    Page 10 of the PSoC datasheet reads "Buck Regulator" with corrections and
+    "BuckRegulator" without them.
+    """
+    from datasheetindex.core.engine import layout_engine
+
+    pdf = Path(__file__).resolve().parent.parent / (
+        "infineon-psoc-6-mcu-cy8c62x8-cy8c62xa-datasheet-datasheet-en.pdf"
+    )
+    if not pdf.exists():
+        pytest.skip("bundled PSoC datasheet not present")
+
+    def read(page: pymupdf.Page) -> tuple[list, list]:
+        with classic_tables():
+            cells = [t.extract() for t in page.find_tables()]
+        return cells, page.get_text("blocks")
+
+    doc = pymupdf.open(str(pdf))
+    try:
+        before = read(doc[9])
+        assert "Buck Regulator" in str(before[0]), "fixture no longer sensitive"
+
+        with layout_engine():
+            # Inside, the flag is pymupdf4llm's -- proving the page is one the
+            # flag changes, so the equality below is not vacuous.
+            assert "BuckRegulator" in str(
+                [t.extract() for t in doc[9].find_tables(use_layout=False)]
+            )
+
+        assert read(doc[9]) == before
+    finally:
+        doc.close()

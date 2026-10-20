@@ -875,9 +875,11 @@ def test_extract_table_markdown_passes_layout_kwargs_only_on_the_layout_branch(
     `_silence_pymupdf_stdout_notice` does not cover it; it silences PyMuPDF's
     own advertisement, a different print in a different package.
 
-    Runs on the default lane, which is the point: tests/test_layout_integration.py
-    skips without the [layout] extra, i.e. in exactly the environment where the
-    classic branch is taken.
+    A fake module rather than the real one, which is the point: with the full
+    pymupdf 2.x wheel the real pymupdf4llm always takes the layout branch, and
+    tests/test_layout_integration.py skips in exactly the environment
+    (``pymupdf-lite``, or a broken onnxruntime) where the classic branch is
+    taken.
     """
     seen: dict = {}
     module = _fake_pymupdf4llm(use_layout=use_layout, seen=seen)

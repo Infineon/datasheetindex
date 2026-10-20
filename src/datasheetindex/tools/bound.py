@@ -540,7 +540,7 @@ class DatasheetTools:
     def extract_table_markdown(self, page: int) -> str:
         """Extract a single page as layout-aware markdown with table structure.
 
-        Requires the ``[layout]`` extra (``pymupdf4llm``). Returns markdown
+        Requires ``pymupdf4llm``, bundled with ``pymupdf>=2.0``. Returns markdown
         with proper table formatting using ``|`` delimiters.
 
         The import and the call both happen inside ``layout_engine()``. Doing

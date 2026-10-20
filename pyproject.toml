@@ -1,14 +1,18 @@
 [project]
 name = "datasheetindex"
-version = "0.40.0"
+version = "0.41.0"
 description = "Agent-first parameter extraction from technical datasheets"
 readme = "README.md"
 requires-python = ">=3.13"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Infineon Technologies AG" }]
+# PyMuPDF 2.0 bundles pymupdf4llm and the ONNX layout engine, and imports both
+# whenever `pymupdf` is imported. The floor is what lets core/engine.py rely on
+# that: the layout hook and the quad-corrections flag are both already set by
+# the time our code runs, so it owns them from a known state (see engine.py).
 dependencies = [
-    "pymupdf>=1.25.0",
+    "pymupdf>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -26,26 +30,25 @@ dependencies = [
 # us, and leave the SDK and its injected client on different implementations.
 # One stack is the point; that is why the two bounds move together.
 llm = ["openai>=3.5.0", "python-dotenv>=1.0.0", "httpx2>=2.7.0"]
-layout = ["pymupdf4llm>=1.27.0"]
-# Deliberately unbounded across the 1.x/2.x major boundary: `mcp_server.py`
-# supports both APIs, so the resolver is free to pick either. An upper bound
-# would break `uvx --from datasheetindex[mcp]` (which resolves 2.x); a lower
-# bound of 2 would break any consumer still held under the boundary by its own
-# graph. Only one `mcp` can be present at a time, so the version is negotiated
-# by whatever else is in the environment -- not by a constraint we can usefully
-# declare here. See `_build_mcp_server`.
-#
-# `claude-agent-sdk` used to be that consumer: it required `mcp<2.0.0`, which
-# made `uv lock` unsatisfiable under a `>=2` bound (uv builds one universal
-# resolution and the `sdk` group is part of it) and pinned the lock to 1.x.
-# 0.2.147 widened that to `mcp<3.0.0`, so the lock now resolves 2.x and 1.x is
-# the major nothing exercises by default.
+# Kept so `datasheetindex[layout]` still resolves for existing consumers, but it
+# adds nothing: pymupdf 2.x requires pymupdf4llm itself, and pymupdf4llm 2.x is
+# an empty distribution whose code ships inside the pymupdf wheel.
+layout = ["pymupdf4llm>=2.0"]
+# mcp 2.x only, as of 0.41.0. 2.0.0 replaced the low-level `Server` decorators
+# with constructor handlers, and `mcp_server.py` served both majors until
+# nothing that installs this extra was held under the boundary any more:
+# `claude-agent-sdk` 0.2.147 widened its `mcp<2.0.0` to `<3.0.0`. Consumers that
+# pin mcp 1.x for their own reasons (analytics-agent via chainlit, ifx-data-agent
+# via its own `McpError` import) do not install this extra, and nothing outside
+# `mcp_server.py` imports `mcp`, so they are unaffected. No upper bound:
+# `_build_mcp_server` names an unsupported future major instead of failing with
+# a TypeError, and an upper bound would hold back every environment we share.
 #
 # `jsonschema` is declared even though it resolves anyway as a core (non-extra)
-# requirement of `mcp` on both majors: `mcp_server._compile_validators` imports
-# it directly, so relying on someone else's dependency graph to supply it is an
-# implicit dependency waiting to break.
-mcp = ["mcp[cli]>=1.26.0", "jsonschema>=4.20.0"]
+# requirement of `mcp`: `mcp_server._compile_validators` imports it directly, so
+# relying on someone else's dependency graph to supply it is an implicit
+# dependency waiting to break.
+mcp = ["mcp[cli]>=2.0.0", "jsonschema>=4.20.0"]
 
 [project.scripts]
 datasheetindex = "datasheetindex.cli:main_cli"
@@ -124,12 +127,6 @@ dev = [
     # directly, and ty cannot resolve it otherwise. uv has no way to enable an
     # extra by default, so declare it here -- a plain `uv sync`, which both the
     # post-checkout hook and CI run, then yields a checkable environment.
-    # The layout extra is deliberately excluded. Importing pymupdf4llm installs
-    # a process-wide hook at pymupdf._get_layout which find_tables() consults on
-    # every call, switching it to the ML layout engine: ~35-100x slower on the
-    # synthetic table fixtures, ~4.4x on a real 68-page datasheet. Table counts
-    # are pinned to the classic detector (see core/engine.py), so the extra
-    # changes only extract_table_markdown -- and the suite's wall time.
     "datasheetindex[mcp]",
 ]
 
@@ -141,8 +138,7 @@ bench = ["tiktoken>=0.13.0"]
 
 # Not in `dev`, so a plain `uv sync` never pulls it: the wheel unpacks to ~263 MB,
 # of which ~262 MB is a bundled `claude` CLI binary that these tests never invoke
-# (create_sdk_mcp_server is pure Python). That is 5x the layout extra, which is
-# already kept out of the default sync for the same reason.
+# (create_sdk_mcp_server is pure Python).
 #
 # It exists because create_datasheet_tools_server is only as correct as the
 # converter it feeds, and the suite used to stub that converter out entirely --

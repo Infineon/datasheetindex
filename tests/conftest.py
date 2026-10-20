@@ -106,74 +106,29 @@ _LLM_ENV_VARS = (
 )
 
 
-# --- Cross-major MCP drivers --------------------------------------------------
-# mcp 1.x registers handlers in a `request_handlers` dict keyed by request type
-# and wraps results in a ServerResult root; mcp 2.x exposes them via
-# `get_request_handler(method)` and returns the result directly. The helpers
-# below hide that so a behavioural test is written once and asserts the same
-# thing on both majors -- which is the whole point of the dual-support branch in
-# `_build_mcp_server`.
+# --- Low-level MCP drivers -----------------------------------------------------
+# Call a low-level `mcp.server.lowlevel.Server`'s registered handlers directly,
+# without a transport. Two callers with nothing else in common:
+# `tests/test_mcp_server.py` drives our own server, and
+# `tests/test_sdk_integration.py` drives the one
+# `claude_agent_sdk.create_sdk_mcp_server` builds.
 #
-# They live in conftest rather than in one test module because there are two
-# callers with nothing else in common: `tests/test_mcp_server.py` drives our own
-# low-level server, and `tests/test_sdk_integration.py` drives the one
-# `claude_agent_sdk.create_sdk_mcp_server` builds. Both are `mcp.server.lowlevel.
-# Server` instances, so both broke identically when the lock moved to mcp 2.x --
-# and only the first had the branch.
-#
-# The 2.x handler is called with a ``None`` request context. That is not a stub
+# The handler is called with a ``None`` request context. That is not a stub
 # standing in for behaviour: our handlers close over the tool session and never
 # read the context, so passing one would add setup (a live ServerSession) that
 # proves nothing. If a handler ever starts using it, this raises rather than
 # silently passing.
 
 
-def mcp_is_v2(server):
-    return hasattr(server, "get_request_handler")
+def mcp_list_tools(server):
+    entry = server.get_request_handler("tools/list")
+    return asyncio.run(entry.handler(None, None)).tools
 
 
-def mcp_list_tools(server, types):
-    if mcp_is_v2(server):
-        entry = server.get_request_handler("tools/list")
-        return asyncio.run(entry.handler(None, None)).tools
-    request = types.ListToolsRequest(method="tools/list")
-    handler = server.request_handlers[type(request)]
-    return asyncio.run(handler(request)).root.tools
-
-
-def mcp_call(server, types, name, arguments):
-    if mcp_is_v2(server):
-        entry = server.get_request_handler("tools/call")
-        params = entry.params_type.model_validate(
-            {"name": name, "arguments": arguments}
-        )
-        return asyncio.run(entry.handler(None, params))
-    request = types.CallToolRequest(
-        method="tools/call",
-        params=types.CallToolRequestParams(name=name, arguments=arguments),
-    )
-    handler = server.request_handlers[type(request)]
-    return asyncio.run(handler(request)).root
-
-
-def mcp_is_error(result):
-    """``CallToolResult.isError`` (mcp 1.x) / ``.is_error`` (mcp 2.x)."""
-    return result.is_error if hasattr(result, "is_error") else result.isError
-
-
-def mcp_mime(block):
-    """``ImageContent.mimeType`` (mcp 1.x) / ``.mime_type`` (mcp 2.x)."""
-    return block.mime_type if hasattr(block, "mime_type") else block.mimeType
-
-
-def mcp_input_schema(tool):
-    """``Tool.inputSchema`` (mcp 1.x) / ``.input_schema`` (mcp 2.x).
-
-    Only the *attribute* was renamed. ``mcp_server`` still constructs with
-    ``inputSchema=``, which 2.x accepts as an alias -- so this asymmetry is
-    real and the production code needs no branch for it.
-    """
-    return tool.input_schema if hasattr(tool, "input_schema") else tool.inputSchema
+def mcp_call(server, name, arguments):
+    entry = server.get_request_handler("tools/call")
+    params = entry.params_type.model_validate({"name": name, "arguments": arguments})
+    return asyncio.run(entry.handler(None, params))
 
 
 @pytest.fixture(autouse=True)
