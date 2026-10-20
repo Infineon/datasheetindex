@@ -463,7 +463,7 @@ def test_stdio_wire_carries_only_json_even_on_the_sequential_scan(tmp_path):
 
     PyMuPDF's ``find_tables()`` calls ``_warn_layout_once()``, which ``print()``s
     a layout-package advertisement to **stdout** -- the JSON-RPC channel. Our
-    parallel scan is immune because ``structure._subprocess_init`` puts worker
+    parallel scan is immune because ``_scan_worker.init_pool_worker`` puts worker
     stdout on devnull, but the sequential path (``DATASHEETINDEX_PARALLEL=0``,
     and the fallback after a pool failure or scan timeout) runs ``find_tables()``
     in-process, straight onto the wire.

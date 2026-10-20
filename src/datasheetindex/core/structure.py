@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from datasheetindex._scan_worker import init_pool_worker
 from datasheetindex.core.boilerplate import flag_boilerplate
 from datasheetindex.core.engine import classic_tables
 from datasheetindex.core.textfile import extract_page_text, extract_section_text
@@ -254,13 +255,13 @@ def _count_tables_on_page(args: tuple[str, int]) -> tuple[int, int]:
     Each worker opens the PDF independently because PyMuPDF document
     objects cannot be pickled across process boundaries.
 
-    The classic_tables() guard is load-bearing: workers start under
-    forkserver/spawn, and under PyMuPDF 2.x their ``import pymupdf`` imports
+    The worker's initializer normally keeps PyMuPDF's layout engine out of the
+    process (``_scan_worker.skip_layout_engine``), but it cannot when the
+    host's ``__main__`` imported PyMuPDF first: ``spawn`` re-imports it before
+    the initializer runs. Then the worker's ``import pymupdf`` has imported
     pymupdf4llm, which installs the layout hook and unsets quad corrections.
-    The guard suppresses both, so "classic" is a property of this function
-    rather than of the worker's import graph. (That import also loads the ONNX
-    model, ~2s per worker, which this scan never uses: measured, a 134-page
-    build is still faster on 2.0 than on 1.28.2.)
+    The classic_tables() guard suppresses both, so "classic" is a property of
+    this function rather than of the worker's import graph.
     """
     import pymupdf as _pymupdf
 
@@ -272,22 +273,6 @@ def _count_tables_on_page(args: tuple[str, int]) -> tuple[int, int]:
         return page_idx, len(tables.tables)
     finally:
         doc.close()
-
-
-def _subprocess_init() -> None:
-    """Redirect stdin/stdout to devnull in worker subprocesses.
-
-    Workers start under a non-fork method (see :func:`_mp_context`), so they do
-    not inherit the parent's open file descriptors -- except 0, 1 and 2, which
-    survive ``exec`` on every platform. When the parent is an MCP stdio server,
-    an inherited stdin/stdout collides with JSON-RPC communication, causing
-    deadlocks. Only 0 and 1 are redirected; stderr is deliberately left intact
-    so worker tracebacks still reach the parent's logs.
-    """
-    devnull = os.open(os.devnull, os.O_RDWR)
-    os.dup2(devnull, 0)  # stdin
-    os.dup2(devnull, 1)  # stdout
-    os.close(devnull)
 
 
 def _cpus_from_quota(quota: int, period: int) -> int | None:
@@ -517,7 +502,7 @@ def _build_table_count_cache_pool(pdf_path: str, total_pages: int) -> dict[int, 
     args = [(pdf_path, i) for i in range(total_pages)]
     pool = concurrent.futures.ProcessPoolExecutor(
         max_workers=workers,
-        initializer=_subprocess_init,
+        initializer=init_pool_worker,
         mp_context=_mp_context(),
     )
     try:
@@ -570,7 +555,7 @@ def _build_table_count_cache_helper(pdf_path: str, total_pages: int) -> dict[int
         err_path = os.path.join(tmpdir, "scan_worker.err")
 
         # stderr goes to a FILE, never a PIPE. The child's own pool workers
-        # inherit fd 2 (_subprocess_init redirects only 0 and 1, so worker
+        # inherit fd 2 (init_pool_worker redirects only 0 and 1, so worker
         # tracebacks survive), which means they hold the write end. A PIPE
         # would make communicate() wait for an EOF that kill() cannot deliver,
         # because kill() reaches only the direct child -- reproducing the exact
@@ -580,7 +565,7 @@ def _build_table_count_cache_helper(pdf_path: str, total_pages: int) -> dict[int
                 [
                     sys.executable,
                     "-m",
-                    "datasheetindex.core._scan_worker",
+                    "datasheetindex._scan_worker",
                     pdf_path,
                     str(total_pages),
                     out_path,

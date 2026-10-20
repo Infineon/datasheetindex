@@ -48,7 +48,7 @@ def _silence_pymupdf_stdout_notice() -> None:
     every page, and ``engine.classic_tables()`` sets ``pymupdf._get_layout =
     None``, which *satisfies* the notice's trigger rather than avoiding it.
 
-    The parallel scan is already immune: ``structure._subprocess_init`` puts
+    The parallel scan is already immune: ``_scan_worker.init_pool_worker`` puts
     worker stdin/stdout on devnull. The sequential path
     (``DATASHEETINDEX_PARALLEL=0``, and the fallback after a pool failure or
     scan timeout) runs in-process, so the line lands on the wire and the client's
