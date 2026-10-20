@@ -158,12 +158,8 @@ def _schema_violation(validator: Any, arguments: dict[str, Any]) -> str | None:
 
     Mirrors what mcp 1.x's ``@server.call_tool()`` wrapper did before dispatch,
     reported with its exact ``Input validation error: {message}`` wording, so an
-    agent is told the same thing about the same bad call as it always was. A ``None``
-    validator means no such tool, which is not this function's error to report.
+    agent is told the same thing about the same bad call as it always was.
     """
-    if validator is None:
-        return None
-
     import jsonschema
 
     try:
@@ -263,10 +259,11 @@ def _build_mcp_server(
         arguments = params.arguments or {}
         try:
             definition = by_name.get(params.name)
-            violation = _schema_violation(validators.get(params.name), arguments)
             if definition is None:
                 envelope = _text_error(f"unknown tool: {params.name}")
-            elif violation is not None:
+            elif (
+                violation := _schema_violation(validators[params.name], arguments)
+            ) is not None:
                 envelope = _text_error(f"Input validation error: {violation}")
             else:
                 envelope = await definition.handler(arguments)

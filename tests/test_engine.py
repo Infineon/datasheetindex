@@ -195,7 +195,7 @@ def test_layout_engine_raises_a_helpful_import_error(monkeypatch):
         raise ImportError(name)
 
     monkeypatch.setattr(engine, "importlib", types.SimpleNamespace(import_module=boom))
-    with pytest.raises(ImportError, match="pymupdf-lite does not include it"):
+    with pytest.raises(ImportError, match="install pymupdf instead of pymupdf-lite"):
         with layout_engine():
             pass
 
@@ -256,3 +256,41 @@ def test_importing_the_package_resets_quad_corrections():
         [sys.executable, "-c", code], capture_output=True, text=True, check=False
     )
     assert proc.returncode == 0, proc.stderr
+
+
+def test_layout_engine_does_not_leak_a_flag_its_first_import_set(monkeypatch):
+    """The flag is saved before the import, because the import is what sets it.
+
+    Under PyMuPDF 2.x `import pymupdf` has normally imported pymupdf4llm
+    already, but not when its own `import pymupdf.layout` failed, nor for a
+    pymupdf4llm installed separately: then the import inside layout_engine() is
+    the first, and its helpers turn the flag on as it runs. Saved afterwards,
+    that state would be "restored" on exit -- the leak this module fixes.
+    """
+    module = _fake_module(use_layout=True)
+
+    def first_import(name: str) -> Any:
+        pymupdf.TOOLS.unset_quad_corrections(True)
+        return module
+
+    monkeypatch.setattr(
+        engine, "importlib", types.SimpleNamespace(import_module=first_import)
+    )
+    pymupdf.TOOLS.unset_quad_corrections(False)
+    with layout_engine():
+        assert _quad_corrections_unset()
+    assert not _quad_corrections_unset()
+
+
+def test_layout_engine_restores_quad_corrections_when_the_import_fails(monkeypatch):
+    def half_import(name: str) -> Any:
+        pymupdf.TOOLS.unset_quad_corrections(True)
+        raise ImportError(name)
+
+    monkeypatch.setattr(
+        engine, "importlib", types.SimpleNamespace(import_module=half_import)
+    )
+    pymupdf.TOOLS.unset_quad_corrections(False)
+    with pytest.raises(ImportError), layout_engine():
+        pass
+    assert not _quad_corrections_unset()

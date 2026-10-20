@@ -76,7 +76,11 @@ def _set_quad_corrections_unset(on: bool) -> bool:
 
 # PyMuPDF's default, which pymupdf4llm overrode while `import pymupdf` ran.
 # Every PyMuPDF call this package makes outside layout_engine() -- page text,
-# search, rendering, the table scan -- expects it.
+# search, rendering, the table scan -- expects it. This is deliberately a
+# change to the *host's* process state too: a host that calls pymupdf4llm
+# itself, outside layout_engine(), now does so with PyMuPDF's default rather
+# than the flag pymupdf4llm set. Either value is wrong for someone in a shared
+# process; this one is right for every PyMuPDF call that is not pymupdf4llm's.
 _set_quad_corrections_unset(False)
 
 
@@ -112,30 +116,39 @@ def layout_engine() -> Generator[Any]:
 
     The quad-corrections flag is on for the duration -- the state pymupdf4llm
     set for itself at import, and the one its markdown output was built
-    against -- and restored on exit.
+    against -- and restored on exit. It is saved *before* the import: when
+    this is pymupdf4llm's first import in the process, the import is what turns
+    the flag on, and saving afterwards would "restore" the leak.
+
+    Other threads' unlocked PyMuPDF reads (page text, search) see the flag on
+    while this is held. The window is one ``to_markdown`` call; locking every
+    read in the package to close it would serialize all builds, and before
+    0.41.0 the flag stayed on for the rest of the process instead.
 
     Raises ``ImportError`` when pymupdf4llm is absent, which with
     ``pymupdf>=2.0`` means ``pymupdf-lite`` was installed in its place.
     """
     with _LAYOUT_LOCK:
+        saved_quads = bool(pymupdf.TOOLS.unset_quad_corrections())
         try:
-            module = importlib.import_module("pymupdf4llm")
-        except ImportError:
-            raise ImportError(
-                "pymupdf4llm is required for table markdown extraction. It ships "
-                "inside the full pymupdf wheel; pymupdf-lite does not include it. "
-                "Install it with: uv sync --extra layout"
-            ) from None
-        # Invariant: if pymupdf4llm believes layout is on, the hook must exist.
-        # Gated on _use_layout so a pymupdf4llm whose `import pymupdf.layout`
-        # failed legitimately is not "repaired" into an engine it lacks.
-        if (
-            getattr(module, "_use_layout", False)
-            and getattr(pymupdf, "_get_layout", None) is None
-        ):
-            module.use_layout(True)
-        saved_quads = _set_quad_corrections_unset(True)
-        try:
+            try:
+                module = importlib.import_module("pymupdf4llm")
+            except ImportError:
+                raise ImportError(
+                    "pymupdf4llm is required for table markdown extraction. It "
+                    "ships inside the full pymupdf wheel, which pymupdf-lite "
+                    "replaces: install pymupdf instead of pymupdf-lite."
+                ) from None
+            # Invariant: if pymupdf4llm believes layout is on, the hook must
+            # exist. Gated on _use_layout so a pymupdf4llm whose `import
+            # pymupdf.layout` failed legitimately is not "repaired" into an
+            # engine it lacks.
+            if (
+                getattr(module, "_use_layout", False)
+                and getattr(pymupdf, "_get_layout", None) is None
+            ):
+                module.use_layout(True)
+            pymupdf.TOOLS.unset_quad_corrections(True)
             yield module
         finally:
             pymupdf.TOOLS.unset_quad_corrections(saved_quads)
