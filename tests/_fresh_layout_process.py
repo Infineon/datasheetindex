@@ -15,9 +15,9 @@ What this proves, precisely:
   is the very callable it was and the flag is still off -- so the build's
   classic_tables() round-trip restored both;
 * after that round-trip, extract_table_markdown still returns layout-aware
-  markdown, and puts the flag back off when it is done -- the leak this guards
-  is what made every later read in a long-lived process see different table
-  cells and text-block coordinates;
+  markdown and leaves the flag off -- the leak this guards is what made every
+  later read in a long-lived process see different table cells and text-block
+  coordinates;
 * the whole thing runs through DatasheetTools.build_datasheet and
   DatasheetTools.extract_table_markdown, so a regression in that wiring fails
   here even if engine.py itself is fine.

@@ -18,7 +18,6 @@ import sys
 from typing import Any
 
 from datasheetindex._version import package_version
-from datasheetindex.core.engine import layout_engine
 from datasheetindex.tools.defs import (
     DatasheetToolSession,
     create_datasheet_tool_session,
@@ -36,21 +35,6 @@ def _load_mcp_modules() -> tuple[Any, Any]:
             "Install it with: uv sync --extra mcp"
         ) from None
     return lowlevel.Server, types_module
-
-
-def _preload_layout_model() -> None:
-    """Import pymupdf4llm to trigger ONNX model loading before serving.
-
-    The layout model takes ~2s to load. Doing this eagerly at server start
-    avoids a long GIL-holding pause on the first extract_table_markdown call,
-    which can cause MCP client timeouts.
-
-    Routed through layout_engine() so that engine.py stays the only place in
-    the package that imports pymupdf4llm, and the hook is only ever installed
-    under the lock. This runs before serving begins, so it cannot race today.
-    """
-    with contextlib.suppress(ImportError), layout_engine():
-        pass  # optional dependency; extract_table_markdown reports the error
 
 
 def _silence_pymupdf_stdout_notice() -> None:
@@ -322,7 +306,6 @@ class LocalMcpServer:
         """Serve over the given transport, closing the session on shutdown."""
         import anyio
 
-        _preload_layout_model()
         try:
             if transport == "stdio":
                 # stdout IS the wire here; nothing else may write to it.

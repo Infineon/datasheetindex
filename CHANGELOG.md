@@ -16,19 +16,25 @@ All notable changes to this project will be documented in this file.
   happens at `import pymupdf`. Over 30 datasheets (3,961 pages) it changed cells
   on 2,058 pages, block coordinates on 484 and table counts on 9.
   `core/engine.py` now owns the flag alongside the layout hook: it resets it at
-  import, holds it off in `classic_tables()` and turns it on only inside
-  `layout_engine()`, so `extract_table_markdown` output is unchanged. With the
-  reset, PyMuPDF 2.0 is byte-identical to `pymupdf-lite` 2.0 on that corpus.
+  import, holds it off in `classic_tables()`, and resets it after
+  `layout_engine()` imports pymupdf4llm. It is never turned on, not even for
+  the duration of a layout call: it is process-global, so a concurrent build
+  would read through it. pymupdf4llm's markdown barely depends on it (identical
+  on 60/60 BME280 and 20/20 sampled PSoC 6 pages, 45/57 on the ADS1115, where
+  the rest differ only in line breaks inside plot-axis text). With the reset,
+  PyMuPDF 2.0 is byte-identical to `pymupdf-lite` 2.0 on that corpus.
   `find_tables(use_layout=False)` does not protect against this, which is why
   the guard is a context manager and not a keyword.
 
 - **`extract_table_markdown` writes nothing to stdout.** pymupdf4llm 2.0's
   layout parser probes for an OCR backend on every call and, with none
   installed, prints a blank line, "=== Document parser messages ===" and
-  "Warning: RapidOCR is missing..." to stdout -- the MCP stdio transport's
-  JSON-RPC wire. The call now passes `use_ocr=False` (layout branch only, like
-  `header`/`footer`). No OCR backend is a dependency of this package, so the
-  markdown is unchanged: identical on the PSoC 6 pages checked.
+  "Warning: RapidOCR is missing..." to stdout -- noise in every Python caller's
+  output. (The mcp 2.x stdio transport diverts fd 1 to stderr while it serves,
+  so the wire itself is exposed only to output still buffered at exit.) The
+  call now passes `use_ocr=False` (layout branch only, like `header`/`footer`):
+  0 bytes on stdout across all 251 pages of three datasheets. No OCR backend
+  is a dependency of this package, so the markdown is unchanged.
 
 ### Changed
 - **PyMuPDF 2.0 (`pymupdf>=2.0`).** The full wheel now bundles `pymupdf4llm`

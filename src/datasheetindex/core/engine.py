@@ -12,18 +12,19 @@ both alter what *every* later PyMuPDF call in the process returns:
   (``"1.71"`` -> ``"171\\n."``, ``"Supply Voltage"`` -> ``"SupplyVoltage"``)
   and shifts ``get_text("blocks")`` coordinates. Across a 30-document corpus
   it changed the cells on 2,058 of 3,961 pages and block coordinates on 484.
-  pymupdf4llm wants it on; nothing else in this package does.
+  pymupdf4llm sets it for itself, but its layout-branch markdown barely
+  depends on it (see :func:`layout_engine`), so this package keeps it off.
 
 So which table engine runs, and what text comes back, are properties of the
 *process*, not of the document. This module is the only place in the package
 that imports ``pymupdf4llm`` or writes either global. It resets the flag to
-PyMuPDF's own default once, at import, and then:
+PyMuPDF's own default at import and never turns it back on, and:
 
-* :func:`classic_tables` suppresses the hook and the flag, so
+* :func:`classic_tables` suppresses the hook and holds the flag off, so
   ``find_tables()`` uses PyMuPDF's classic geometric detector on corrected
   character boxes.
-* :func:`layout_engine` yields ``pymupdf4llm`` with its hook installed and the
-  flag on, as pymupdf4llm left it, and puts the flag back on exit.
+* :func:`layout_engine` yields ``pymupdf4llm`` with its hook installed, and
+  resets the flag again after importing it, since a first import sets it.
 
 Both serialize on one re-entrant lock. The import inside
 :func:`layout_engine` stays under it although PyMuPDF 2.x has already done the
@@ -114,44 +115,45 @@ def classic_tables() -> Generator[None]:
 def layout_engine() -> Generator[Any]:
     """Import ``pymupdf4llm`` under the lock and yield it, hook installed.
 
-    The quad-corrections flag is on for the duration -- the state pymupdf4llm
-    set for itself at import, and the one its markdown output was built
-    against -- and restored on exit. It is saved *before* the import: when
-    this is pymupdf4llm's first import in the process, the import is what turns
-    the flag on, and saving afterwards would "restore" the leak.
+    The quad-corrections flag stays **off** throughout, although pymupdf4llm
+    sets it on for itself. The flag is process-global and every other PyMuPDF
+    read in the package takes no lock, so turning it on here -- even only for
+    the duration -- would let a build on another thread read its pages with
+    mangled cells and shifted blocks and cache them in its artifact. Off costs
+    the markdown almost nothing, measured with ``header``/``footer``/``use_ocr``
+    as ``extract_table_markdown`` passes them: identical on every page of the
+    BME280 (60/60) and on 20/20 sampled PSoC 6 pages, and on 45/57 TI ADS1115
+    pages, where the rest differ only in line breaks inside plot-axis text
+    (``"Bus VCM"`` vs ``"Bus<br>VCM"``). The layout branch never calls
+    ``find_tables``, the only other thing that toggles the flag.
 
-    Other threads' unlocked PyMuPDF reads (page text, search) see the flag on
-    while this is held. The window is one ``to_markdown`` call; locking every
-    read in the package to close it would serialize all builds, and before
-    0.41.0 the flag stayed on for the rest of the process instead.
+    The reset comes *after* the import, in a ``finally``: when this is
+    pymupdf4llm's first import in the process, the import itself is what turns
+    the flag on, whether or not it then succeeds.
 
     Raises ``ImportError`` when pymupdf4llm is absent, which with
     ``pymupdf>=2.0`` means ``pymupdf-lite`` was installed in its place.
     """
     with _LAYOUT_LOCK:
-        saved_quads = bool(pymupdf.TOOLS.unset_quad_corrections())
         try:
-            try:
-                module = importlib.import_module("pymupdf4llm")
-            except ImportError:
-                raise ImportError(
-                    "pymupdf4llm is required for table markdown extraction. It "
-                    "ships inside the full pymupdf wheel, which pymupdf-lite "
-                    "replaces: install pymupdf instead of pymupdf-lite."
-                ) from None
-            # Invariant: if pymupdf4llm believes layout is on, the hook must
-            # exist. Gated on _use_layout so a pymupdf4llm whose `import
-            # pymupdf.layout` failed legitimately is not "repaired" into an
-            # engine it lacks.
-            if (
-                getattr(module, "_use_layout", False)
-                and getattr(pymupdf, "_get_layout", None) is None
-            ):
-                module.use_layout(True)
-            pymupdf.TOOLS.unset_quad_corrections(True)
-            yield module
+            module = importlib.import_module("pymupdf4llm")
+        except ImportError:
+            raise ImportError(
+                "pymupdf4llm is required for table markdown extraction. It "
+                "ships inside the full pymupdf wheel, which pymupdf-lite "
+                "replaces: install pymupdf instead of pymupdf-lite."
+            ) from None
         finally:
-            pymupdf.TOOLS.unset_quad_corrections(saved_quads)
+            pymupdf.TOOLS.unset_quad_corrections(False)
+        # Invariant: if pymupdf4llm believes layout is on, the hook must exist.
+        # Gated on _use_layout so a pymupdf4llm whose `import pymupdf.layout`
+        # failed legitimately is not "repaired" into an engine it lacks.
+        if (
+            getattr(module, "_use_layout", False)
+            and getattr(pymupdf, "_get_layout", None) is None
+        ):
+            module.use_layout(True)
+        yield module
 
 
 def layout_active(module: Any) -> bool:

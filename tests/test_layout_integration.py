@@ -383,16 +383,18 @@ def test_dropped_blocks_agree_with_the_layout_model():
 
 
 @pytest.mark.real_pdf
-def test_layout_use_leaves_later_classic_reads_unchanged():
-    """A layout call must not change what the next classic read returns.
+def test_layout_use_leaves_classic_reads_unchanged():
+    """No classic read changes while, or after, the layout engine is in use.
 
     pymupdf4llm unsets quad corrections while it is imported, and PyMuPDF 2.x
     imports it with ``import pymupdf``. Left on, the flag rewrote classic cell
     text on 2,058 of 3,961 corpus pages and shifted text-block coordinates on
     484 -- and on 1.28.2 it switched on at a long-lived server's first
     extract_table_markdown, so every later build in that process differed.
-    Page 10 of the PSoC datasheet reads "Buck Regulator" with corrections and
-    "BuckRegulator" without them.
+    Reads *inside* layout_engine() stand in for another thread's build, whose
+    page reads take no lock: the flag is process-global, so they see whatever
+    layout_engine() leaves it at. Page 10 of the PSoC datasheet reads "Buck
+    Regulator" with corrections and "BuckRegulator" without them.
     """
     from datasheetindex.core.engine import layout_engine
 
@@ -402,30 +404,35 @@ def test_layout_use_leaves_later_classic_reads_unchanged():
     if not pdf.exists():
         pytest.skip("bundled PSoC datasheet not present")
 
+    def cells(page: pymupdf.Page) -> list:
+        return [t.extract() for t in page.find_tables(use_layout=False)]
+
     def read(page: pymupdf.Page) -> tuple[list, list]:
         with classic_tables():
-            cells = [t.extract() for t in page.find_tables()]
-        return cells, page.get_text("blocks")
+            found = [t.extract() for t in page.find_tables()]
+        return found, page.get_text("blocks")
 
     doc = pymupdf.open(str(pdf))
     try:
         before = read(doc[9])
-        assert "Buck Regulator" in str(before[0]), "fixture no longer sensitive"
+        assert "Buck Regulator" in str(before[0])
+        # The page is one the flag changes, so the equalities below are not
+        # vacuous.
+        pymupdf.TOOLS.unset_quad_corrections(True)
+        try:
+            assert "BuckRegulator" in str(cells(doc[9])), "fixture not sensitive"
+        finally:
+            pymupdf.TOOLS.unset_quad_corrections(False)
 
         with layout_engine():
-            # Inside, the flag is pymupdf4llm's -- proving the page is one the
-            # flag changes, so the equality below is not vacuous.
-            assert "BuckRegulator" in str(
-                [t.extract() for t in doc[9].find_tables(use_layout=False)]
-            )
-
+            assert (cells(doc[9]), doc[9].get_text("blocks")) == before
         assert read(doc[9]) == before
     finally:
         doc.close()
 
 
 def test_extract_table_markdown_writes_nothing_to_stdout(mixed_pdf, capfd):
-    """stdout is the MCP stdio transport's JSON-RPC wire.
+    """stdout belongs to the caller -- and, at exit, to the MCP stdio wire.
 
     pymupdf4llm 2.0's layout parser probes for an OCR backend on every call
     and, finding none, ends with a bare ``print()`` and two

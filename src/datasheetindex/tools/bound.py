@@ -559,7 +559,9 @@ class DatasheetTools:
         layout parser probes for an OCR backend on every call and reports what
         it found -- with no backend installed, "Warning: RapidOCR is missing"
         -- through a bare ``print()`` and ``pymupdf.message()``, both on
-        stdout, which under the MCP stdio transport is the JSON-RPC wire. A
+        stdout: noise in every Python caller's output, and on the MCP stdio
+        wire for anything still buffered when the transport restores fd 1 at
+        exit (mcp 2.x diverts fd 1 to stderr only while it serves). A
         ``redirect_stdout`` would not do: ``pymupdf.message`` writes to the
         stream PyMuPDF bound at import. Nothing is lost by it in practice: no
         OCR backend is a dependency of this package, so OCR could only run

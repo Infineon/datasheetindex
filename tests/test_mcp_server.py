@@ -274,7 +274,6 @@ def test_run_dispatches_transport_and_closes_session(monkeypatch):
     calls: list[str] = []
     # stdio is served via `anyio.run(self._serve_stdio)`; stub anyio.run so no
     # real event loop starts. http/sse call their runners directly.
-    monkeypatch.setattr("datasheetindex.mcp_server._preload_layout_model", lambda: None)
     monkeypatch.setattr("anyio.run", lambda fn, *a, **k: calls.append("stdio"))
     monkeypatch.setattr(server, "_serve_streamable_http", lambda: calls.append("http"))
     monkeypatch.setattr(server, "_serve_sse", lambda: calls.append("sse"))
