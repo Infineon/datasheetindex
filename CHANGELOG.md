@@ -46,6 +46,13 @@ All notable changes to this project will be documented in this file.
   before and after) and cells on 3. `pymupdf-lite`, the same import without the
   layout engine, was rejected as the base: it writes the same files as
   `pymupdf`, so uninstalling either breaks the other.
+- **Breaking: fewer supported platforms.** `pymupdf` 2.0 requires
+  `onnxruntime`, which has no source distribution, and between them there are
+  no wheels for **Intel macOS, Alpine/musl Linux, Linux with glibc older than
+  2.28, Windows ARM64 or 32-bit Windows**. 0.41.0 does not install there; 0.40.0
+  is the last release that does. Supported: Linux x86_64/aarch64 (glibc 2.28+),
+  Windows x64, and macOS 14+ on Apple Silicon. See README -> "Supported
+  platforms".
 - **The `[layout]` extra is a compatibility alias.** `pymupdf4llm` 2.x is an
   empty distribution whose code ships inside the `pymupdf` wheel, so
   `datasheetindex[layout]` now installs nothing extra; it is kept so existing

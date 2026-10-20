@@ -11,6 +11,14 @@ authors = [{ name = "Infineon Technologies AG" }]
 # whenever `pymupdf` is imported. The floor is what lets core/engine.py rely on
 # that: the layout hook and the quad-corrections flag are both already set by
 # the time our code runs, so it owns them from a known state (see engine.py).
+#
+# It also narrows the platforms this installs on, deliberately: pymupdf 2.0
+# requires onnxruntime, which ships no sdist, and between them there are no
+# wheels for Intel macOS, musl, glibc < 2.28, Windows ARM64 or 32-bit Windows.
+# README -> "Supported platforms" lists them; 0.40.0 is the last release that
+# installs there. Accepting both majors instead was rejected: on those platforms
+# `[layout]` would resolve the empty pymupdf4llm 2.x and break
+# extract_table_markdown, and every guard would need a test per major.
 dependencies = [
     "pymupdf>=2.0",
 ]

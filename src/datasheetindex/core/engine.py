@@ -131,17 +131,21 @@ def layout_engine() -> Generator[Any]:
     pymupdf4llm's first import in the process, the import itself is what turns
     the flag on, whether or not it then succeeds.
 
-    Raises ``ImportError`` when pymupdf4llm is absent, which with
-    ``pymupdf>=2.0`` means ``pymupdf-lite`` was installed in its place.
+    Raises ``ImportError`` when pymupdf4llm cannot be imported, which with
+    ``pymupdf>=2.0`` means ``pymupdf-lite`` was installed in its place, or
+    ``onnxruntime`` is missing or broken -- pymupdf4llm imports it
+    unconditionally, although core PyMuPDF runs without it.
     """
     with _LAYOUT_LOCK:
         try:
             module = importlib.import_module("pymupdf4llm")
-        except ImportError:
+        except ImportError as exc:
             raise ImportError(
-                "pymupdf4llm is required for table markdown extraction. It "
-                "ships inside the full pymupdf wheel, which pymupdf-lite "
-                "replaces: install pymupdf instead of pymupdf-lite."
+                f"pymupdf4llm could not be imported ({exc}); table markdown "
+                "extraction needs it. It ships inside the full pymupdf wheel and "
+                "needs onnxruntime, which pymupdf requires; pymupdf-lite has "
+                "neither. Install pymupdf instead of pymupdf-lite, and check "
+                "that onnxruntime imports."
             ) from None
         finally:
             pymupdf.TOOLS.unset_quad_corrections(False)

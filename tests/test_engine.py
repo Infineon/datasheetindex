@@ -195,7 +195,7 @@ def test_layout_engine_raises_a_helpful_import_error(monkeypatch):
         raise ImportError(name)
 
     monkeypatch.setattr(engine, "importlib", types.SimpleNamespace(import_module=boom))
-    with pytest.raises(ImportError, match="install pymupdf instead of pymupdf-lite"):
+    with pytest.raises(ImportError, match="Install pymupdf instead of pymupdf-lite"):
         with layout_engine():
             pass
 
