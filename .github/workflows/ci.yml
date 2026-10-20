@@ -1,6 +1,6 @@
 name: CI
 
-# Four lanes, each covering an environment the others cannot reach. Every lane
+# Three lanes, each covering an environment the others cannot reach. Every lane
 # that depends on an optional install asserts that install took effect before
 # testing: pytest reports a skipped module as a pass, so without the assertion a
 # lane goes green while testing nothing the moment its install stops working --
@@ -35,26 +35,13 @@ jobs:
         with:
           cache-suffix: unit
       - run: uv sync
-      - run: uv run pytest tests/ -q
-
-  # The same suite against the real ML layout engine. test_layout_integration.py
-  # skips unless `pymupdf.layout` is importable, so without this lane it never
-  # runs anywhere. The full suite rather than `-m layout`: the handler tests that
-  # call extract_table_markdown are unmarked and must also see a live engine.
-  # The extra adds ~49 MB of bundled ONNX models, hence a separate lane.
-  layout:
-    name: layout
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          cache-suffix: layout
-      - run: uv sync --extra layout
+      # pymupdf>=2.0 bundles the ONNX layout engine, so this lane also runs
+      # test_layout_integration.py -- which skips, i.e. passes, without it. The
+      # separate `layout` lane that used to install it was dropped in 0.41.0;
+      # this assertion is what it left behind.
       - name: Assert the layout engine is importable
         run: uv run --no-sync python -c "import pymupdf.layout"
-      - run: uv run --no-sync pytest tests/ -q
+      - run: uv run pytest tests/ -q
 
   # The same suite against the real claude-agent-sdk. The default lane checks our
   # envelope against tests/conftest.py:sdk_envelope_to_content, a key-for-key

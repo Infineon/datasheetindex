@@ -50,6 +50,11 @@ All notable changes to this project will be documented in this file.
   reasons do not install this extra. An `mcp` whose `Server` lacks the 2.x
   constructor handlers raises a named "unsupported mcp version" error. Content
   blocks are built with `mime_type=` / `input_schema=`.
+- **The `layout` CI lane is dropped.** With the layout engine inside the
+  `pymupdf` wheel, `uv sync --extra layout` resolves exactly the packages a
+  plain `uv sync` does, so the lane repeated `unit`. Its one distinct step, the
+  assertion that `pymupdf.layout` imports, moved into `unit`, which now runs
+  `test_layout_integration.py` and would otherwise pass it by skipping.
 - **Dependency refresh across the lock (`uv lock --upgrade`), and the
   pre-commit hooks with it.** `pymupdf`, `pymupdf-layout` and `pymupdf4llm`
   1.28.2 -> 2.0, `openai` 3.29.0 -> 3.35.1, `claude-agent-sdk` 0.2.165 ->
