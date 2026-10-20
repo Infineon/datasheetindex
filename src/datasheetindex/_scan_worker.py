@@ -70,8 +70,10 @@ def skip_layout_engine() -> None:
     for name in _LAYOUT_MODULES:
         modules.setdefault(name, None)
     # With layout looking uninstalled, find_tables() would print() PyMuPDF's
-    # "Consider using the pymupdf_layout package" advice. Process-local: this
-    # is our own scan process, never the host.
+    # "Consider using the pymupdf_layout package" advice. Defensive: both
+    # callers already have stdout on devnull, so this is not what keeps a
+    # JSON-RPC wire clean -- it keeps the line from existing at all.
+    # Process-local: this is our own scan process, never the host.
     os.environ["PYMUPDF_SUGGEST_LAYOUT_ANALYZER"] = "0"
 
 

@@ -20,14 +20,14 @@ if TYPE_CHECKING:
     from datasheetindex.index import DatasheetIndex
     from datasheetindex.llm.client import LlmTlsVerificationError
     from datasheetindex.mcp_server import create_local_mcp_server, run_mcp_server
-    from datasheetindex.tools.bound import DatasheetTools
-    from datasheetindex.tools.defs import (
+    from datasheetindex.tools import (
         DatasheetToolDef,
+        DatasheetTools,
         DatasheetToolSession,
         create_datasheet_tool_defs,
         create_datasheet_tool_session,
+        create_datasheet_tools_server,
     )
-    from datasheetindex.tools.registry import create_datasheet_tools_server
 
 __all__ = [
     "BatchResult",
@@ -53,12 +53,14 @@ _ATTR_MODULES = {
     "LlmTlsVerificationError": "datasheetindex.llm.client",
     "create_local_mcp_server": "datasheetindex.mcp_server",
     "run_mcp_server": "datasheetindex.mcp_server",
-    "DatasheetTools": "datasheetindex.tools.bound",
-    "DatasheetToolDef": "datasheetindex.tools.defs",
-    "DatasheetToolSession": "datasheetindex.tools.defs",
-    "create_datasheet_tool_defs": "datasheetindex.tools.defs",
-    "create_datasheet_tool_session": "datasheetindex.tools.defs",
-    "create_datasheet_tools_server": "datasheetindex.tools.registry",
+    # Delegated to the tools package's own lazy table, so each of these names
+    # has one home to update when a tool class moves between its modules.
+    "DatasheetTools": "datasheetindex.tools",
+    "DatasheetToolDef": "datasheetindex.tools",
+    "DatasheetToolSession": "datasheetindex.tools",
+    "create_datasheet_tool_defs": "datasheetindex.tools",
+    "create_datasheet_tool_session": "datasheetindex.tools",
+    "create_datasheet_tools_server": "datasheetindex.tools",
 }
 
 

@@ -66,7 +66,11 @@ def test_skip_layout_engine_is_a_noop_once_pymupdf_is_imported(monkeypatch):
     Blocking then would only make a later import of it fail; the scan's
     classic_tables() guard covers that worker instead.
     """
-    monkeypatch.delenv("PYMUPDF_SUGGEST_LAYOUT_ANALYZER", raising=False)
+    # setenv first so the delenv records an undo: a regression that sets the
+    # variable here must not leak it into later tests, where it would silence
+    # the layout notice test_mcp_server's stdio-wire test depends on.
+    monkeypatch.setenv("PYMUPDF_SUGGEST_LAYOUT_ANALYZER", "unset-by-test")
+    monkeypatch.delenv("PYMUPDF_SUGGEST_LAYOUT_ANALYZER")
     before = {name: sys.modules.get(name) for name in _ENGINE_MODULES}
 
     skip_layout_engine()
@@ -78,8 +82,9 @@ def test_skip_layout_engine_is_a_noop_once_pymupdf_is_imported(monkeypatch):
 def test_pool_workers_skip_the_engine():
     """The production pool, real start method, real initializer.
 
-    The probe also asserts PyMuPDF *is* imported, so a worker that skipped the
-    engine by never importing PyMuPDF cannot pass this vacuously.
+    The expected value names ``pymupdf`` and is compared exactly, so a worker
+    that skipped the engine by never importing PyMuPDF cannot pass this
+    vacuously. Keep it an equality check.
     """
     proc = subprocess.run(
         [sys.executable, str(PROBE)], capture_output=True, text=True, check=False

@@ -40,8 +40,9 @@ All notable changes to this project will be documented in this file.
 - **PyMuPDF 2.0 (`pymupdf>=2.0`).** The full wheel now bundles `pymupdf4llm`
   and the ONNX layout engine and requires onnxruntime, numpy and networkx
   (~313 MB installed against ~64 MB); `import pymupdf` loads the model, which
-  costs ~2 s and ~90 MB RSS per process (table-scan workers skip it, below). The classic scan is faster: a 134-page
-  build takes ~22 s against ~29 s on 1.28.2. The MuPDF 1.28.2 -> 1.28.5 engine
+  costs ~2 s and ~90 MB RSS per process (table-scan workers skip it, below).
+  The classic scan is faster: a 134-page build takes ~22 s against ~29 s on
+  1.28.2. The MuPDF 1.28.2 -> 1.28.5 engine
   update itself changed text on 4 pages (a font with no Unicode mapping, garbage
   before and after) and cells on 3. `pymupdf-lite`, the same import without the
   layout engine, was rejected as the base: it writes the same files as
@@ -54,12 +55,16 @@ All notable changes to this project will be documented in this file.
   import PyMuPDF, interleaved runs on a loaded machine: the 134-page PSoC 6 build
   went from 16.4-20.7 s to 5.6-8.1 s and the SEMPER flash datasheet from
   20.6-23.7 s to 9.8-12.1 s, with artifacts byte-identical on all 32 local
-  datasheets. The `datasheetindex` CLI and MCP server do not change (CLI on
-  the same PSoC build: 9.7-11.8 s against 10.0-14.9 s): under `forkserver` the
-  fork server preloads their `__main__`, which imports PyMuPDF, so their
-  workers already shared one engine load rather than paying one each, and a
-  worker that inherits the engine cannot drop it. To make the skip possible, `import datasheetindex` no longer imports
-  PyMuPDF: the package resolves its exports lazily (PEP 562), as
+  datasheets. On Linux the `datasheetindex` CLI and MCP server do not change
+  (CLI on the same PSoC build: 9.7-11.8 s against 10.0-14.9 s): the fork
+  server preloads their `__main__`, which imports PyMuPDF, so their workers
+  already shared one engine load, and a worker that inherits the engine cannot
+  drop it. On Windows the MCP server's scan goes through the stdio-detached
+  helper, which now skips the engine in its own process and in each of its
+  `spawn` workers. Under `spawn` (macOS), a host whose `__main__` imports
+  PyMuPDF at top level still loads it in every worker. To make the skip
+  possible, `import datasheetindex` no longer imports PyMuPDF: the package
+  resolves its exports lazily (PEP 562), as
   `datasheetindex.tools` already did, and the quad-corrections reset now comes
   with `datasheetindex.core`, which every page reader imports. The Windows scan
   helper moved from `datasheetindex.core._scan_worker` to
