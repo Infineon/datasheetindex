@@ -2,6 +2,85 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.41.0] - 2026-10-20
+
+### Fixed
+- **Classic table text and page-text geometry no longer change after a layout
+  call.** `pymupdf4llm` turns `TOOLS.unset_quad_corrections` on while it is
+  imported, process-wide, and character boxes then skip PyMuPDF's quad
+  corrections: classic cell text comes back mangled (`"1.71"` -> `"171\n."`,
+  `"Supply Voltage"` -> `"SupplyVoltage"`), table bboxes move and
+  `get_text("blocks")` coordinates shift. Under 1.28.2 that happened at a
+  process's first `extract_table_markdown`, so a long-lived MCP server's later
+  builds read pages differently from its earlier ones; under 2.0 (below) it
+  happens at `import pymupdf`. Over 30 datasheets (3,961 pages) it changed cells
+  on 2,058 pages, block coordinates on 484 and table counts on 9.
+  `core/engine.py` now owns the flag alongside the layout hook: it resets it at
+  import, holds it off in `classic_tables()`, and resets it after
+  `layout_engine()` imports pymupdf4llm. It is never turned on, not even for
+  the duration of a layout call: it is process-global, so a concurrent build
+  would read through it. pymupdf4llm's markdown barely depends on it (identical
+  on 60/60 BME280 and 20/20 sampled PSoC 6 pages, 45/57 on the ADS1115, where
+  the rest differ only in line breaks inside plot-axis text). With the reset,
+  PyMuPDF 2.0 is byte-identical to `pymupdf-lite` 2.0 on that corpus.
+  `find_tables(use_layout=False)` does not protect against this, which is why
+  the guard is a context manager and not a keyword.
+
+- **`extract_table_markdown` writes nothing to stdout.** pymupdf4llm 2.0's
+  layout parser probes for an OCR backend on every call and, with none
+  installed, prints a blank line, "=== Document parser messages ===" and
+  "Warning: RapidOCR is missing..." to stdout -- noise in every Python caller's
+  output. (The mcp 2.x stdio transport diverts fd 1 to stderr while it serves,
+  so the wire itself is exposed only to output still buffered at exit.) The
+  call now passes `use_ocr=False` (layout branch only, like `header`/`footer`):
+  0 bytes on stdout across all 251 pages of three datasheets. No OCR backend
+  is a dependency of this package, so the markdown is unchanged.
+
+### Changed
+- **PyMuPDF 2.0 (`pymupdf>=2.0`).** The full wheel now bundles `pymupdf4llm`
+  and the ONNX layout engine and requires onnxruntime, numpy and networkx
+  (~313 MB installed against ~64 MB); `import pymupdf` loads the model, which
+  costs ~2 s and ~90 MB RSS per process. The classic scan is faster: a 134-page
+  build takes ~22 s against ~29 s on 1.28.2. The MuPDF 1.28.2 -> 1.28.5 engine
+  update itself changed text on 4 pages (a font with no Unicode mapping, garbage
+  before and after) and cells on 3. `pymupdf-lite`, the same import without the
+  layout engine, was rejected as the base: it writes the same files as
+  `pymupdf`, so uninstalling either breaks the other.
+- **Breaking: fewer supported platforms.** `pymupdf` 2.0 requires
+  `onnxruntime`, which has no source distribution, and between them there are
+  no wheels for **Intel macOS, Alpine/musl Linux, Linux with glibc older than
+  2.28, Windows ARM64 or 32-bit Windows**. 0.41.0 does not install there; 0.40.0
+  is the last release that does. Supported: Linux x86_64/aarch64 (glibc 2.28+),
+  Windows x64, and macOS 14+ on Apple Silicon. See README -> "Supported
+  platforms".
+- **The `[layout]` extra is a compatibility alias.** `pymupdf4llm` 2.x is an
+  empty distribution whose code ships inside the `pymupdf` wheel, so
+  `datasheetindex[layout]` now installs nothing extra; it is kept so existing
+  requirements still resolve.
+- **mcp 2.x only (`[mcp]` is `mcp[cli]>=2.0.0`).** The 1.x decorator branch of
+  `_build_mcp_server` and the `mcp 1.x` CI lane are removed: `claude-agent-sdk`
+  allows `mcp<3` since 0.2.147, and consumers that pin mcp 1.x for their own
+  reasons do not install this extra. An `mcp` whose `Server` lacks the 2.x
+  constructor handlers raises a named "unsupported mcp version" error. Content
+  blocks are built with `mime_type=` / `input_schema=`.
+- **The `layout` CI lane is dropped.** With the layout engine inside the
+  `pymupdf` wheel, `uv sync --extra layout` resolves exactly the packages a
+  plain `uv sync` does, so the lane repeated `unit`. Its one distinct step, the
+  assertion that `pymupdf.layout` imports, moved into `unit`, which now runs
+  `test_layout_integration.py` and would otherwise pass it by skipping.
+- **Dependency refresh across the lock (`uv lock --upgrade`), and the
+  pre-commit hooks with it.** `pymupdf`, `pymupdf-layout` and `pymupdf4llm`
+  1.28.2 -> 2.0, `openai` 3.29.0 -> 3.35.1, `claude-agent-sdk` 0.2.165 ->
+  0.2.168, `httpx2` / `httpcore2` 2.13.1 -> 2.15.1, `starlette` 1.8.0 -> 1.9.0,
+  `ruff` 0.17.0 -> 0.17.1, `ty` 0.0.86 -> 0.0.89, plus `certifi`, `distlib`,
+  `filelock`, `platformdirs`, `pluggy`, `python-discovery` and `virtualenv` by
+  a patch or minor. Hooks: `uv-pre-commit` 0.13.0 -> 0.13.3, `ruff-pre-commit`
+  v0.17.0 -> v0.17.1, `ty-pre-commit` v0.0.86 -> v0.0.89.
+- **Test fixtures stretch images explicitly.** PyMuPDF 2.0 fixed
+  `insert_image` ignoring the aspect ratio of square images, so the
+  figure-caption fixtures' 20x20 pixmaps in 450x25 rects shrank to 25x25 and
+  fell below the figure threshold; they now pass `keep_proportion=False`.
+
 ## [0.40.0] - 2026-10-13
 
 ### Added

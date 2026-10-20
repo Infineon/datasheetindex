@@ -11,9 +11,9 @@ updates:
     schedule:
       interval: monthly
     # Lock-only, never touching pyproject.toml. The default for a library
-    # widens or raises declared requirements, and the [mcp] extra is unbounded
-    # on purpose: a lower bound of mcp>=2 strands every consumer still held
-    # under the 1.x/2.x boundary by its own dependency graph.
+    # widens or raises declared requirements, and a library's floors are a
+    # statement about what it supports, not about what was newest last month:
+    # raising one strands every consumer still on the older release.
     versioning-strategy: lockfile-only
     cooldown:
       default-days: 14

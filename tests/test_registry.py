@@ -875,9 +875,11 @@ def test_extract_table_markdown_passes_layout_kwargs_only_on_the_layout_branch(
     `_silence_pymupdf_stdout_notice` does not cover it; it silences PyMuPDF's
     own advertisement, a different print in a different package.
 
-    Runs on the default lane, which is the point: tests/test_layout_integration.py
-    skips without the [layout] extra, i.e. in exactly the environment where the
-    classic branch is taken.
+    A fake module rather than the real one, which is the point: with the full
+    pymupdf 2.x wheel the real pymupdf4llm always takes the layout branch, and
+    tests/test_layout_integration.py skips in exactly the environment
+    (``pymupdf-lite``, or a broken onnxruntime) where the classic branch is
+    taken.
     """
     seen: dict = {}
     module = _fake_pymupdf4llm(use_layout=use_layout, seen=seen)
@@ -892,8 +894,11 @@ def test_extract_table_markdown_passes_layout_kwargs_only_on_the_layout_branch(
 
     assert ("header" in seen) is expect_furniture, seen
     assert ("footer" in seen) is expect_furniture, seen
+    # Layout-only too: the classic renderer would print a notice naming it.
+    assert ("use_ocr" in seen) is expect_furniture, seen
     if expect_furniture:
         assert seen["header"] is False and seen["footer"] is False, seen
+        assert seen["use_ocr"] is False, seen
     # The keywords the classic renderer does accept are passed either way.
     assert seen["pages"] == [0] and seen["show_progress"] is False, seen
 

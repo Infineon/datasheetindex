@@ -254,11 +254,13 @@ def _count_tables_on_page(args: tuple[str, int]) -> tuple[int, int]:
     Each worker opens the PDF independently because PyMuPDF document
     objects cannot be pickled across process boundaries.
 
-    The classic_tables() guard is a no-op today -- workers start under
-    forkserver/spawn and never import pymupdf4llm. It is here so that "classic"
-    is a property of this function rather than an accident of the worker's
-    import graph: a future set_forkserver_preload, or a PyMuPDF that activates
-    layout on import, must not silently reintroduce the divergence.
+    The classic_tables() guard is load-bearing: workers start under
+    forkserver/spawn, and under PyMuPDF 2.x their ``import pymupdf`` imports
+    pymupdf4llm, which installs the layout hook and unsets quad corrections.
+    The guard suppresses both, so "classic" is a property of this function
+    rather than of the worker's import graph. (That import also loads the ONNX
+    model, ~2s per worker, which this scan never uses: measured, a 134-page
+    build is still faster on 2.0 than on 1.28.2.)
     """
     import pymupdf as _pymupdf
 

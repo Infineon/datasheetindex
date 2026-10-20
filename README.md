@@ -143,6 +143,26 @@ uv sync
 uv run pre-commit install
 ```
 
+### Supported platforms
+
+Python 3.13 or later, on a platform that both PyMuPDF 2.x and onnxruntime
+publish wheels for. Since 0.41.0 `pymupdf` bundles its ONNX layout engine and
+requires `onnxruntime`, which has no source distribution, so a platform without
+a wheel for either cannot install this package at all:
+
+| platform | 0.41.0 and later |
+|---|---|
+| Linux x86_64 / aarch64, glibc 2.28 or later | supported |
+| Windows x64 | supported |
+| macOS on Apple Silicon (onnxruntime's wheels need macOS 14 or later) | supported |
+| macOS on Intel | **not supported** |
+| Alpine and other musl Linux | **not supported** |
+| Linux with glibc older than 2.28 (e.g. RHEL/CentOS 7) | **not supported** |
+| Windows ARM64, 32-bit Windows | **not supported** |
+
+0.40.0 (PyMuPDF 1.28) is the last release that installs on the unsupported
+rows. They come back if PyMuPDF and onnxruntime publish wheels for them.
+
 Optional integrations:
 
 ```bash

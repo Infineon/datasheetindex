@@ -540,7 +540,7 @@ class DatasheetTools:
     def extract_table_markdown(self, page: int) -> str:
         """Extract a single page as layout-aware markdown with table structure.
 
-        Requires the ``[layout]`` extra (``pymupdf4llm``). Returns markdown
+        Requires ``pymupdf4llm``, bundled with ``pymupdf>=2.0``. Returns markdown
         with proper table formatting using ``|`` delimiters.
 
         The import and the call both happen inside ``layout_engine()``. Doing
@@ -555,26 +555,41 @@ class DatasheetTools:
         extracted table -- roughly 86 characters per page on the PSoC 6
         datasheet, and noise the agent would otherwise have to read past.
 
-        The two flags are **layout-only**, and they are passed only when
+        ``use_ocr=False`` keeps the call off **stdout**. pymupdf4llm 2.0's
+        layout parser probes for an OCR backend on every call and reports what
+        it found -- with no backend installed, "Warning: RapidOCR is missing"
+        -- through a bare ``print()`` and ``pymupdf.message()``, both on
+        stdout: noise in every Python caller's output, and on the MCP stdio
+        wire for anything still buffered when the transport restores fd 1 at
+        exit (mcp 2.x diverts fd 1 to stderr only while it serves). A
+        ``redirect_stdout`` would not do: ``pymupdf.message`` writes to the
+        stream PyMuPDF bound at import. Nothing is lost by it in practice: no
+        OCR backend is a dependency of this package, so OCR could only run
+        where a host had installed one, and these are born-digital datasheets
+        whose text layer is the source this tool reads.
+
+        The three flags are **layout-only**, and they are passed only when
         ``layout_active()`` says the layout branch will actually be taken. An
         importable pymupdf4llm whose own ``import pymupdf.layout`` failed
         serves the classic renderer instead, which swallows unknown keywords
         into ``**kwargs`` and ``print()``s a notice about them to stdout --
-        the MCP stdio transport's JSON-RPC channel. See ``layout_active``.
+        the same wire. See ``layout_active``.
         """
         total = len(self.doc)
         if page < 1 or page > total:
             raise ValueError(f"page must be between 1 and {total}")
         with layout_engine() as pymupdf4llm:
             # Empty on the classic branch: see the docstring.
-            furniture = (
-                {"header": False, "footer": False} if layout_active(pymupdf4llm) else {}
+            layout_only = (
+                {"header": False, "footer": False, "use_ocr": False}
+                if layout_active(pymupdf4llm)
+                else {}
             )
             return pymupdf4llm.to_markdown(
                 self.doc,
                 pages=[page - 1],
                 show_progress=False,
-                **furniture,
+                **layout_only,
             )
 
     def build_datasheet(

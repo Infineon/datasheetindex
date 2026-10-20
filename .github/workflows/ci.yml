@@ -1,6 +1,6 @@
 name: CI
 
-# Five lanes, each covering an environment the others cannot reach. Every lane
+# Three lanes, each covering an environment the others cannot reach. Every lane
 # that depends on an optional install asserts that install took effect before
 # testing: pytest reports a skipped module as a pass, so without the assertion a
 # lane goes green while testing nothing the moment its install stops working --
@@ -35,26 +35,13 @@ jobs:
         with:
           cache-suffix: unit
       - run: uv sync
-      - run: uv run pytest tests/ -q
-
-  # The same suite against the real ML layout engine. test_layout_integration.py
-  # skips unless `pymupdf.layout` is importable, so without this lane it never
-  # runs anywhere. The full suite rather than `-m layout`: the handler tests that
-  # call extract_table_markdown are unmarked and must also see a live engine.
-  # The extra adds ~49 MB of bundled ONNX models, hence a separate lane.
-  layout:
-    name: layout
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          cache-suffix: layout
-      - run: uv sync --extra layout
+      # pymupdf>=2.0 bundles the ONNX layout engine, so this lane also runs
+      # test_layout_integration.py -- which skips, i.e. passes, without it. The
+      # separate `layout` lane that used to install it was dropped in 0.41.0;
+      # this assertion is what it left behind.
       - name: Assert the layout engine is importable
         run: uv run --no-sync python -c "import pymupdf.layout"
-      - run: uv run --no-sync pytest tests/ -q
+      - run: uv run pytest tests/ -q
 
   # The same suite against the real claude-agent-sdk. The default lane checks our
   # envelope against tests/conftest.py:sdk_envelope_to_content, a key-for-key
@@ -74,43 +61,6 @@ jobs:
       - run: uv sync --group sdk
       - name: Assert the real SDK is importable
         run: uv run --no-sync python -c "import claude_agent_sdk"
-      - run: uv run --no-sync pytest tests/ -q
-
-  # The same suite against the mcp 1.x major. uv.lock pins 2.x, so every other
-  # lane takes the 2.x branch of mcp_server._build_mcp_server; the [mcp] extra is
-  # deliberately unbounded, so a consumer held under the boundary takes the 1.x
-  # branch, which we still ship. Installed over the lock rather than resolved
-  # (`uv sync` would undo it, hence --no-sync below), and with dependencies,
-  # since 1.x needs packages the 2.x resolution does not contain.
-  mcp1:
-    name: mcp 1.x
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          cache-suffix: mcp1
-      - run: uv sync
-      - run: uv pip install "mcp[cli]<2"
-      # Asserts the API shape as well as the version, because the API is what
-      # the code branches on: a 1.x without `list_tools` would run the 2.x
-      # branch while this lane claimed to cover 1.x.
-      - name: Assert mcp 1.x and its decorator API
-        run: |
-          uv run --no-sync python - <<'GUARD'
-          import sys
-          from importlib.metadata import version
-
-          from mcp.server.lowlevel import Server
-
-          installed = version("mcp")
-          if installed.split(".")[0] != "1":
-              sys.exit(f"ERROR: expected mcp 1.x in the mcp1 lane, found {installed}.")
-          if not hasattr(Server, "list_tools"):
-              sys.exit(f"ERROR: mcp {installed} lacks the 1.x decorator API.")
-          print(f"Confirmed: mcp {installed}, 1.x decorator API.")
-          GUARD
       - run: uv run --no-sync pytest tests/ -q
 
   # The dev group installs datasheetindex[mcp], so every other lane has `mcp`

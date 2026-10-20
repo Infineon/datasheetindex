@@ -45,17 +45,20 @@ This convention matches PyMuPDF's `get_toc()`, which returns 1-indexed page numb
 
 **Text file size.** A 73-page datasheet produces ~50KB of text; a 300-page datasheet may produce 300KB+. The agent is expected to read slices of the text file (by page range), not load the entire file into context. The Claude Agent SDK's built-in file reading tools support this natively.
 
-**The table engine is process-global; `core/engine.py` owns it.** PyMuPDF's `find_tables()` consults a module global, `pymupdf._get_layout`, on *every* call. Importing `pymupdf4llm` (the optional `[layout]` extra) installs an ONNX-backed callable there, for the whole process. So which table engine runs is a property of the process, not of the document.
+**The table engine and the text geometry are process-global; `core/engine.py` owns both.** PyMuPDF 2.x bundles `pymupdf4llm` and the ONNX layout engine, and a plain `import pymupdf` imports both. That import sets two module globals for the whole process:
 
-`core/engine.py` is therefore the only module under `src/` allowed to import `pymupdf4llm` or to read or write that hook. It exposes two context managers, serialized on one re-entrant lock:
+- `pymupdf._get_layout` — an ONNX-backed callable that `find_tables()` consults on *every* call, switching it to the ML engine.
+- `pymupdf.TOOLS.unset_quad_corrections` — turned on by three `pymupdf4llm.helpers` modules at import. Character boxes then skip PyMuPDF's quad corrections, which mangles classic table cell text (`"1.71"` -> `"171\n."`, `"Supply Voltage"` -> `"SupplyVoltage"`), moves table bboxes and shifts `get_text("blocks")` coordinates. Measured over 30 datasheets (3,961 pages): cells changed on 2,058 pages, block coordinates on 484, table counts on 9. Under PyMuPDF 1.x the same flag switched on at a process's first `extract_table_markdown`, so a long-lived MCP server returned different reads before and after it.
 
-- `classic_tables()` — suppresses the hook, pinning `find_tables()` to PyMuPDF's classic geometric detector. Both table-counting paths (parallel workers and the sequential fallback) scan inside it, which is why `table_count` is a stable property of the document rather than of the indexing process.
-- `layout_engine()` — imports `pymupdf4llm` **inside** the lock and yields it with its hook installed. Only `extract_table_markdown` uses it.
-- `layout_active(module)` — whether `to_markdown` will take the *layout* branch. Reaching `layout_engine()` does not imply it: `to_markdown` dispatches on the module global `_use_layout` at call time, and a pymupdf4llm whose own `import pymupdf.layout` failed (an unimportable `onnxruntime` suffices) imports fine with it `False` and routes to the classic renderer. That renderer swallows unknown keywords into `**kwargs` and `print()`s a notice naming them to **stdout** — the MCP stdio transport's JSON-RPC channel — so a layout-only keyword must be withheld there. `extract_table_markdown`'s `header=`/`footer=` are gated on this.
+So which table engine runs, and what geometry the text comes back with, are properties of the process, not of the document. `core/engine.py` is the only module under `src/` allowed to import `pymupdf4llm` or to write either global. It resets the quad flag to PyMuPDF's default at import and never turns it back on, and exposes two context managers, serialized on one re-entrant lock:
 
-The import must happen inside the lock, because the import *is* the hook installation. An import racing `classic_tables()` lets the guard save `None`, the import install the hook, and the guard restore its stale `None`. Since `pymupdf4llm._use_layout` stays `True`, `to_markdown()` then iterates a `None` `page.layout_information` and raises `TypeError` — permanently, because the module is cached in `sys.modules`. `build_datasheet` and `extract_table_markdown` both run under `asyncio.to_thread`, so this race is reachable.
+- `classic_tables()` — suppresses the hook and holds the quad flag off, pinning `find_tables()` to PyMuPDF's classic geometric detector on corrected character boxes. Both table-counting paths (parallel workers and the sequential fallback) scan inside it, which is why `table_count` is a stable property of the document rather than of the indexing process.
+- `layout_engine()` — imports `pymupdf4llm` **inside** the lock and yields it with its hook installed, resetting the quad flag after the import (a first import is what sets it). The flag stays off while pymupdf4llm runs: it is process-global and no other page read in the package takes the lock, so turning it on for the call would let a concurrent build cache mangled text. The markdown barely depends on it -- identical on 60/60 BME280 and 20/20 sampled PSoC 6 pages, and on 45/57 ADS1115 pages, where the rest differ only in line breaks inside plot-axis text. Only `extract_table_markdown` uses it.
+- `layout_active(module)` — whether `to_markdown` will take the *layout* branch. Reaching `layout_engine()` does not imply it: `to_markdown` dispatches on the module global `_use_layout` at call time, and a pymupdf4llm whose own `import pymupdf.layout` failed (an unimportable `onnxruntime` suffices) imports fine with it `False` and routes to the classic renderer. That renderer swallows unknown keywords into `**kwargs` and `print()`s a notice naming them to **stdout** — the MCP stdio transport's JSON-RPC channel — so a layout-only keyword must be withheld there. `extract_table_markdown`'s `header=`, `footer=` and `use_ocr=` are gated on this; a new layout-only keyword belongs in the same gated dict.
 
-The two engines are different heuristics, not better and worse. On a real 68-page datasheet the classic detector finds 75 tables to the ML engine's 39 and is ~4.4x faster; the ML engine's extra misses are the "Typical Characteristics" plot pages, where the classic detector false-positives on chart gridlines. Counts are defined as the classic detector's answer so they do not depend on which optional extras happen to be installed.
+The import must happen inside the lock, because with a separately imported pymupdf4llm the import *is* the hook installation (PyMuPDF 2.x has already done it, but the guard costs nothing). An import racing `classic_tables()` lets the guard save `None`, the import install the hook, and the guard restore its stale `None`. Since `pymupdf4llm._use_layout` stays `True`, `to_markdown()` then iterates a `None` `page.layout_information` and raises `TypeError` — permanently, because the module is cached in `sys.modules`. `build_datasheet` and `extract_table_markdown` both run under `asyncio.to_thread`, so this race is reachable.
+
+The two engines are different heuristics, not better and worse. On a real 68-page datasheet the classic detector finds 75 tables to the ML engine's 39 and is ~4.4x faster; the ML engine's extra misses are the "Typical Characteristics" plot pages, where the classic detector false-positives on chart gridlines. Counts are defined as the classic detector's answer so they do not depend on what else the process has done with PyMuPDF.
 
 ---
 
@@ -264,8 +267,8 @@ evidence for an agent to weigh, not a stable API.
 
 Note: `has_tables` and `table_count` are heuristic hints from PyMuPDF's classic
 geometric table detector (false positives on block diagrams and on plot
-gridlines are expected). They are identical whether or not the optional
-`[layout]` extra is installed, and whichever internal scan path runs, so the
+gridlines are expected). They are identical whatever else the process has
+done with PyMuPDF's layout engine, and whichever internal scan path runs, so the
 count is a stable property of the document. The ML layout engine is used only by
 `extract_table_markdown`. `source` is always the filename, not the full path. In
 this example, node "0001" has `table_count: 2` which are false positives from
@@ -610,8 +613,9 @@ decision a future reader would otherwise redo.
 - **`pymupdf.layout` was evaluated for figure discovery and rejected on cost.**
   Warm, after model load: 1.28 s/page over 5 pages, 0.89 s/page over 20 --
   extrapolating to **~119 s for the 134-page PSoC 6 against a ~8 s build**,
-  roughly 15x, in the default path, for every document. It also requires the
-  ~49 MB `[layout]` extra a plain `uv sync` excludes, brings the process-global
+  roughly 15x, in the default path, for every document. It also required the
+  ~49 MB `[layout]` extra (bundled with `pymupdf` since 2.0, which removes only
+  that argument), brings the process-global
   hook hazard documented in `core/engine.py`, and unlike `get_image_info()` it is
   a model with an error rate rather than an exact enumeration. `get_image_info()`
   is exact and free.
@@ -1001,7 +1005,7 @@ constants above read as decisions rather than taste.
 - **`pymupdf.layout`**, which classifies `page-header`/`page-footer` directly and
   is what 0.32.0 uses to clean `extract_table_markdown`, cannot serve the text
   file: ~0.95s/page (~128s for the PSoC against an ~8s build) and it sits behind
-  the optional `[layout]` extra that a plain `uv sync` excludes. It earns its
+  the ONNX layout engine, optional when this was decided. It earns its
   keep instead as the **oracle**: a `layout`-marked test asserts that every block
   we delete is one the model also calls furniture, at >= 0.95 precision.
 - **Existing libraries.** `refinedoc` (Apache-2.0, pure stdlib, page-association

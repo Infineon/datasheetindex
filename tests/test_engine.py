@@ -49,6 +49,18 @@ def _restore_hook():
         pymupdf._get_layout = saved
 
 
+@pytest.fixture(autouse=True)
+def _restore_quad_corrections():
+    """The other process-wide global engine.py owns. Put it back too."""
+    saved = bool(pymupdf.TOOLS.unset_quad_corrections())
+    yield
+    pymupdf.TOOLS.unset_quad_corrections(saved)
+
+
+def _quad_corrections_unset() -> bool:
+    return bool(pymupdf.TOOLS.unset_quad_corrections())
+
+
 def _lock_is_held_by_another_thread() -> bool:
     """True when _LAYOUT_LOCK cannot be acquired from a fresh thread."""
     acquired: list[bool] = []
@@ -183,6 +195,100 @@ def test_layout_engine_raises_a_helpful_import_error(monkeypatch):
         raise ImportError(name)
 
     monkeypatch.setattr(engine, "importlib", types.SimpleNamespace(import_module=boom))
-    with pytest.raises(ImportError, match="uv sync --extra layout"):
+    with pytest.raises(ImportError, match="Install pymupdf instead of pymupdf-lite"):
         with layout_engine():
             pass
+
+
+def test_classic_tables_holds_quad_corrections_on_and_restores():
+    """pymupdf4llm unsets quad corrections at import; the scan must not see it.
+
+    With them unset, classic cell text comes back mangled ("1.71" -> "171\\n.")
+    and the table counts may move -- tests/test_layout_integration.py pins that
+    on a real datasheet.
+    """
+    pymupdf.TOOLS.unset_quad_corrections(True)
+    with classic_tables():
+        assert not _quad_corrections_unset()
+    assert _quad_corrections_unset()
+
+
+def test_classic_tables_restores_quad_corrections_on_error():
+    pymupdf.TOOLS.unset_quad_corrections(True)
+    with contextlib.suppress(RuntimeError), classic_tables():
+        raise RuntimeError("boom")
+    assert _quad_corrections_unset()
+
+
+def test_layout_engine_keeps_quad_corrections_on_for_every_thread(monkeypatch):
+    """The flag stays off even while pymupdf4llm runs, because it is global.
+
+    Turning it on for the duration would let a build on another thread -- whose
+    page reads take no lock -- read mangled text into its cached artifact.
+    """
+    module = _fake_module(use_layout=True)
+    monkeypatch.setattr(
+        engine, "importlib", types.SimpleNamespace(import_module=lambda name: module)
+    )
+    pymupdf.TOOLS.unset_quad_corrections(False)
+    with layout_engine():
+        assert not _quad_corrections_unset()
+    assert not _quad_corrections_unset()
+
+
+def test_importing_the_package_resets_quad_corrections():
+    """By the time anything here runs, the import-time reset has happened.
+
+    PyMuPDF 2.x turns the flag on while `import pymupdf` runs, so a process
+    that never touched layout_engine() would otherwise read every page with it
+    on. Asserted in a fresh interpreter, since this one has been through every
+    other test's toggling.
+    """
+    import subprocess
+    import sys
+
+    code = (
+        "import pymupdf, datasheetindex; "
+        "assert not pymupdf.TOOLS.unset_quad_corrections()"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=False
+    )
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_layout_engine_resets_a_flag_its_first_import_set(monkeypatch):
+    """The reset follows the import, because the import is what sets the flag.
+
+    Under PyMuPDF 2.x `import pymupdf` has normally imported pymupdf4llm
+    already, but not when its own `import pymupdf.layout` failed, nor for a
+    pymupdf4llm installed separately: then the import inside layout_engine() is
+    the first, and its helpers turn the flag on as it runs.
+    """
+    module = _fake_module(use_layout=True)
+
+    def first_import(name: str) -> Any:
+        pymupdf.TOOLS.unset_quad_corrections(True)
+        return module
+
+    monkeypatch.setattr(
+        engine, "importlib", types.SimpleNamespace(import_module=first_import)
+    )
+    pymupdf.TOOLS.unset_quad_corrections(False)
+    with layout_engine():
+        assert not _quad_corrections_unset()
+    assert not _quad_corrections_unset()
+
+
+def test_layout_engine_resets_the_flag_when_the_import_fails(monkeypatch):
+    def half_import(name: str) -> Any:
+        pymupdf.TOOLS.unset_quad_corrections(True)
+        raise ImportError(name)
+
+    monkeypatch.setattr(
+        engine, "importlib", types.SimpleNamespace(import_module=half_import)
+    )
+    pymupdf.TOOLS.unset_quad_corrections(False)
+    with pytest.raises(ImportError), layout_engine():
+        pass
+    assert not _quad_corrections_unset()
