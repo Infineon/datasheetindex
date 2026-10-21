@@ -536,6 +536,68 @@ def test_changing_the_text_model_blocks_reuse(
     assert len(build_spy) == 2, "a changed text model must rebuild"
 
 
+@pytest.mark.parametrize(
+    "variable,value",
+    [
+        ("DATASHEETINDEX_REASONING_EFFORT", "low"),
+        ("DATASHEETINDEX_VISION_REASONING_EFFORT", "none"),
+        ("DATASHEETINDEX_MAX_OUTPUT_TOKENS", "900"),
+        ("DATASHEETINDEX_VISION_MAX_OUTPUT_TOKENS", "450"),
+        ("DATASHEETINDEX_TOKEN_LIMIT_PARAMETER", "max_tokens"),
+        ("DATASHEETINDEX_LLM_STORE", "omit"),
+    ],
+)
+def test_generation_settings_invalidate_memory_and_disk_reuse(
+    tmp_path, toc_pdf, not_editable, build_spy, monkeypatch, variable, value
+):
+    out = str(tmp_path / "out")
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+        tools.build_datasheet(output_dir=out)
+        assert len(build_spy) == 1
+        monkeypatch.setenv(variable, value)
+        tools.build_datasheet(output_dir=out)
+        assert len(build_spy) == 2, "changed options must bypass the memory cache"
+
+    # Same normalized settings round-trip through JSON and still reuse on disk.
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+    assert len(build_spy) == 2
+
+    monkeypatch.delenv(variable)
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+    assert len(build_spy) == 3, "changed options must bypass the disk cache too"
+
+
+def test_reasoning_settings_are_normalized_in_the_artifact_key(
+    tmp_path, toc_pdf, not_editable, build_spy, monkeypatch
+):
+    out = str(tmp_path / "out")
+    monkeypatch.setenv("DATASHEETINDEX_VISION_REASONING_EFFORT", " NONE ")
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+    monkeypatch.setenv("DATASHEETINDEX_VISION_REASONING_EFFORT", "none")
+    with DatasheetTools(str(toc_pdf)) as tools:
+        tools.build_datasheet(output_dir=out)
+    assert len(build_spy) == 1
+
+
+def test_invalid_request_settings_do_not_destroy_a_valid_sidecar(
+    tmp_path, toc_pdf, not_editable, monkeypatch
+):
+    out = str(tmp_path / "out")
+    with DatasheetTools(str(toc_pdf)) as tools:
+        artifacts = tools.build_datasheet(output_dir=out)
+        assert artifacts.json_path is not None
+        sidecar = sidecar_path(out, artifacts.json_path.stem)
+        before = sidecar.read_bytes()
+        monkeypatch.setenv("DATASHEETINDEX_VISION_MAX_OUTPUT_TOKENS", "0")
+        with pytest.raises(ValueError, match="DATASHEETINDEX_VISION_MAX_OUTPUT_TOKENS"):
+            tools.build_datasheet(output_dir=out)
+        assert sidecar.read_bytes() == before
+
+
 def test_flipping_the_furniture_hatch_blocks_reuse(
     tmp_path, toc_pdf, not_editable, build_spy, monkeypatch
 ):

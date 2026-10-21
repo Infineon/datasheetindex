@@ -396,97 +396,36 @@ def test_get_structured_output_client_exposes_schema_calls(monkeypatch):
             },
         },
     }
-    # max_tokens, not max_output_tokens: the spelling vLLM is certain to know.
-    assert seen_request["max_tokens"] == 123
+    assert seen_request["max_completion_tokens"] == 123
+    assert "max_tokens" not in seen_request
     assert result.output_text == '{"entries":[]}'
     assert result.status == "completed"
 
 
-def test_call_with_retry_retries_on_429(monkeypatch):
-    """Should retry on rate limit errors and succeed."""
-    from datasheetindex.llm.client import _call_with_retry
+@pytest.mark.parametrize("operation", ["text", "structured", "vision"])
+@pytest.mark.parametrize("status", [400, 401, 403, 429, 500])
+def test_sdk_failures_are_not_retried_by_an_outer_loop(operation, status):
+    """The SDK has already applied its retry policy before an error reaches us."""
+    from datasheetindex.llm.client import _ManagedLlmClient
 
-    monkeypatch.setattr("datasheetindex.llm.client._RETRY_BASE_DELAY", 0.01)
+    calls = []
+    error = _status_error(status)
 
-    call_count = 0
+    class BrokenApi:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            raise error
 
-    class _RateLimitError(Exception):
-        status_code = 429
-
-    def fake_create(*, model, messages):
-        nonlocal call_count
-        call_count += 1
-        if call_count < 3:
-            raise _RateLimitError("Too Many Requests")
-        return _chat_reply("success")
-
-    api = types.SimpleNamespace(create=fake_create)
-    result = _call_with_retry(api, "model", "sys", "user")  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
-    assert result == "success"
-    assert call_count == 3
-
-
-def test_call_structured_with_retry_retries_on_429(monkeypatch):
-    """Structured calls should retry on rate limit errors and succeed."""
-    from datasheetindex.llm.client import _call_structured_with_retry
-
-    monkeypatch.setattr("datasheetindex.llm.client._RETRY_BASE_DELAY", 0.01)
-
-    call_count = 0
-
-    class _RateLimitError(Exception):
-        status_code = 429
-
-    def fake_create(**_kwargs):
-        nonlocal call_count
-        call_count += 1
-        if call_count < 3:
-            raise _RateLimitError("Too Many Requests")
-        return _chat_reply('{"entries":[]}')
-
-    api = types.SimpleNamespace(create=fake_create)
-    result = _call_structured_with_retry(
-        api,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
-        "model",
-        "sys",
-        "user",
-        name="probe-schema",
-        schema={"type": "object", "properties": {}, "additionalProperties": False},
-    )
-    assert result.output_text == '{"entries":[]}'
-    assert result.status == "completed"
-    assert call_count == 3
-
-
-def test_call_with_retry_raises_on_non_retryable(monkeypatch):
-    """Should raise immediately on non-retryable errors."""
-    from datasheetindex.llm.client import _call_with_retry
-
-    monkeypatch.setattr("datasheetindex.llm.client._RETRY_BASE_DELAY", 0.01)
-
-    def fake_create(*, model, messages):
-        raise ValueError("bad input")
-
-    api = types.SimpleNamespace(create=fake_create)
-    with pytest.raises(ValueError, match="bad input"):
-        _call_with_retry(api, "model", "sys", "user")  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
-
-
-def test_call_with_retry_raises_after_max_attempts(monkeypatch):
-    """Should raise after exhausting all retry attempts."""
-    from datasheetindex.llm.client import _call_with_retry
-
-    monkeypatch.setattr("datasheetindex.llm.client._RETRY_BASE_DELAY", 0.01)
-
-    class _RateLimitError(Exception):
-        status_code = 429
-
-    def fake_create(*, model, messages):
-        raise _RateLimitError("Too Many Requests")
-
-    api = types.SimpleNamespace(create=fake_create)
-    with pytest.raises(_RateLimitError):
-        _call_with_retry(api, "model", "sys", "user")  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+    client = _ManagedLlmClient(BrokenApi(), object(), "model")
+    with pytest.raises(type(error)) as caught:
+        if operation == "text":
+            client("s", "u")
+        elif operation == "structured":
+            client.structured_json("s", "u", name="n", schema={"type": "object"})
+        else:
+            client.describe_image("s", "QUJD")
+    assert caught.value is error
+    assert len(calls) == 1
 
 
 def test_get_vision_client_detects_describe_image():
@@ -563,14 +502,15 @@ def test_text_calls_log_when_the_reply_comes_back_empty(caplog):
     # about why. The model and finish_reason are what separate the causes.
     import logging
 
-    from datasheetindex.llm.client import _ManagedLlmClient
+    from datasheetindex.llm.client import LlmIncompleteResponseError, _ManagedLlmClient
 
     client = _ManagedLlmClient(
         _FakeChat(content="", finish_reason="length"), object(), "some-gateway-model"
     )
 
     with caplog.at_level(logging.WARNING, logger="datasheetindex.llm.client"):
-        assert client("s", "u") == ""
+        with pytest.raises(LlmIncompleteResponseError, match="truncated"):
+            client("s", "u")
 
     assert "some-gateway-model" in caplog.text
     assert "length" in caplog.text
@@ -684,7 +624,8 @@ def test_describe_image_caps_output_tokens():
     chat = _FakeChat()
     _ManagedLlmClient(chat, object(), "gpt-4.1").describe_image("s", "QUJD")
 
-    assert chat.captured["max_tokens"] == VISION_MAX_TOKENS
+    assert chat.captured["max_completion_tokens"] == VISION_MAX_TOKENS
+    assert "max_tokens" not in chat.captured
 
 
 def test_describe_image_returns_empty_string_when_the_model_says_nothing():
@@ -863,6 +804,25 @@ def test_create_llm_client_falls_back_to_the_default_model(monkeypatch):
     create_llm_client()("system", "user")
 
     assert chat.captured["model"] == DEFAULT_TEXT_MODEL
+
+
+def test_the_release_default_is_qwen_for_both_text_and_vision(monkeypatch):
+    monkeypatch.setenv("LITELLM_BASE_URL", "https://example.com")
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "secret")
+    chat = _patch_fake_clients(monkeypatch, {}, {})
+    from datasheetindex.llm.client import (
+        DEFAULT_TEXT_MODEL,
+        create_llm_client,
+        get_vision_client,
+    )
+
+    assert DEFAULT_TEXT_MODEL == "qwen3.8-27b"
+    client = create_llm_client()
+    client("s", "u")
+    vision = get_vision_client(client)
+    assert vision is not None
+    vision.describe_image("s", "QUJD")
+    assert [request["model"] for request in chat.requests] == ["qwen3.8-27b"] * 2
 
 
 def test_the_vision_knob_still_wins_over_the_text_model_env(monkeypatch):
@@ -1260,8 +1220,8 @@ def _converted_tls():
 def test_permanent_failures_are_told_apart_from_transient_ones(exc, expected):
     """Only a misconfiguration an operator can fix counts as permanent.
 
-    Duck-typed on ``status_code`` exactly as ``_is_retryable`` is, so the check
-    needs no ``openai`` import -- the SDK sets that attribute on its status
+    Duck-typed on ``status_code``, so the check needs no ``openai`` import --
+    the SDK sets that attribute on its status
     errors (``AuthenticationError`` 401, ``PermissionDeniedError`` 403).
 
     404 is deliberately absent. It reads like "the model does not exist", but a

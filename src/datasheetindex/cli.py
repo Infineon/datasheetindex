@@ -6,7 +6,7 @@ import argparse
 import sys
 
 from datasheetindex.index import DatasheetIndex
-from datasheetindex.llm.client import close_llm_client
+from datasheetindex.llm.client import DEFAULT_TEXT_MODEL, close_llm_client
 from datasheetindex.llm.figure_captions import DEFAULT_MAX_FIGURE_CAPTIONS
 from datasheetindex.mcp_server import _add_mcp_arguments
 
@@ -39,7 +39,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Explicit LLM model for ToC fallback and summaries; without it, "
             "low-quality ToCs may still use the default auto-fallback model "
-            "(DATASHEETINDEX_MODEL, or gpt-4.1) when LLM credentials are "
+            f"(DATASHEETINDEX_MODEL, or {DEFAULT_TEXT_MODEL}) when LLM credentials are "
             "available"
         ),
     )

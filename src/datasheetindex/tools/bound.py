@@ -53,11 +53,15 @@ from datasheetindex.core.variants import (
 )
 from datasheetindex.index import REGENERATE_TOC_REQUIRES_CLIENT, DatasheetIndex
 from datasheetindex.llm.client import (
+    VISION_MAX_TOKENS,
+    ChatRequestOptions,
     close_llm_client,
     ensure_dotenv_loaded,
     get_vision_client,
     text_model_env,
+    text_request_options_env,
     vision_model_env,
+    vision_request_options_env,
 )
 from datasheetindex.llm.figure_captions import (
     DEFAULT_MAX_FIGURE_CAPTIONS,
@@ -145,6 +149,13 @@ class _BuildOptions:
     #: source and options and served the stale ToC, with ``json_sha256``
     #: agreeing because it hashes that same stale file.
     regenerate_toc: bool
+    # Generation settings affect artifact content just as model selection does.
+    # Frozen option objects keep the in-memory key stable; asdict serializes them
+    # into the same plain dictionaries that the disk sidecar reads back.
+    text_request_options: ChatRequestOptions = ChatRequestOptions()
+    vision_request_options: ChatRequestOptions = ChatRequestOptions(
+        max_output_tokens=VISION_MAX_TOKENS
+    )
 
     def to_dict(self) -> dict[str, object]:
         """The cache key, as recorded in the sidecar.
@@ -661,6 +672,8 @@ class DatasheetTools:
             # sets the hatch keys the same value ``scan_pages`` will act on.
             strip_furniture=furniture_enabled_by_env(),
             regenerate_toc=regenerate_toc,
+            text_request_options=text_request_options_env(),
+            vision_request_options=vision_request_options_env(),
         )
         # One resolver for the whole call, closed however the call exits. Both
         # gates and the rebuild ask it, so a walk through all three opens one

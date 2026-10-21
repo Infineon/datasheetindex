@@ -2,6 +2,50 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.42.0] - 2026-10-21
+
+### Added
+- Independent text/structured and vision reasoning settings and optional output
+  budgets for Chat Completions. `ChatRequestOptions` supports explicit per-role
+  Python overrides; environment settings are documented in `.env.example` and
+  README. Defaults keep reasoning omitted, text uncapped and captions at 300 tokens.
+- Optional immutable `LlmCallMetadata` callbacks: operation, requested/returned
+  models, finish reason, elapsed time, optional request ID/token usage, and
+  empty/refusal flags, without prompts, images, replies or credentials. Callback
+  failures cannot fail a successful request.
+- Offline real-OpenAI-SDK HTTP contract tests, enabled alongside the Claude SDK
+  tests by `uv sync --group sdk --extra llm` in both CI configurations.
+
+### Changed
+- The built-in text model changes from `gpt-4.1` to `qwen3.8-27b`; figure
+  captions follow it unless `DATASHEETINDEX_VISION_MODEL` is set. Explicit model
+  arguments and deployment overrides still take precedence. The Qwen name is a
+  gateway alias: deployments that do not serve it must name an available model.
+- Chat Completions token limits now use `max_completion_tokens` by default.
+  `DATASHEETINDEX_TOKEN_LIMIT_PARAMETER=max_tokens` explicitly supports older
+  gateways, without automatic parameter/API fallback.
+- Requests explicitly send `store=false` by default. Deployments can select
+  `DATASHEETINDEX_LLM_STORE=omit` for gateways that reject that field; this setting
+  is not a promise about gateway logging or all provider retention.
+- The SDK alone owns HTTP retries for every call shape. `LITELLM_MAX_RETRIES=2`
+  permits at most three underlying attempts, not the previous five application
+  attempts times three SDK attempts on text/structured calls. `0` disables HTTP
+  retries. The separate structured-to-free-text ToC fallback is unchanged.
+- Resolved request settings are included in the memory/disk artifact-reuse key;
+  previous sidecars rebuild once rather than serving content from old settings.
+  Prompt text, callable interfaces and the Chat Completions transport are unchanged.
+
+### Fixed
+- Figure captions normalize whitespace to preserve the client's single-line
+  contract when a model returns paragraphs or lists, without rewriting content.
+- Truncated plain-text replies raise `LlmIncompleteResponseError` rather than
+  being accepted as complete summaries. Structured incomplete statuses and usable
+  caption prefixes are unchanged; metadata still records the truncated response.
+- Close the owned HTTP client if SDK initialization fails, preserving the original
+  exception rather than leaking the connection pool during client construction.
+- Live LLM tests include per-run identifiers as well as per-attempt variation,
+  preventing a gateway cache replay from masquerading as a fresh successful run.
+
 ## [0.41.0] - 2026-10-20
 
 ### Fixed

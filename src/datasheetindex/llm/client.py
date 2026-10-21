@@ -14,10 +14,10 @@ import os
 import ssl
 import time
 import weakref
-from collections.abc import Generator, Sequence
-from contextlib import contextmanager
+from collections.abc import Callable, Generator, Sequence
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
-from typing import Protocol, cast
+from typing import Literal, Protocol, cast
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +139,14 @@ class LlmTlsVerificationError(RuntimeError):
     """
 
 
+class LlmIncompleteResponseError(RuntimeError):
+    """Plain-text generation hit its output limit; partial text is not a summary.
+
+    Structured callers receive ``StructuredLlmResult.status`` instead. Caption
+    prefixes are intentionally useful even when clipped and remain available.
+    """
+
+
 def _tls_verification_failure(
     exc: BaseException,
 ) -> ssl.SSLCertVerificationError | None:
@@ -218,10 +226,6 @@ def _naming_tls_failures() -> Generator[None]:
         raise
 
 
-_RETRY_MAX_ATTEMPTS = 5
-_RETRY_BASE_DELAY = 4.0
-_RETRY_MAX_DELAY = 60.0
-
 #: Ceiling on one figure caption. The caption prompt asks for under 60 words,
 #: which lands around 90 tokens; measured over 16 real figure regions the
 #: median is 71-102 and gpt-4.1's worst case is 197. It exists for the models
@@ -233,6 +237,88 @@ _RETRY_MAX_DELAY = 60.0
 #: earns its place in the index. Set above every compliant answer observed, so
 #: it binds on runaways only.
 VISION_MAX_TOKENS = 300
+
+
+@dataclass(frozen=True)
+class ChatRequestOptions:
+    """Generation settings independent of model names and the SDK.
+
+    Unset reasoning is omitted, not guessed from a model alias. ``store=None``
+    omits the field for gateways that do not support it. Vision uses 300 tokens
+    when no budget is named; text and structured calls have no default budget.
+    """
+
+    reasoning_effort: str | None = None
+    max_output_tokens: int | None = None
+    token_limit_parameter: Literal["max_completion_tokens", "max_tokens"] = (
+        "max_completion_tokens"
+    )
+    store: bool | None = False
+
+    def __post_init__(self) -> None:
+        if self.reasoning_effort not in (
+            None,
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+        ):
+            raise ValueError(
+                "reasoning_effort must be none/minimal/low/medium/high/xhigh/max"
+            )
+        if self.max_output_tokens is not None:
+            _validate_token_limit(self.max_output_tokens)
+        if self.token_limit_parameter not in ("max_completion_tokens", "max_tokens"):
+            raise ValueError(
+                "token_limit_parameter must be max_completion_tokens or max_tokens"
+            )
+        if self.store is not None and not isinstance(self.store, bool):
+            raise ValueError("store must be a boolean or None (omit)")
+
+    def to_kwargs(self, *, max_output_tokens: int | None = None) -> dict[str, object]:
+        """An explicit per-call budget overrides the configured budget."""
+        limit = (
+            self.max_output_tokens if max_output_tokens is None else max_output_tokens
+        )
+        result: dict[str, object] = {}
+        if limit is not None:
+            _validate_token_limit(limit)
+            result[self.token_limit_parameter] = limit
+        if self.reasoning_effort is not None:
+            result["reasoning_effort"] = self.reasoning_effort
+        if self.store is not None:
+            result["store"] = self.store
+        return result
+
+
+def _validate_token_limit(value: int) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError("max_output_tokens must be an integer > 0")
+
+
+@dataclass(frozen=True)
+class LlmCallMetadata:
+    """Payload-free metadata for one SDK invocation that returned a response.
+
+    Includes empty replies and refusals. SDK-internal retries are included in
+    elapsed time, not separate events. No prompt, answer, image, credential, or
+    refusal text is retained. Compatible gateways may omit token counts/IDs.
+    """
+
+    operation: Literal["text", "structured", "vision"]
+    requested_model: str
+    response_model: str | None
+    finish_reason: str | None
+    elapsed_seconds: float
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    reasoning_tokens: int | None
+    request_id: str | None
+    empty: bool
+    refused: bool
 
 
 #: Statuses that mean the deployment is misconfigured rather than unlucky.
@@ -256,9 +342,8 @@ def is_permanent_llm_failure(exc: BaseException) -> bool:
 
     Duck-typed on ``status_code`` -- the openai SDK sets it on its status
     errors -- so this stays importable with no ``[llm]`` extra installed.
-    ``_is_retryable`` duck-types the same attribute but also falls back to
-    ``.code`` and to a message substring; this one deliberately does not, since
-    an unrecognised shape must stay transient rather than be guessed permanent.
+    An unrecognised shape stays transient rather than being guessed permanent.
+    The SDK alone owns HTTP retries for every request shape.
     """
     # Both forms, and both are needed. The type alone misses a raw transport
     # chain from any future path that skipped the conversion; the chain walk
@@ -270,20 +355,6 @@ def is_permanent_llm_failure(exc: BaseException) -> bool:
     if _tls_verification_failure(exc) is not None:
         return True
     return getattr(exc, "status_code", None) in _PERMANENT_STATUS_CODES
-
-
-def _is_retryable(exc: Exception) -> bool:
-    """Check if an API error is retryable (429 or 5xx)."""
-    if isinstance(exc, LlmTlsVerificationError):
-        # Permanent by construction, and stated rather than left to the
-        # substring check below -- which would match a certificate message
-        # mentioning a rate by accident.
-        return False
-    status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
-    if isinstance(status, int):
-        return status == 429 or status >= 500
-    msg = str(exc).lower()
-    return "429" in msg or "rate" in msg or "too many" in msg
 
 
 def _read_chat_reply(
@@ -344,140 +415,6 @@ def _read_chat_reply(
     return content, finish_reason
 
 
-def _call_with_retry(
-    chat_api: _ChatCompletionsApi,
-    model: str,
-    system: str,
-    user: str,
-) -> str:
-    """Call the LLM API with exponential backoff on retryable errors."""
-    last_exc: Exception | None = None
-    for attempt in range(_RETRY_MAX_ATTEMPTS):
-        try:
-            with _naming_tls_failures():
-                response = chat_api.create(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user},
-                    ],
-                )
-            return _read_chat_reply(response, model, what="Text completion")[0]
-        except Exception as exc:
-            last_exc = exc
-            if not _is_retryable(exc) or attempt == _RETRY_MAX_ATTEMPTS - 1:
-                raise
-            delay = min(_RETRY_BASE_DELAY * (2**attempt), _RETRY_MAX_DELAY)
-            logger.warning(
-                "LLM call failed (attempt %d/%d): %s. Retrying in %.1fs",
-                attempt + 1,
-                _RETRY_MAX_ATTEMPTS,
-                exc,
-                delay,
-            )
-            time.sleep(delay)
-    assert last_exc is not None
-    raise last_exc
-
-
-def _call_structured_with_retry(
-    chat_api: _ChatCompletionsApi,
-    model: str,
-    system: str,
-    user: str,
-    *,
-    name: str,
-    schema: dict[str, object],
-    max_output_tokens: int | None = None,
-) -> StructuredLlmResult:
-    """Call Chat Completions with a strict JSON schema and retry if needed.
-
-    ``StructuredLlmResult`` keeps the field names it had when this went over the
-    Responses API. That is on purpose: ``toc_fallback._parse_structured_chunk_response``
-    reads them, and a consumer may inject its own ``structured_json`` callable, so
-    the shape is closer to public than the underscore-free name suggests. Only
-    where the values come from has changed.
-
-    ``finish_reason`` is what now decides completion. ``"stop"`` is the whole of
-    success; anything else -- ``"length"`` above all -- is reported as an
-    incomplete status so the caller raises on a truncated chunk exactly as it did
-    before, rather than parsing half a JSON document.
-
-    ``max_tokens``, not ``max_completion_tokens``, for the reason ``describe_image``
-    records: both are accepted by the models this gateway serves, and ``max_tokens``
-    is the one an OpenAI-compatible backend such as vLLM is certain to know.
-
-    Expect to want to change that, because OpenAI now documents ``max_tokens`` as
-    deprecated in favour of ``max_completion_tokens`` and "not compatible with
-    o-series models". Re-measured against exactly those: through this gateway
-    **both spellings answer on gpt-4.1, qwen3.6-27b, o4-mini, gpt-5-mini and
-    gpt-5.2**, all ``finish_reason="stop"``. LiteLLM translates, so the
-    deprecation does not reach us and the vLLM argument still decides. What would
-    change the answer is talking to an o-series model *directly* rather than
-    through a gateway -- so re-measure before switching, do not switch on the
-    strength of the deprecation notice alone.
-    """
-
-    last_exc: Exception | None = None
-    for attempt in range(_RETRY_MAX_ATTEMPTS):
-        try:
-            # Kept out of the call rather than built as one dict: unpacking a
-            # dict[str, object] erases the declared parameter types and the
-            # checker can no longer see that ``messages`` is a list.
-            optional: dict[str, object] = {}
-            if max_output_tokens is not None:
-                optional["max_tokens"] = max_output_tokens
-
-            with _naming_tls_failures():
-                response = chat_api.create(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user},
-                    ],
-                    response_format={
-                        "type": "json_schema",
-                        "json_schema": {
-                            "name": name,
-                            "strict": True,
-                            "schema": schema,
-                        },
-                    },
-                    **optional,
-                )
-            content, finish_reason = _read_chat_reply(
-                response, model, what="Structured completion"
-            )
-            # A missing finish_reason stays None rather than becoming
-            # "incomplete". ``_parse_structured_chunk_response`` already treats
-            # None as "this gateway does not report one, which says nothing
-            # about the payload" and parses anyway; mapping it to "incomplete"
-            # would throw away every good chunk from such a gateway.
-            if finish_reason is None:
-                return StructuredLlmResult(output_text=content)
-            completed = finish_reason == "stop"
-            return StructuredLlmResult(
-                output_text=content,
-                status="completed" if completed else "incomplete",
-                incomplete_details=None if completed else {"reason": finish_reason},
-            )
-        except Exception as exc:
-            last_exc = exc
-            if not _is_retryable(exc) or attempt == _RETRY_MAX_ATTEMPTS - 1:
-                raise
-            delay = min(_RETRY_BASE_DELAY * (2**attempt), _RETRY_MAX_DELAY)
-            logger.warning(
-                "Structured LLM call failed (attempt %d/%d): %s. Retrying in %.1fs",
-                attempt + 1,
-                _RETRY_MAX_ATTEMPTS,
-                exc,
-                delay,
-            )
-            time.sleep(delay)
-    assert last_exc is not None
-    raise last_exc
-
-
 class _ManagedLlmClient:
     """Callable wrapper that owns and closes its underlying HTTP client."""
 
@@ -488,6 +425,9 @@ class _ManagedLlmClient:
         model: str,
         *,
         vision_model: str | None = None,
+        text_options: ChatRequestOptions | None = None,
+        vision_options: ChatRequestOptions | None = None,
+        on_completion: Callable[[LlmCallMetadata], None] | None = None,
     ) -> None:
         self._chat_api = chat_api
         self._model = model
@@ -496,10 +436,35 @@ class _ManagedLlmClient:
         #: per-figure cost, and the cheapest capable model on a gateway is
         #: rarely the one you want writing summaries.
         self._vision_model = vision_model or model
+        self._text_options = text_options or ChatRequestOptions()
+        self._vision_options = vision_options or ChatRequestOptions(
+            max_output_tokens=VISION_MAX_TOKENS
+        )
+        self._on_completion = on_completion
         self._finalizer = weakref.finalize(self, _close_resource, http_client)
 
     def __call__(self, system: str, user: str) -> str:
-        return _call_with_retry(self._chat_api, self._model, system, user)
+        started = time.perf_counter()
+        with _naming_tls_failures():
+            response = self._chat_api.create(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                **self._text_options.to_kwargs(),
+            )
+        self._record_completion(response, "text", self._model, started)
+        content, finish_reason = _read_chat_reply(
+            response, self._model, what="Text completion"
+        )
+        if finish_reason == "length":
+            raise LlmIncompleteResponseError(
+                f"Text completion from model {self._model} was truncated "
+                "(finish_reason=length); refusing to return incomplete text. "
+                "Increase the text output budget or reduce reasoning effort."
+            )
+        return content
 
     def structured_json(
         self,
@@ -510,14 +475,33 @@ class _ManagedLlmClient:
         schema: dict[str, object],
         max_output_tokens: int | None = None,
     ) -> StructuredLlmResult:
-        return _call_structured_with_retry(
-            self._chat_api,
-            self._model,
-            system,
-            user,
-            name=name,
-            schema=schema,
-            max_output_tokens=max_output_tokens,
+        optional = self._text_options.to_kwargs(max_output_tokens=max_output_tokens)
+        started = time.perf_counter()
+        with _naming_tls_failures():
+            response = self._chat_api.create(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {"name": name, "strict": True, "schema": schema},
+                },
+                **optional,
+            )
+        self._record_completion(response, "structured", self._model, started)
+        content, finish_reason = _read_chat_reply(
+            response, self._model, what="Structured completion"
+        )
+        # Missing completion metadata is not evidence of truncation.
+        if finish_reason is None:
+            return StructuredLlmResult(output_text=content)
+        completed = finish_reason == "stop"
+        return StructuredLlmResult(
+            output_text=content,
+            status="completed" if completed else "incomplete",
+            incomplete_details=None if completed else {"reason": finish_reason},
         )
 
     def describe_image(
@@ -582,6 +566,7 @@ class _ManagedLlmClient:
         one type-checks and then fails at the gateway. Worth keeping in mind if
         this call is ever ported back.
         """
+        started = time.perf_counter()
         with _naming_tls_failures():
             response = self._chat_api.create(
                 model=self._vision_model,
@@ -607,23 +592,16 @@ class _ManagedLlmClient:
                         ],
                     },
                 ],
-                # ``max_tokens``, not ``max_completion_tokens``, and the choice was
-                # measured rather than inherited. Both names are accepted by every
-                # model this gateway serves -- gpt-4.1, the self-hosted qwen and
-                # gpt-5-mini all answered under either -- so the newer spelling buys
-                # no compatibility, while ``max_tokens`` is the one an
-                # OpenAI-compatible backend such as vLLM is certain to know.
-                #
-                # It is worth being clear about what *neither* name protects
-                # against: a **reasoning** model spends this budget on thinking
-                # before it writes anything. gpt-5-mini returned an empty caption
-                # with ``finish_reason="length"`` and 300 of 300 tokens billed as
-                # reasoning, identically under both spellings. So the guard against
-                # that is the log below and the note on
-                # ``DATASHEETINDEX_VISION_MODEL`` -- name a non-reasoning vision
-                # model -- not the parameter name.
-                max_tokens=VISION_MAX_TOKENS,
+                # Both token spellings count reasoning as well as visible output.
+                # Explicit vision reasoning controls, not a larger universal cap,
+                # fix a reasoning model exhausting the budget before it writes.
+                **self._vision_options.to_kwargs(
+                    max_output_tokens=(
+                        self._vision_options.max_output_tokens or VISION_MAX_TOKENS
+                    )
+                ),
             )
+        self._record_completion(response, "vision", self._vision_model, started)
         # An empty caption is worse here than the shared warning conveys, so the
         # vision-specific advice stays: ``caption_figures_in_place`` scores a
         # blank reply as ``failed``, which marks the artifact incomplete and
@@ -634,10 +612,46 @@ class _ManagedLlmClient:
         if not caption.strip() and finish_reason == "length":
             logger.warning(
                 "The %d-token vision budget bound before any caption text was "
-                "written; name a non-reasoning model in DATASHEETINDEX_VISION_MODEL.",
-                VISION_MAX_TOKENS,
+                "written; configure DATASHEETINDEX_VISION_REASONING_EFFORT=none "
+                "if supported, or name a non-reasoning DATASHEETINDEX_VISION_MODEL.",
+                self._vision_options.max_output_tokens or VISION_MAX_TOKENS,
             )
-        return caption
+        # Keep the public single-line contract even when a model wraps its
+        # caption in paragraphs or a list. Do not rewrite or truncate its text.
+        return " ".join(caption.split())
+
+    def _record_completion(
+        self,
+        response: _ChatCompletion,
+        operation: Literal["text", "structured", "vision"],
+        model: str,
+        started: float,
+    ) -> None:
+        callback = self._on_completion
+        if callback is None:
+            return
+        choice = response.choices[0] if response.choices else None
+        usage = getattr(response, "usage", None)
+        details = getattr(usage, "completion_tokens_details", None)
+        metadata = LlmCallMetadata(
+            operation=operation,
+            requested_model=model,
+            response_model=_optional_str(response, "model"),
+            finish_reason=_optional_str(choice, "finish_reason"),
+            elapsed_seconds=time.perf_counter() - started,
+            prompt_tokens=_optional_int(usage, "prompt_tokens"),
+            completion_tokens=_optional_int(usage, "completion_tokens"),
+            reasoning_tokens=_optional_int(details, "reasoning_tokens"),
+            request_id=_optional_str(response, "_request_id"),
+            empty=not choice or not (choice.message.content or "").strip(),
+            refused=bool(choice and getattr(choice.message, "refusal", None)),
+        )
+        try:
+            callback(metadata)
+        except Exception:
+            # Telemetry must not fail a successful build or leak callback payloads
+            # through its exception message. Callbacks may run on caption threads.
+            logger.warning("LLM completion callback failed; ignoring it")
 
     def close(self) -> None:
         """Release the underlying HTTP client once the callable is no longer needed."""
@@ -647,6 +661,16 @@ class _ManagedLlmClient:
 
 DEFAULT_TIMEOUT_SECONDS = 60.0
 DEFAULT_MAX_RETRIES = 2
+
+
+def _optional_str(value: object, name: str) -> str | None:
+    field = getattr(value, name, None)
+    return field if isinstance(field, str) else None
+
+
+def _optional_int(value: object, name: str) -> int | None:
+    field = getattr(value, name, None)
+    return field if isinstance(field, int) and not isinstance(field, bool) else None
 
 
 def _parse_tls_verify_env(value: str | None) -> bool:
@@ -696,7 +720,7 @@ def _parse_max_retries_env(value: str | None) -> int:
 #: A last resort, not a recommendation: it is a name this library cannot know
 #: any given gateway serves. ``DATASHEETINDEX_MODEL`` is how a deployment that
 #: serves something else says so.
-DEFAULT_TEXT_MODEL = "gpt-4.1"
+DEFAULT_TEXT_MODEL = "qwen3.8-27b"
 
 
 def ensure_dotenv_loaded() -> None:
@@ -796,12 +820,9 @@ def vision_model_env() -> str | None:
     user pointing ``LITELLM_BASE_URL`` at some other endpoint. Baking it in
     would break both of them to save one line of configuration.
 
-    **Name a non-reasoning model.** A reasoning model spends
-    ``VISION_MAX_TOKENS`` on thinking before it writes a caption: gpt-5-mini
-    returned an empty caption with ``finish_reason="length"`` and 300 of 300
-    tokens billed as reasoning. ``describe_image`` logs that case rather than
-    guessing at it, since raising the cap for one model would silently raise
-    the per-figure cost for every other.
+    A reasoning model may exhaust ``VISION_MAX_TOKENS`` before writing a caption.
+    Set ``DATASHEETINDEX_VISION_REASONING_EFFORT=none`` when supported, or name a
+    non-reasoning model. Reasoning settings are independent of the model alias.
     """
     ensure_dotenv_loaded()
     value = os.environ.get("DATASHEETINDEX_VISION_MODEL")
@@ -811,7 +832,71 @@ def vision_model_env() -> str | None:
     return value or None
 
 
-def create_llm_client(model: str | None = None) -> LlmCallable:
+def _request_options_env(
+    reasoning_variable: str, budget_variable: str, default_budget: int | None
+) -> ChatRequestOptions:
+    ensure_dotenv_loaded()
+    reasoning = os.environ.get(reasoning_variable, "").strip().lower() or None
+    budget_value = os.environ.get(budget_variable, "").strip()
+    budget = default_budget
+    if budget_value:
+        try:
+            budget = int(budget_value)
+            _validate_token_limit(budget)
+        except ValueError as exc:
+            raise ValueError(f"{budget_variable} must be an integer > 0") from exc
+    parameter = (
+        os.environ.get("DATASHEETINDEX_TOKEN_LIMIT_PARAMETER", "").strip().lower()
+        or "max_completion_tokens"
+    )
+    storage = os.environ.get("DATASHEETINDEX_LLM_STORE", "").strip().lower()
+    if storage in {"", "0", "false", "no", "off"}:
+        store = False
+    elif storage in {"1", "true", "yes", "on"}:
+        store = True
+    elif storage == "omit":
+        store = None
+    else:
+        raise ValueError("DATASHEETINDEX_LLM_STORE must be true, false, or omit")
+    try:
+        return ChatRequestOptions(
+            reasoning_effort=reasoning,
+            max_output_tokens=budget,
+            token_limit_parameter=cast(
+                'Literal["max_completion_tokens", "max_tokens"]', parameter
+            ),
+            store=store,
+        )
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid {reasoning_variable} or "
+            f"DATASHEETINDEX_TOKEN_LIMIT_PARAMETER: {exc}"
+        ) from exc
+
+
+def text_request_options_env() -> ChatRequestOptions:
+    """Resolved text/structured options; also read before artifact cache lookup."""
+    return _request_options_env(
+        "DATASHEETINDEX_REASONING_EFFORT", "DATASHEETINDEX_MAX_OUTPUT_TOKENS", None
+    )
+
+
+def vision_request_options_env() -> ChatRequestOptions:
+    """Resolved vision options, independent of the text model's reasoning effort."""
+    return _request_options_env(
+        "DATASHEETINDEX_VISION_REASONING_EFFORT",
+        "DATASHEETINDEX_VISION_MAX_OUTPUT_TOKENS",
+        VISION_MAX_TOKENS,
+    )
+
+
+def create_llm_client(
+    model: str | None = None,
+    *,
+    text_options: ChatRequestOptions | None = None,
+    vision_options: ChatRequestOptions | None = None,
+    on_completion: Callable[[LlmCallMetadata], None] | None = None,
+) -> LlmCallable:
     """Create a sync LLM callable backed by the OpenAI-compatible gateway.
 
     Reads ``LITELLM_BASE_URL`` and ``LITELLM_MASTER_KEY`` from the
@@ -837,6 +922,17 @@ def create_llm_client(model: str | None = None) -> LlmCallable:
 
     Returns a ``(system: str, user: str) -> str`` callable. The returned object
     also exposes ``close()`` for explicit cleanup when the caller owns it.
+
+    Explicit options replace environment options for that role. Reasoning is
+    omitted by default; output limits use ``max_completion_tokens`` by default,
+    with ``max_tokens`` available for older gateways. Requests send ``store=False``
+    unless configured otherwise. Only the SDK retries requests: ``max_retries``
+    means that many retries after the initial attempt, for all three call shapes.
+
+    ``on_completion`` receives immutable metadata without document payloads for
+    each returned response, including empty/refused ones, but not terminal API
+    errors. It may be called concurrently by caption workers; the callback must
+    be thread-safe. Callback exceptions are logged without their text and ignored.
     """
     ensure_dotenv_loaded()
 
@@ -854,6 +950,14 @@ def create_llm_client(model: str | None = None) -> LlmCallable:
         os.environ.get("LITELLM_TIMEOUT_SECONDS")
     )
     max_retries = _parse_max_retries_env(os.environ.get("LITELLM_MAX_RETRIES"))
+    resolved_text_options = (
+        text_options if text_options is not None else text_request_options_env()
+    )
+    resolved_vision_options = (
+        vision_options if vision_options is not None else vision_request_options_env()
+    )
+    resolved_model = (model or "").strip() or text_model_env() or DEFAULT_TEXT_MODEL
+    resolved_vision_model = vision_model_env()
     # `httpx2` is httpx 2.x under its new distribution name, and it is openai
     # 3.x's own transport -- the injected `http_client` comes from the same
     # library the SDK is built on rather than a second HTTP stack installed
@@ -862,13 +966,20 @@ def create_llm_client(model: str | None = None) -> LlmCallable:
     httpx2 = importlib.import_module("httpx2")
     openai = importlib.import_module("openai")
     http_client = httpx2.Client(verify=tls_verify, timeout=timeout_seconds)
-    client = openai.OpenAI(
-        base_url=base_url.rstrip("/") + "/v1",
-        api_key=api_key,
-        http_client=http_client,
-        timeout=timeout_seconds,
-        max_retries=max_retries,
-    )
+    try:
+        client = openai.OpenAI(
+            base_url=base_url.rstrip("/") + "/v1",
+            api_key=api_key,
+            http_client=http_client,
+            timeout=timeout_seconds,
+            max_retries=max_retries,
+        )
+    except BaseException:
+        # Ownership has not reached the managed client/finalizer yet. Preserve
+        # the construction error even if best-effort cleanup itself fails.
+        with suppress(Exception):
+            _close_resource(http_client)
+        raise
     return _ManagedLlmClient(
         # The SDK's Completions.create spells out every request field as a named
         # parameter, so it cannot structurally satisfy a protocol that forwards
@@ -879,8 +990,11 @@ def create_llm_client(model: str | None = None) -> LlmCallable:
         # Stripped: a name with stray whitespace is always a mistake, and
         # sending it verbatim turns it into the gateway's error rather than
         # ours. Matches what both env readers already do with their values.
-        model=(model or "").strip() or text_model_env() or DEFAULT_TEXT_MODEL,
-        vision_model=vision_model_env(),
+        model=resolved_model,
+        vision_model=resolved_vision_model,
+        text_options=resolved_text_options,
+        vision_options=resolved_vision_options,
+        on_completion=on_completion,
     )
 
 
