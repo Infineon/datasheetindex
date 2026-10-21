@@ -167,6 +167,18 @@ def generate_toc_from_text(
     return build_tree(raw_toc, total_pages, multi_variant=multi_variant)
 
 
+class _UnparseableReply(ValueError):
+    """A call that succeeded but whose reply holds no readable ToC answer.
+
+    Prose, an empty reply (the client returns ``""`` for one) or broken JSON
+    is a *successful* call, so the client's own retry never sees it. It is the
+    one failure ``_collect_entries`` asks about again: a model that rambled
+    once usually answers the same prompt properly the second time. A truncated
+    reply is deliberately not one -- the same prompt hits the same output
+    budget.
+    """
+
+
 @dataclass(frozen=True)
 class _ChunkExtractor:
     """One way of turning a text chunk into ToC entries."""
@@ -215,15 +227,21 @@ def _collect_entries(
 ) -> list[dict[str, int | str]]:
     """Run one extractor over every chunk, tolerating per-chunk failures.
 
-    A chunk whose response is truncated, malformed, or refused is logged and
-    skipped -- it must not discard the entries already collected from the other
-    chunks. Whether the surviving entries are a good enough ToC to ship is not
-    decided here: ``index._accept_llm_toc_candidate`` scores the assembled
+    A chunk whose reply does not parse is asked once more (see
+    ``_UnparseableReply``); a reply that parses, even to no entries, is never
+    re-asked, so a healthy run makes one call per chunk. A chunk whose response
+    is still malformed, or is truncated or refused, is logged and skipped -- it
+    must not discard the entries already collected from the other chunks.
+    Whether the surviving entries are a good enough ToC to ship is not decided
+    here: ``index._accept_llm_toc_candidate`` scores the assembled
     candidate against the original and rejects it if it came back too thin.
 
     A first chunk that fails aborts the run, since a path that cannot handle
     chunk 1 (unsupported schema, bad credentials) will not handle chunk 40
-    either, and the caller has a cheaper path to fall back to.
+    either, and the caller has a cheaper path to fall back to. That includes
+    a chunk 1 that answered in prose twice: the free-text parser once read
+    prose as "no entries" and carried on, but a model that will not write the
+    array for chunk 1 when asked twice is no likelier to for chunk 40.
     """
     all_entries: list[dict[str, int | str]] = []
 
@@ -239,7 +257,7 @@ def _collect_entries(
             )
 
         try:
-            entries = extractor.run(extractor.system_prompt, user_msg)
+            entries = _ask_chunk(extractor, user_msg, i + 1, len(chunks))
         except LlmTlsVerificationError:
             # Not degradable. Skipping the chunk returns [] on the first one,
             # which reaches the caller as a document with no outline -- the same
@@ -264,6 +282,24 @@ def _collect_entries(
         all_entries.extend(_dedupe_entries(all_entries, entries))
 
     return all_entries
+
+
+def _ask_chunk(
+    extractor: _ChunkExtractor, user_msg: str, number: int, total: int
+) -> list[dict]:
+    """Run ``extractor`` on one chunk, asking once more if the reply won't parse."""
+    try:
+        return extractor.run(extractor.system_prompt, user_msg)
+    except _UnparseableReply as exc:
+        logger.info(
+            "%s ToC reply for chunk %d/%d did not parse (%s); asking again",
+            extractor.name,
+            number,
+            total,
+            exc,
+        )
+    time.sleep(INTER_CHUNK_DELAY)
+    return extractor.run(extractor.system_prompt, user_msg)
 
 
 def _split_into_chunks(text: str, max_chars: int) -> list[str]:
@@ -376,7 +412,8 @@ def _describe_markers(markers: set[int]) -> str:
 def _parse_json_response(raw: str) -> list[dict]:
     """Extract a JSON array from the LLM response.
 
-    Handles responses wrapped in markdown code blocks.
+    Handles responses wrapped in markdown code blocks. A reply with no JSON
+    array in it raises ``_UnparseableReply``; an empty array is an answer.
     """
     text = raw.strip()
     # Strip markdown code fences
@@ -391,13 +428,15 @@ def _parse_json_response(raw: str) -> list[dict]:
     except json.JSONDecodeError:
         # Try to find a JSON array in the response
         match = re.search(r"\[.*\]", text, re.DOTALL)
-        if match:
+        if not match:
+            raise _UnparseableReply("Free-text ToC reply holds no JSON array") from None
+        try:
             data = json.loads(match.group())
-        else:
-            return []
+        except json.JSONDecodeError as exc:
+            raise _UnparseableReply("Free-text ToC reply has invalid JSON") from exc
 
     if not isinstance(data, list):
-        return []
+        raise _UnparseableReply("Free-text ToC reply is not a JSON array")
 
     return _normalize_entries(data)
 
@@ -418,14 +457,14 @@ def _parse_structured_chunk_response(result: StructuredLlmResult) -> list[dict]:
     try:
         data = json.loads(result.output_text)
     except json.JSONDecodeError as exc:
-        raise ValueError("Structured ToC chunk returned invalid JSON") from exc
+        raise _UnparseableReply("Structured ToC chunk returned invalid JSON") from exc
 
     if not isinstance(data, dict):
-        raise ValueError("Structured ToC chunk returned a non-object payload")
+        raise _UnparseableReply("Structured ToC chunk returned a non-object payload")
 
     raw_entries = data.get("entries")
     if not isinstance(raw_entries, list):
-        raise ValueError("Structured ToC chunk response missing entries")
+        raise _UnparseableReply("Structured ToC chunk response missing entries")
 
     return _normalize_entries(raw_entries)
 

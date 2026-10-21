@@ -20,6 +20,7 @@ from datasheetindex.llm.toc_fallback import (
     _page_markers,
     _parse_json_response,
     _split_into_chunks,
+    _UnparseableReply,
     generate_toc_from_text,
 )
 from datasheetindex.llm.untrusted import DATA_ONLY_INSTRUCTION
@@ -214,9 +215,15 @@ def test_parse_json_response_code_fence():
     assert result[0]["title"] == "Intro"
 
 
-def test_parse_json_response_invalid():
-    """Non-JSON response should return empty list."""
-    assert _parse_json_response("This is not JSON") == []
+@pytest.mark.parametrize("raw", ["", "This is not JSON", '{"entries": []}', "[1, 2"])
+def test_parse_json_response_invalid(raw):
+    """A reply with no readable array raises, so the chunk is asked again."""
+    with pytest.raises(_UnparseableReply):
+        _parse_json_response(raw)
+
+
+def test_parse_json_response_empty_array_is_an_answer():
+    assert _parse_json_response("[]") == []
 
 
 def test_parse_json_response_missing_fields():
@@ -614,3 +621,132 @@ def test_an_ordinary_chunk_failure_still_degrades_to_an_empty_toc():
         raise RuntimeError("gateway had a bad day")
 
     assert generate_toc_from_text("--- PAGE 1 ---\n1 Overview\n", 1, llm) == []
+
+
+# --- A reply that does not parse is asked once more --------------------------
+
+
+@pytest.fixture
+def _no_chunk_delay(monkeypatch):
+    monkeypatch.setattr("datasheetindex.llm.toc_fallback.INTER_CHUNK_DELAY", 0)
+
+
+@pytest.mark.usefixtures("_no_chunk_delay")
+@pytest.mark.parametrize("bad_reply", ["", "I could not find any sections."])
+def test_free_text_chunk_is_asked_again_after_a_reply_it_cannot_parse(bad_reply):
+    """An empty or prose reply is a *successful* call, so the client's own
+    retry never sees it. Without a second ask the chunk silently contributes
+    nothing -- here, the whole document's outline."""
+    replies = [
+        bad_reply,
+        json.dumps([{"level": 1, "title": "Overview", "start_page": 1}]),
+    ]
+    calls = []
+
+    def llm(system: str, user: str) -> str:
+        calls.append(user)
+        return replies[len(calls) - 1]
+
+    nodes = generate_toc_from_text("--- PAGE 1 ---\nOverview\n", 1, llm)
+
+    assert [node.title for node in nodes] == ["Overview"]
+    assert len(calls) == 2
+    assert calls[0] == calls[1]
+
+
+@pytest.mark.usefixtures("_no_chunk_delay")
+def test_structured_chunk_is_asked_again_after_invalid_json():
+    class _StructuredMockLlm:
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        def __call__(self, system: str, user: str) -> str:
+            raise AssertionError("free-text path should not be used")
+
+        def structured_json(
+            self, _system: str, user: str, **_kwargs
+        ) -> StructuredLlmResult:
+            self.call_count += 1
+            if self.call_count == 2:
+                return StructuredLlmResult(
+                    output_text='{"entries": [', status="completed"
+                )
+            payload = {
+                "entries": [
+                    {
+                        "level": 1,
+                        "title": f"Part {_last_page_of(user)}",
+                        "start_page": _last_page_of(user),
+                    }
+                ]
+            }
+            return StructuredLlmResult(
+                output_text=json.dumps(payload), status="completed"
+            )
+
+    llm = _StructuredMockLlm()
+    text = _multi_chunk_text(pages=200)
+    chunk_count = len(_split_into_chunks(text, 15000))
+    nodes = generate_toc_from_text(text, total_pages=200, llm_callable=llm)
+
+    assert chunk_count >= 3
+    assert llm.call_count == chunk_count + 1
+    assert len(nodes) == chunk_count
+
+
+@pytest.mark.usefixtures("_no_chunk_delay")
+def test_a_chunk_that_fails_to_parse_twice_is_skipped_after_one_retry():
+    calls = [0]
+
+    def llm(system: str, user: str) -> str:
+        calls[0] += 1
+        if calls[0] in (2, 3):
+            return "no JSON here"
+        return json.dumps(
+            [
+                {
+                    "level": 1,
+                    "title": f"Part {calls[0]}",
+                    "start_page": _last_page_of(user),
+                }
+            ]
+        )
+
+    text = _multi_chunk_text(pages=200)
+    chunk_count = len(_split_into_chunks(text, 15000))
+    nodes = generate_toc_from_text(text, total_pages=200, llm_callable=llm)
+
+    assert calls[0] == chunk_count + 1
+    titles = [node.title for node in nodes]
+    assert "Part 1" in titles
+    assert len(titles) == chunk_count - 1
+
+
+@pytest.mark.usefixtures("_no_chunk_delay")
+def test_a_reply_that_parses_is_never_asked_again():
+    """An empty array is an answer, not a parse failure: a healthy run makes
+    exactly one call per chunk, as before the retry existed."""
+    calls = [0]
+
+    def llm(system: str, user: str) -> str:
+        calls[0] += 1
+        return "[]"
+
+    text = _multi_chunk_text(pages=200)
+    chunk_count = len(_split_into_chunks(text, 15000))
+
+    assert generate_toc_from_text(text, 200, llm) == []
+    assert calls[0] == chunk_count
+
+
+def test_a_failed_call_is_not_asked_again():
+    """Call failures are the client's to retry; repeating them here would
+    multiply its retry budget."""
+    calls = [0]
+
+    def llm(system: str, user: str) -> str:
+        calls[0] += 1
+        raise RuntimeError("gateway had a bad day")
+
+    assert generate_toc_from_text("--- PAGE 1 ---\n1 Overview\n", 1, llm) == []
+    assert calls[0] == 1
