@@ -92,6 +92,18 @@ STRUCTURED_CONTINUE_USER_PROMPT = (
     "Text:\n{text}"
 )
 
+# Appended to a chunk's prompt when it is asked again, so the second request is
+# never byte-identical to the first: a gateway response cache or deterministic
+# sampling would otherwise return the same unreadable reply.
+FREE_TEXT_RETRY_NOTE = (
+    "\n\nYour previous reply could not be read. "
+    "Reply with ONLY the JSON array, no other text."
+)
+STRUCTURED_RETRY_NOTE = (
+    "\n\nYour previous reply could not be read. "
+    "Reply with ONLY the JSON object the schema describes."
+)
+
 STRUCTURED_TOC_SCHEMA: dict[str, object] = {
     "type": "object",
     "properties": {
@@ -170,12 +182,14 @@ def generate_toc_from_text(
 class _UnparseableReply(ValueError):
     """A call that succeeded but whose reply holds no readable ToC answer.
 
-    Prose, an empty reply (the client returns ``""`` for one) or broken JSON
-    is a *successful* call, so the client's own retry never sees it. It is the
-    one failure ``_collect_entries`` asks about again: a model that rambled
-    once usually answers the same prompt properly the second time. A truncated
-    reply is deliberately not one -- the same prompt hits the same output
-    budget.
+    Prose, an empty reply or broken JSON is a *successful* call, so the
+    client's own retry never sees it. It is the one failure ``_collect_entries``
+    asks about again: a model that rambled once usually answers properly the
+    second time. The client returns a refusal as ``""`` too, so a refusal is
+    re-asked once like any other empty reply. Truncation is not re-asked when
+    the callable reports it -- the same prompt hits the same output budget --
+    but a callable that does not report it sends a truncated reply here as
+    broken JSON.
     """
 
 
@@ -187,7 +201,13 @@ class _ChunkExtractor:
     system_prompt: str
     init_prompt: str
     continue_prompt: str
+    retry_note: str
     run: Callable[[str, str], list[dict]]
+    #: Whether a cheaper path follows this one. If so, a chunk 1 that will not
+    #: parse ends the pass (a gateway ignoring the schema fails every chunk
+    #: alike); if not, it is skipped like any later chunk, since ending the
+    #: last pass would throw away the outline in chunks 2..N.
+    has_fallback: bool
 
 
 def _legacy_extractor(llm_callable: LlmCallable) -> _ChunkExtractor:
@@ -199,7 +219,9 @@ def _legacy_extractor(llm_callable: LlmCallable) -> _ChunkExtractor:
         system_prompt=SYSTEM_PROMPT,
         init_prompt=INIT_USER_PROMPT,
         continue_prompt=CONTINUE_USER_PROMPT,
+        retry_note=FREE_TEXT_RETRY_NOTE,
         run=run,
+        has_fallback=False,
     )
 
 
@@ -218,7 +240,9 @@ def _structured_extractor(llm_callable: StructuredLlmCallable) -> _ChunkExtracto
         system_prompt=STRUCTURED_SYSTEM_PROMPT,
         init_prompt=STRUCTURED_INIT_USER_PROMPT,
         continue_prompt=STRUCTURED_CONTINUE_USER_PROMPT,
+        retry_note=STRUCTURED_RETRY_NOTE,
         run=run,
+        has_fallback=True,
     )
 
 
@@ -229,19 +253,19 @@ def _collect_entries(
 
     A chunk whose reply does not parse is asked once more (see
     ``_UnparseableReply``); a reply that parses, even to no entries, is never
-    re-asked, so a healthy run makes one call per chunk. A chunk whose response
-    is still malformed, or is truncated or refused, is logged and skipped -- it
-    must not discard the entries already collected from the other chunks.
+    re-asked, so a healthy run makes one call per chunk. A chunk that still
+    does not parse, or whose call fails, is logged and skipped -- it must not
+    discard the entries already collected from the other chunks.
     Whether the surviving entries are a good enough ToC to ship is not decided
     here: ``index._accept_llm_toc_candidate`` scores the assembled
     candidate against the original and rejects it if it came back too thin.
 
     A first chunk that fails aborts the run, since a path that cannot handle
     chunk 1 (unsupported schema, bad credentials) will not handle chunk 40
-    either, and the caller has a cheaper path to fall back to. That includes
-    a chunk 1 that answered in prose twice: the free-text parser once read
-    prose as "no entries" and carried on, but a model that will not write the
-    array for chunk 1 when asked twice is no likelier to for chunk 40.
+    either, and the caller has a cheaper path to fall back to. The one
+    exception is a reply that still does not parse on the last path (see
+    ``_ChunkExtractor.has_fallback``): chunk 1 is often front matter that a
+    model answers in prose, and the later chunks hold the outline.
     """
     all_entries: list[dict[str, int | str]] = []
 
@@ -266,7 +290,7 @@ def _collect_entries(
             # next build, and the operator can fix it in one variable, so this
             # is the one failure here worth stopping for.
             raise
-        except Exception:
+        except Exception as exc:
             logger.warning(
                 "%s ToC extraction failed on chunk %d/%d; skipping it",
                 extractor.name,
@@ -274,7 +298,9 @@ def _collect_entries(
                 len(chunks),
                 exc_info=True,
             )
-            if i == 0:
+            if i == 0 and (
+                extractor.has_fallback or not isinstance(exc, _UnparseableReply)
+            ):
                 return []
             continue
 
@@ -291,7 +317,10 @@ def _ask_chunk(
     try:
         return extractor.run(extractor.system_prompt, user_msg)
     except _UnparseableReply as exc:
-        logger.info(
+        # WARNING even when the second ask recovers: a model that needs it on
+        # most chunks nearly doubles the fallback's cost, and should not be
+        # found only on the bill.
+        logger.warning(
             "%s ToC reply for chunk %d/%d did not parse (%s); asking again",
             extractor.name,
             number,
@@ -299,7 +328,7 @@ def _ask_chunk(
             exc,
         )
     time.sleep(INTER_CHUNK_DELAY)
-    return extractor.run(extractor.system_prompt, user_msg)
+    return extractor.run(extractor.system_prompt, user_msg + extractor.retry_note)
 
 
 def _split_into_chunks(text: str, max_chars: int) -> list[str]:

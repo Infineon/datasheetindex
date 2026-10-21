@@ -651,7 +651,7 @@ def test_free_text_chunk_is_asked_again_after_a_reply_it_cannot_parse(bad_reply)
 
     assert [node.title for node in nodes] == ["Overview"]
     assert len(calls) == 2
-    assert calls[0] == calls[1]
+    assert calls[1].startswith(calls[0])
 
 
 @pytest.mark.usefixtures("_no_chunk_delay")
@@ -750,3 +750,90 @@ def test_a_failed_call_is_not_asked_again():
 
     assert generate_toc_from_text("--- PAGE 1 ---\n1 Overview\n", 1, llm) == []
     assert calls[0] == 1
+
+
+@pytest.mark.usefixtures("_no_chunk_delay")
+def test_free_text_chunk_1_that_never_parses_does_not_end_the_fallback():
+    """Free text is the last path, so nothing is cheaper to fall back to:
+    front matter answered in prose must not cost the outline in chunks 2..N."""
+    calls = [0]
+
+    def llm(system: str, user: str) -> str:
+        calls[0] += 1
+        if calls[0] <= 2:
+            return "There are no section headings in this part."
+        return json.dumps(
+            [
+                {
+                    "level": 1,
+                    "title": f"Part {calls[0]}",
+                    "start_page": _last_page_of(user),
+                }
+            ]
+        )
+
+    text = _multi_chunk_text(pages=200)
+    chunk_count = len(_split_into_chunks(text, 15000))
+    nodes = generate_toc_from_text(text, total_pages=200, llm_callable=llm)
+
+    assert calls[0] == chunk_count + 1
+    assert len(nodes) == chunk_count - 1
+
+
+@pytest.mark.usefixtures("_no_chunk_delay")
+def test_structured_chunk_1_that_never_parses_falls_back_to_free_text():
+    """The structured pass does have a fallback, and a gateway ignoring the
+    schema fails every chunk alike, so chunk 1 still ends that pass."""
+
+    class _StructuredMockLlm:
+        def __init__(self) -> None:
+            self.structured_calls = 0
+            self.text_calls = 0
+
+        def __call__(self, system: str, user: str) -> str:
+            self.text_calls += 1
+            return json.dumps([{"level": 1, "title": "Overview", "start_page": 1}])
+
+        def structured_json(self, *_args, **_kwargs) -> StructuredLlmResult:
+            self.structured_calls += 1
+            return StructuredLlmResult(output_text="Here you go!", status="completed")
+
+    llm = _StructuredMockLlm()
+    nodes = generate_toc_from_text("--- PAGE 1 ---\nOverview\n", 1, llm)
+
+    assert llm.structured_calls == 2
+    assert llm.text_calls == 1
+    assert [node.title for node in nodes] == ["Overview"]
+
+
+@pytest.mark.usefixtures("_no_chunk_delay")
+def test_the_second_ask_is_not_byte_identical_to_the_first():
+    """A response cache or deterministic sampling would hand back the same
+    unreadable reply to an identical request."""
+    calls = []
+
+    def llm(system: str, user: str) -> str:
+        calls.append(user)
+        if len(calls) == 1:
+            return "Sure, here are the sections."
+        return json.dumps([{"level": 1, "title": "Overview", "start_page": 1}])
+
+    generate_toc_from_text("--- PAGE 1 ---\nOverview\n", 1, llm)
+
+    assert len(calls) == 2
+    assert calls[1] != calls[0]
+    assert calls[1].startswith(calls[0])
+    assert "JSON" in calls[1][len(calls[0]) :]
+
+
+@pytest.mark.usefixtures("_no_chunk_delay")
+def test_a_recovered_retry_is_visible_at_warning(caplog):
+    replies = ["", "[]"]
+
+    def llm(system: str, user: str) -> str:
+        return replies.pop(0)
+
+    with caplog.at_level("WARNING", logger="datasheetindex.llm.toc_fallback"):
+        generate_toc_from_text("--- PAGE 1 ---\nOverview\n", 1, llm)
+
+    assert any("did not parse" in r.getMessage() for r in caplog.records)

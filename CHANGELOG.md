@@ -8,13 +8,16 @@ All notable changes to this project will be documented in this file.
 - The LLM ToC fallback asks a chunk once more when its reply does not parse
   (prose, an empty reply, broken JSON). Such a reply is a successful call, so the
   client's HTTP retries never covered it, and one bad reply silently dropped that
-  chunk's sections -- or, on chunk 1, the whole structured pass. Replies that
-  parse, including an empty array, failed calls and truncated replies are not
-  re-asked, so a healthy run makes the same calls as before.
+  chunk's sections -- or, on chunk 1, the whole structured pass. The second ask
+  appends a one-line reminder of the format, so a response cache or deterministic
+  sampling cannot return the same reply. Replies that parse (including an empty
+  array), failed calls and truncation the callable reports are not re-asked, so a
+  healthy run makes the same calls as before. A refusal reaches the parser as an
+  empty reply and is re-asked once. Each re-ask logs a WARNING.
 - The free-text parser now treats a reply with no JSON array as a parse failure
-  instead of "no sections". A free-text chunk 1 that answers in prose twice now
-  ends the fallback, like every other chunk-1 failure, rather than continuing
-  without its sections.
+  instead of "no sections". On the free-text pass, the last one, a chunk 1 that
+  still does not parse is skipped rather than ending the fallback, so its outline
+  in later chunks is kept -- as before for prose, and newly for broken JSON.
 
 ### Fixed
 - The architecture doc no longer lists recursive sub-section discovery as
