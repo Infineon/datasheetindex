@@ -339,8 +339,9 @@ def caption_figures_in_place(
             # now carries the named error's full remedy instead of openai's
             # "Connection error.". The re-captioning loop this would have
             # closed is pre-existing behaviour for any persistent caption
-            # failure, and closing it belongs with `figure_captions_pending`'s
-            # non-transient treatment in `reuse_blocker`, not here.
+            # failure; closing it would belong with `figure_captions_pending`'s
+            # non-transient treatment in `reuse_blocker`, not here, and was
+            # declined in issue #16 once the rebuild got cheap.
             logger.warning(
                 "Figure caption failed on page %s", entry["page"], exc_info=True
             )
@@ -391,11 +392,14 @@ def caption_figures_in_place(
         # Nothing else changes: `failed` still marks the artifact incomplete, so
         # reuse behaves exactly as before. What this fixes is the *duration* of
         # the breakage. While it lasts, `figure_caption_failed` blocks artifact
-        # reuse, so every build_datasheet call re-scans the whole PDF (86.5s
-        # measured on the 134-page PSoC 6) to fail the same way again. That cost
-        # is only worth paying attention to because the operator could not
-        # previously tell what to fix: the one actionable line was buried in
-        # each per-figure traceback.
+        # reuse, so every build_datasheet call re-scans the whole PDF to fail
+        # the same way again -- 14-21s on the 134-page PSoC 6 as of 0.43.0, most
+        # of it the 20 failing vision calls (86.5s when 0.36.0 shipped this).
+        # That cost is only worth paying attention to because the operator
+        # could not previously tell what to fix: the one actionable line was
+        # buried in each per-figure traceback. Making the rebuild itself
+        # reusable (a gateway fingerprint in the sidecar) was declined in
+        # issue #16 for that reason.
         attempted = len(rendered)
         logger.error(
             "Figure captioning is misconfigured, not merely failing: %s "

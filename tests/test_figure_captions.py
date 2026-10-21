@@ -667,8 +667,8 @@ def test_a_permanent_failure_is_reported_once_and_named(caplog):
     Two figures means two failures; before this the operator got two warnings
     naming pages and no cause, and the actionable line sat inside each
     traceback. The cost of staying broken is what hurts here -- every
-    build_datasheet call rebuilds the document from scratch (86.5s measured on
-    the 134-page PSoC 6) because `figure_caption_failed` blocks artifact reuse
+    build_datasheet call rebuilds the document from scratch (14-21s on the
+    134-page PSoC 6 as of 0.43.0) because `figure_caption_failed` blocks reuse
     -- so the fix is to make the breakage short-lived, not the rebuild cheap.
     """
     import logging
