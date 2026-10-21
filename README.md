@@ -184,12 +184,94 @@ your deployment rather than of this library:
 
 | variable | names | default |
 |---|---|---|
-| `DATASHEETINDEX_MODEL` | summaries and the ToC fallback | `gpt-4.1` |
+| `DATASHEETINDEX_MODEL` | summaries and the ToC fallback | `qwen3.8-27b` |
 | `DATASHEETINDEX_VISION_MODEL` | figure captions only | follows the text model |
 
 `build_datasheet`'s `model` argument overrides `DATASHEETINDEX_MODEL` for one
 call; the vision model is deployment-level only, and deliberately not a tool
 argument -- an agent has no way to know what a given gateway serves.
+The built-in Qwen name is a gateway alias, not a universally available endpoint.
+Deployments that do not serve `qwen3.8-27b` must explicitly name an available
+model with `DATASHEETINDEX_MODEL`. Unless separately overridden, captions use
+that same model and require image-input support.
+
+### Chat Completions configuration
+
+All library LLM calls use Chat Completions, including images and strict JSON
+schemas; there is no automatic fallback to a different API or different model.
+
+| variable | controls | default |
+|---|---|---|
+| `DATASHEETINDEX_REASONING_EFFORT` | text and structured ToC reasoning | omitted; model decides |
+| `DATASHEETINDEX_VISION_REASONING_EFFORT` | caption reasoning, independently of text | omitted; model decides |
+| `DATASHEETINDEX_MAX_OUTPUT_TOKENS` | text/structured output budget | no explicit limit |
+| `DATASHEETINDEX_VISION_MAX_OUTPUT_TOKENS` | caption output budget | `300` |
+| `DATASHEETINDEX_TOKEN_LIMIT_PARAMETER` | token-limit field sent to the gateway | `max_completion_tokens` |
+| `DATASHEETINDEX_LLM_STORE` | response-storage request flag | `false` |
+| `LITELLM_TIMEOUT_SECONDS` | SDK request timeout | `60` |
+| `LITELLM_MAX_RETRIES` | SDK retries **after** the first attempt, for all call types | `2` |
+
+Reasoning accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`.
+Only configure settings your model supports: unset/blank omits reasoning entirely,
+and the library never guesses capabilities from a model alias. For models such as
+GPT-6 Luna, set `DATASHEETINDEX_VISION_REASONING_EFFORT=none` to keep reasoning
+from consuming the entire caption budget. Both token-limit spellings count
+reasoning as well as visible output; changing the spelling does not fix that.
+Budgets must be positive integers. Text reasoning is not inherited by vision,
+even when both use the same model.
+Plain-text responses that hit the output limit raise `LlmIncompleteResponseError`
+(also exported from `datasheetindex`) rather than caching a partial summary.
+Inside `build()` a failed summary does not fail the build: summaries already
+written are kept, the rest are left empty, and the artifact is marked
+`llm_enrichment_incomplete` (note `summaries_raised`) so it is rebuilt later.
+Structured responses retain their incomplete status for ToC candidate handling;
+clipped caption prefixes remain usable, as before.
+
+For older gateways, choose `DATASHEETINDEX_TOKEN_LIMIT_PARAMETER=max_tokens`.
+For gateways that reject the storage field, `DATASHEETINDEX_LLM_STORE=omit`
+leaves it out; explicit `true` is also available. `store=false` does not disable
+gateway logging, abuse monitoring, or all provider retention mechanisms.
+Generation settings participate in artifact reuse so changing them does not
+serve content generated with the old settings. Existing sidecars without these
+settings rebuild once.
+
+The OpenAI SDK alone owns HTTP retries, including backoff and Retry-After handling.
+`LITELLM_MAX_RETRIES=0` now really means one HTTP attempt per invocation; text and
+structured calls no longer add a second five-attempt loop around the SDK. ToC
+fallback may still retry with a free-text prompt if structured extraction produces
+no entries: that is a separate application operation, not an HTTP retry.
+
+Python callers can replace the environment settings for either role and collect
+immutable, payload-free completion metadata without changing the callable result:
+
+```python
+from datasheetindex.llm.client import (
+    ChatRequestOptions,
+    close_llm_client,
+    create_llm_client,
+)
+
+events = []
+client = create_llm_client(
+    model="gpt-6-luna",
+    text_options=ChatRequestOptions(reasoning_effort="low"),
+    vision_options=ChatRequestOptions(reasoning_effort="none"),
+    on_completion=events.append,
+)
+try:
+    summary = client("Summarize in one sentence.", "The device supports SPI.")
+finally:
+    close_llm_client(client)
+```
+
+Each metadata event includes the operation, requested/returned model, finish
+reason, elapsed seconds, optional request ID and token counts (including reasoning),
+and empty/refusal flags. It contains **no document text, image, answer, or key**.
+The callback fires once when the SDK returns a response, including empty/refused
+responses, but not for terminal API errors. It may run on concurrent caption
+threads, so use a thread-safe collector in applications. Callback exceptions are
+ignored with a payload-free warning. Optional metadata fields remain `None` when
+the gateway does not supply them.
 
 TLS verification is **on** by default. `LITELLM_TLS_VERIFY=false` (also `0`,
 `no`, `off`) turns it off, for a gateway whose certificate the local trust store
@@ -220,6 +302,9 @@ uv run ty check            # type check
 The pre-commit pytest hook runs the fast subset only:
 `uv run pytest -q -m "not integration and not real_pdf"`. Run
 `uv run pytest` for the full suite, including real-PDF and integration tests.
+`uv sync --group sdk --extra llm` also enables offline contract tests against the
+real OpenAI SDK and an in-memory HTTP transport (no credentials/network required),
+as well as the Claude SDK adapter tests. CI's `sdk` lane runs both.
 
 To re-measure the [token economy](#token-economy) numbers, fetch the corpus as
 described in [`docs/corpus.md`](./docs/corpus.md) and run:
@@ -597,10 +682,11 @@ proportionally. Without credentials captioning is a no-op and the deterministic
 
 `DATASHEETINDEX_VISION_MODEL` names a model for captioning alone -- unset, it
 follows the model used for summaries and the ToC fallback -- which is worth
-setting when your gateway serves a cheaper vision model. **Name a
-non-reasoning model:** a reasoning model spends the whole output budget
-thinking and returns an empty caption. Replies are capped at 300 output
-tokens, and the prompt puts identifying labels first so truncation costs
+setting when your gateway serves a cheaper vision model. **Use a non-reasoning
+model or set `DATASHEETINDEX_VISION_REASONING_EFFORT=none` when supported:**
+reasoning can spend the whole output budget before a caption is written.
+Replies default to 300 output tokens (configurable above), and the prompt puts
+identifying labels first so truncation costs
 description rather than identity.
 
 **The manifest carries a bounded digest, not the array**, so an agent learns
@@ -663,7 +749,7 @@ datasheetindex build path/to/datasheet.pdf --output-dir output
 datasheetindex build https://example.com/datasheet.pdf --output-dir output
 
 # With explicit LLM model for ToC fallback and summaries
-datasheetindex build datasheet.pdf --model gpt-4.1 --include-summaries
+datasheetindex build datasheet.pdf --model qwen3.8-27b --include-summaries
 
 # Skip figure captioning, or raise its per-document cap (default 20)
 datasheetindex build datasheet.pdf --no-caption-figures
@@ -675,7 +761,7 @@ datasheetindex mcp
 
 By default, `datasheetindex` first uses native PDF ToC extraction. If ToC
 quality is low, it automatically attempts LLM fallback with the default model
-(`gpt-4.1`) when LLM credentials are available. Pass `--model` to choose the
+(`qwen3.8-27b`) when LLM credentials are available. Pass `--model` to choose the
 LLM model explicitly; `--include-summaries` requires `--model`. Figure
 captioning (see "Figure indexing and captions" above) runs by default under
 the same credential rule and needs no `--model` of its own; `--no-caption-figures`

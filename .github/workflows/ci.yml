@@ -58,9 +58,10 @@ jobs:
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           cache-suffix: sdk
-      - run: uv sync --group sdk
-      - name: Assert the real SDK is importable
-        run: uv run --no-sync python -c "import claude_agent_sdk"
+      # Include the real OpenAI SDK for offline HTTP/retry contract tests too.
+      - run: uv sync --group sdk --extra llm
+      - name: Assert both real SDKs are importable
+        run: uv run --no-sync python -c "import claude_agent_sdk; import openai; import httpx2"
       - run: uv run --no-sync pytest tests/ -q
 
   # The dev group installs datasheetindex[mcp], so every other lane has `mcp`

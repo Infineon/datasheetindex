@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from datasheetindex.models import DatasheetArtifacts
 
 
@@ -256,3 +258,13 @@ def test_cli_mcp_reports_error_without_extra(monkeypatch, capsys):
 
     assert exit_code == 1
     assert "mcp is required" in captured.err
+
+
+def test_help_uses_the_current_default_model(capsys):
+    from datasheetindex.cli import _build_parser
+    from datasheetindex.llm.client import DEFAULT_TEXT_MODEL
+
+    with pytest.raises(SystemExit) as caught:
+        _build_parser().parse_args(["build", "--help"])
+    assert caught.value.code == 0
+    assert DEFAULT_TEXT_MODEL in capsys.readouterr().out

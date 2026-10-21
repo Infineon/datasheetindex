@@ -18,7 +18,10 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from datasheetindex.batch import BatchResult, build_batch
     from datasheetindex.index import DatasheetIndex
-    from datasheetindex.llm.client import LlmTlsVerificationError
+    from datasheetindex.llm.client import (
+        LlmIncompleteResponseError,
+        LlmTlsVerificationError,
+    )
     from datasheetindex.mcp_server import create_local_mcp_server, run_mcp_server
     from datasheetindex.tools import (
         DatasheetToolDef,
@@ -35,6 +38,7 @@ __all__ = [
     "DatasheetToolDef",
     "DatasheetToolSession",
     "DatasheetTools",
+    "LlmIncompleteResponseError",
     "LlmTlsVerificationError",
     "build_batch",
     "create_datasheet_tool_defs",
@@ -51,6 +55,7 @@ _ATTR_MODULES = {
     # Exported because `build()` raises it: catching it must not require
     # reaching into `datasheetindex.llm.client`, whose neighbours are private.
     "LlmTlsVerificationError": "datasheetindex.llm.client",
+    "LlmIncompleteResponseError": "datasheetindex.llm.client",
     "create_local_mcp_server": "datasheetindex.mcp_server",
     "run_mcp_server": "datasheetindex.mcp_server",
     # Delegated to the tools package's own lazy table, so each of these names

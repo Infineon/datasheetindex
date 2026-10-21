@@ -12,6 +12,8 @@ credentials from every test for hermeticity.
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 
 
@@ -42,7 +44,8 @@ def test_describe_image_returns_a_single_line_for_a_real_render():
         vision_client = get_vision_client(client)
         assert vision_client is not None
         caption = vision_client.describe_image(
-            "Name this figure in one sentence.", blocks[0]["data"]
+            f"Name this figure in one sentence. (evaluation run {uuid4().hex})",
+            blocks[0]["data"],
         )
     finally:
         close_llm_client(client)
@@ -67,11 +70,13 @@ def test_describe_image_never_returns_an_empty_caption_over_repeated_calls():
     (verified: repeats return the same completion id plus an
     ``x-litellm-cache-key`` header), so six identical requests are one call and
     five replays -- and a replayed success cannot show a per-call coin flip.
+    A per-run identifier prevents replays of earlier successful test executions.
 
     Runs against whatever this environment has configured, so it covers the
     default model and, where ``DATASHEETINDEX_VISION_MODEL`` is set, that one.
-    **It only has teeth against a model the gateway bridges**; on the default
-    gpt-4.1 it passes on the reverted code too. The resolved model is therefore
+    **It only has teeth against a model the gateway bridges**; on the former
+    default gpt-4.1 it passes on the reverted code too. The resolved model is
+    therefore
     named in the failure message, so a green run is not mistaken for coverage
     it did not provide. A hardcoded internal alias does not belong here.
     """
@@ -95,12 +100,14 @@ def test_describe_image_never_returns_an_empty_caption_over_repeated_calls():
 
     client = create_llm_client()
     resolved_model = getattr(client, "_vision_model", None)
+    run_id = uuid4().hex
     try:
         vision_client = get_vision_client(client)
         assert vision_client is not None
         captions = [
             vision_client.describe_image(
-                f"{CAPTION_SYSTEM_PROMPT} (attempt {attempt})", blocks[0]["data"]
+                f"{CAPTION_SYSTEM_PROMPT} (evaluation run {run_id}, attempt {attempt})",
+                blocks[0]["data"],
             )
             for attempt in range(6)
         ]
@@ -112,3 +119,63 @@ def test_describe_image_never_returns_an_empty_caption_over_repeated_calls():
         f"model {resolved_model!r} returned empty captions at attempts {empty} "
         f"of {len(captions)}"
     )
+
+
+@pytest.mark.usefixtures("_has_env")
+@pytest.mark.integration
+def test_dense_table_caption_survives_the_configured_reasoning_and_token_budget():
+    """A simple VCC rectangle passed even when dense Luna captions were empty.
+
+    This exercises the production prompt and 300-token default on a dense image.
+    Configure DATASHEETINDEX_VISION_REASONING_EFFORT=none for a reasoning model
+    that needs it; do not bake a gateway-specific alias into the test.
+    """
+    import pymupdf
+
+    from datasheetindex.llm.client import (
+        close_llm_client,
+        create_llm_client,
+        get_vision_client,
+    )
+    from datasheetindex.llm.figure_captions import CAPTION_SYSTEM_PROMPT
+    from datasheetindex.tools.vision import inspect_page
+
+    with pymupdf.open() as doc:
+        page = doc.new_page(width=600, height=700)
+        labels = ["Parameter", "Test condition", "Min", "Typ", "Max", "Unit"]
+        rows = [
+            "Supply voltage",
+            "Supply current",
+            "Standby current",
+            "Input voltage",
+            "Offset voltage",
+            "Gain error",
+            "Bandwidth",
+            "Slew rate",
+            "Rise time",
+            "Fall time",
+        ]
+        for row, values in enumerate(
+            [labels] + [[label, "Nominal supply", "1", "2", "3", "V"] for label in rows]
+        ):
+            for col, value in enumerate(values):
+                rect = pymupdf.Rect(
+                    30 + col * 90, 100 + row * 30, 120 + col * 90, 130 + row * 30
+                )
+                page.draw_rect(rect)
+                page.insert_text((rect.x0 + 3, rect.y0 + 18), value, fontsize=7)
+        image = inspect_page(doc, 1)[0]["data"]
+
+    client = create_llm_client()
+    try:
+        vision = get_vision_client(client)
+        assert vision is not None
+        caption = vision.describe_image(
+            f"{CAPTION_SYSTEM_PROMPT} (evaluation run {uuid4().hex})", image
+        )
+    finally:
+        close_llm_client(client)
+    assert caption.strip(), (
+        f"Dense table caption was empty from {getattr(client, '_vision_model', None)!r}"
+    )
+    assert "\n" not in caption

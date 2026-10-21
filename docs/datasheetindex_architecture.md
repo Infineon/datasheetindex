@@ -404,10 +404,14 @@ outline. **Figure captioning is deliberately NOT carved out.** Captioning runs
 at step 6b and the artifacts are written at step 8, so raising there would
 abort the build and write nothing at all -- for a document whose index, and
 possibly whose ToC, is otherwise complete. `figure_caption_failed` therefore
-still absorbs a TLS failure; only the logged message gets better. Summaries are a
-third case and a pre-existing one: `add_summaries` has no exception handler at
-all, so any error there propagates out of `build()` -- unchanged here, and only
-reachable with `include_summaries=True`.
+still absorbs a TLS failure; only the logged message gets better. Summaries run
+at step 6, also before the write, and since 0.42.0 follow captioning rather than
+the fallback: any error, TLS included, stops summarizing, keeps the summaries
+already written (nodes are filled in place) and records `summaries_raised`.
+Until then `add_summaries` had no handler at all, so one truncated reply --
+which 0.42.0 also began raising on -- discarded the whole build. Stopping at the
+first failure, rather than skipping the node, bounds a dead gateway to one
+call's retries instead of one per section.
 
 #### Decisions already settled by measurement
 
@@ -723,6 +727,21 @@ decision a future reader would otherwise redo.
   entry the scan reaches first in the array's own document order -- never a
   dict or set's -- so the digest stays byte-stable across runs. On the PCN this
   changes exactly one row (page 5).
+- **Request policy is explicit and model-independent.** Text/structured and
+  vision calls have separate immutable `ChatRequestOptions`. Reasoning is
+  omitted unless configured; it does not inherit from text into vision.
+  Captions retain their 300-token default, with positive per-role budget
+  overrides. `max_completion_tokens` is the default token-limit field;
+  `max_tokens` is an explicit compatibility choice, not an automatic retry.
+  Requests default to `store=false` (or explicitly omit the field for a gateway
+  that rejects it). The SDK alone owns HTTP retries, so the configured retry
+  count is not multiplied by an outer loop. The structured-to-free-text ToC
+  fallback remains a separate operation. Resolved options are part of the
+  artifact-reuse key. An optional callback receives immutable metadata without
+  document payloads after each SDK response; it can run on caption threads,
+  and its failures cannot fail the build. Offline tests exercise real SDK
+  serialization and exact HTTP retry counts through an in-memory transport in
+  the `sdk` / `eval-sdk` lanes, alongside the Claude adapter tests.
 - **Every LLM call goes over Chat Completions, not the Responses API, and the
   reason is a measured 50% silent loss.** Captioning moved first, in 0.28.0, and
   the text and structured calls followed in 0.30.0 once the same failure was
@@ -812,12 +831,13 @@ decision a future reader would otherwise redo.
   motivated the knob meters at $0 input / $0.13 per MTok output against gpt-4.1's
   $2 / $8, roughly 250x cheaper per document at the default cap of 20, at
   caption quality a side-by-side over 16 real regions found competitive. Naming
-  such a model in the source would be wrong twice over: it is absent from its own
-  gateway's staging tier, and it means nothing to anyone pointing
-  `LITELLM_BASE_URL` somewhere else.
+  a separate caption model remains deployment-specific. Since 0.42.0 the text
+  default is `qwen3.8-27b`, so captions use that model too unless overridden;
+  deployments that do not serve the alias must configure their own model.
 - **So is the text model, and for one call more than symmetry.**
   `DATASHEETINDEX_MODEL` names the model for summaries and the ToC fallback;
-  unset, it is `gpt-4.1`. Before it existed the only way to name a text model
+  unset, it is `qwen3.8-27b` as of 0.42.0 (`gpt-4.1` previously). Before it
+  existed the only way to name a text model
   was `build_datasheet`'s `model` argument -- which the agent is told to omit
   unless the user asked for a specific one -- so the *automatic* ToC fallback,
   the path that runs without anyone deciding anything, was pinned to a name

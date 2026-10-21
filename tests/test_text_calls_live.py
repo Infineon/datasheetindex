@@ -16,6 +16,7 @@ LiteLLM variables are unset -- and which opts these tests out of the autouse
 from __future__ import annotations
 
 import json
+from uuid import uuid4
 
 import pytest
 
@@ -58,10 +59,11 @@ def test_text_calls_never_return_empty_over_repeated_calls():
     **Each call must vary the prompt.** The gateway caches identical payloads
     (repeats return the same completion id plus an ``x-litellm-cache-key``
     header), so six identical requests are one call and five replays, and a
-    replayed success cannot reveal a per-call coin flip.
+    replayed success cannot reveal a per-call coin flip. A per-run identifier
+    also prevents cached successes from earlier test executions hiding a failure.
 
-    **It only has teeth against a model the gateway bridges.** On the default
-    ``gpt-4.1`` this passed on the *broken* code too -- 0 empty in 90 calls --
+    **It only has teeth against a model the gateway bridges.** On the former
+    default ``gpt-4.1`` this passed on the *broken* code too -- 0 empty in 90 calls --
     which is precisely why the bug survived to 0.30.0 with two live integration
     tests already pointed at this path. Set ``DATASHEETINDEX_MODEL`` to a
     self-hosted or otherwise non-native model to give it teeth. The resolved
@@ -75,12 +77,13 @@ def test_text_calls_never_return_empty_over_repeated_calls():
 
     client = create_llm_client()
     resolved_model = _resolved_text_model(client)
+    run_id = uuid4().hex
     try:
         replies = [
             client(
                 SYSTEM_PROMPT,
                 INIT_USER_PROMPT.format(text=wrap_document_text(SAMPLE_TEXT))
-                + f"\n\n(attempt {attempt})",
+                + f"\n\n(evaluation run {run_id}, attempt {attempt})",
             )
             for attempt in range(ATTEMPTS)
         ]
@@ -130,6 +133,7 @@ def test_structured_calls_return_parseable_json_over_repeated_calls():
 
     client = create_llm_client()
     resolved_model = _resolved_text_model(client)
+    run_id = uuid4().hex
     try:
         structured = get_structured_output_client(client)
         assert structured is not None
@@ -137,7 +141,7 @@ def test_structured_calls_return_parseable_json_over_repeated_calls():
             structured.structured_json(
                 STRUCTURED_SYSTEM_PROMPT,
                 STRUCTURED_INIT_USER_PROMPT.format(text=wrap_document_text(SAMPLE_TEXT))
-                + f"\n\n(attempt {attempt})",
+                + f"\n\n(evaluation run {run_id}, attempt {attempt})",
                 name="datasheet_toc_chunk",
                 schema=STRUCTURED_TOC_SCHEMA,
             )

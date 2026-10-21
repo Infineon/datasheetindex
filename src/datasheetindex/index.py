@@ -38,6 +38,7 @@ from datasheetindex.core.structure import (
 from datasheetindex.core.textfile import scan_pages
 from datasheetindex.core.variants import detect_variants, title_text
 from datasheetindex.llm.client import (
+    LlmCredentialsMissingError,
     LlmTlsVerificationError,
     close_llm_client,
     get_vision_client,
@@ -816,8 +817,21 @@ class DatasheetIndex:
                 t_sum = time.monotonic()
                 from datasheetindex.llm.summarizer import add_summaries
 
-                add_summaries(nodes, text_content, active_llm_callable)
-                logger.info("LLM summaries done in %.1fs", time.monotonic() - t_sum)
+                # Caught for the reason captioning absorbs its failures: this
+                # runs before the artifacts are written at step 8, so an escape
+                # discards a complete index. Nodes are summarized in place, so
+                # the ones already done survive; stopping at the first failure
+                # bounds a dead gateway to one call's retries, not one per node.
+                try:
+                    add_summaries(nodes, text_content, active_llm_callable)
+                except Exception:
+                    logger.warning(
+                        "LLM summaries failed; keeping those already written",
+                        exc_info=True,
+                    )
+                    enrichment_notes.append("summaries_raised")
+                else:
+                    logger.info("LLM summaries done in %.1fs", time.monotonic() - t_sum)
 
             # 6b. Caption raster figure regions the text layer never named
             vision_client = get_vision_client(active_llm_callable)
@@ -923,5 +937,5 @@ class DatasheetIndex:
             # automatic ToC fallback -- the path this method exists for -- to a
             # model the deployment has no way to change.
             return create_llm_client()
-        except (ImportError, ValueError, OSError):
+        except (ImportError, LlmCredentialsMissingError, OSError):
             return None
