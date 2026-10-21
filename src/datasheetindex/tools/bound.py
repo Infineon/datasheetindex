@@ -55,6 +55,7 @@ from datasheetindex.index import REGENERATE_TOC_REQUIRES_CLIENT, DatasheetIndex
 from datasheetindex.llm.client import (
     VISION_MAX_TOKENS,
     ChatRequestOptions,
+    LlmCredentialsMissingError,
     close_llm_client,
     ensure_dotenv_loaded,
     get_vision_client,
@@ -210,7 +211,7 @@ class _VisionResolver:
             # ``None`` asks the factory to resolve the deployment's default;
             # it is not a model name of its own.
             candidate = create_llm_client(model=self._model)
-        except (ImportError, ValueError, OSError):
+        except (ImportError, LlmCredentialsMissingError, OSError):
             candidate = None
         if candidate is not None:
             self._owned = candidate

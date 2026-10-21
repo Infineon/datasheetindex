@@ -41,6 +41,17 @@ All notable changes to this project will be documented in this file.
 - Truncated plain-text replies raise `LlmIncompleteResponseError` rather than
   being accepted as complete summaries. Structured incomplete statuses and usable
   caption prefixes are unchanged; metadata still records the truncated response.
+- A failed summary no longer fails `build(include_summaries=True)`. Any error
+  there used to propagate and discard the whole build; summarizing now stops at
+  the first failure, keeps the summaries already written, and marks the artifact
+  `llm_enrichment_incomplete` with note `summaries_raised`, like the ToC fallback.
+- A malformed LLM setting beside valid credentials now raises instead of being
+  read as "no credentials". `build()` and `build_datasheet` used to swallow every
+  `ValueError` from client construction, so a typo such as
+  `DATASHEETINDEX_REASONING_EFFORT=hgih` (or a bad `LITELLM_TIMEOUT_SECONDS`)
+  silently disabled the ToC fallback and captions. Only the new
+  `LlmCredentialsMissingError`, a `ValueError` subclass, still means "build
+  without an LLM"; keyless installs are unaffected.
 - Close the owned HTTP client if SDK initialization fails, preserving the original
   exception rather than leaking the connection pool during client construction.
 - Live LLM tests include per-run identifiers as well as per-attempt variation,

@@ -221,6 +221,9 @@ Budgets must be positive integers. Text reasoning is not inherited by vision,
 even when both use the same model.
 Plain-text responses that hit the output limit raise `LlmIncompleteResponseError`
 (also exported from `datasheetindex`) rather than caching a partial summary.
+Inside `build()` a failed summary does not fail the build: summaries already
+written are kept, the rest are left empty, and the artifact is marked
+`llm_enrichment_incomplete` (note `summaries_raised`) so it is rebuilt later.
 Structured responses retain their incomplete status for ToC candidate handling;
 clipped caption prefixes remain usable, as before.
 

@@ -404,10 +404,14 @@ outline. **Figure captioning is deliberately NOT carved out.** Captioning runs
 at step 6b and the artifacts are written at step 8, so raising there would
 abort the build and write nothing at all -- for a document whose index, and
 possibly whose ToC, is otherwise complete. `figure_caption_failed` therefore
-still absorbs a TLS failure; only the logged message gets better. Summaries are a
-third case and a pre-existing one: `add_summaries` has no exception handler at
-all, so any error there propagates out of `build()` -- unchanged here, and only
-reachable with `include_summaries=True`.
+still absorbs a TLS failure; only the logged message gets better. Summaries run
+at step 6, also before the write, and since 0.42.0 follow captioning rather than
+the fallback: any error, TLS included, stops summarizing, keeps the summaries
+already written (nodes are filled in place) and records `summaries_raised`.
+Until then `add_summaries` had no handler at all, so one truncated reply --
+which 0.42.0 also began raising on -- discarded the whole build. Stopping at the
+first failure, rather than skipping the node, bounds a dead gateway to one
+call's retries instead of one per section.
 
 #### Decisions already settled by measurement
 

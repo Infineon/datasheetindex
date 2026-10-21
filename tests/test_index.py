@@ -19,6 +19,10 @@ from datasheetindex.index import (
     DatasheetIndex,
     _accept_llm_toc_candidate,
 )
+from datasheetindex.llm.client import (
+    LlmCredentialsMissingError,
+    LlmIncompleteResponseError,
+)
 from datasheetindex.models import TocNode, TocQuality
 from tests.conftest import spy_on_toc_fallback
 
@@ -785,7 +789,7 @@ def test_build_auto_llm_fallback_graceful_without_credentials(monkeypatch, tmp_p
     )
 
     def _raise_missing_env(model=None):
-        raise ValueError("missing env")
+        raise LlmCredentialsMissingError("missing env")
 
     monkeypatch.setattr(
         "datasheetindex.llm.client.create_llm_client",
@@ -2013,3 +2017,61 @@ def test_single_page_document_yields_one_preamble_page(tmp_path):
     data = artifacts.json_data
     assert len(data["preamble_pages"]) == 1
     assert "later pages were not examined" not in data["preamble"]
+
+
+def test_missing_credentials_mean_no_default_client():
+    """A keyless install is the default install; it builds without an LLM."""
+    assert DatasheetIndex("dummy.pdf")._try_create_default_llm_client() is None
+
+
+def test_malformed_llm_setting_is_not_mistaken_for_missing_credentials(
+    monkeypatch,
+):
+    """A typo beside valid credentials must name itself, not disable the LLM.
+
+    Catching every ``ValueError`` as "no client" turned
+    ``DATASHEETINDEX_REASONING_EFFORT=hgih`` into a build with no ToC fallback
+    and no captions, and nothing anywhere saying why.
+    """
+    monkeypatch.setenv("LITELLM_BASE_URL", "https://gateway.example")
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "secret")
+    monkeypatch.setenv("DATASHEETINDEX_REASONING_EFFORT", "hgih")
+
+    with pytest.raises(ValueError, match="DATASHEETINDEX_REASONING_EFFORT"):
+        DatasheetIndex("dummy.pdf")._try_create_default_llm_client()
+
+
+class _SummaryFailsAfterFirstClient(_RecordingLlmClient):
+    """Summarizes one section, then reports a truncated reply."""
+
+    def __call__(self, system: str, user: str) -> str:
+        if "summary" in self.calls:
+            self.calls.append("summary")
+            raise LlmIncompleteResponseError("finish_reason=length")
+        return super().__call__(system, user)
+
+
+def test_a_failed_summary_keeps_the_build_and_the_summaries_already_written(
+    tmp_path,
+):
+    """One failed summary must not discard the index built around it.
+
+    Summaries run before captioning and before the artifacts are written, so an
+    exception escaping them used to cost the whole build. The failure is a
+    transient note, like ``toc_fallback_raised``, so the artifact is retried.
+    """
+    pdf_path = _figure_pdf(tmp_path)
+    client = _SummaryFailsAfterFirstClient()
+
+    with DatasheetIndex(str(pdf_path)) as index:
+        artifacts = index.build(
+            output_dir=str(tmp_path / "out"),
+            include_summaries=True,
+            llm_callable=client,
+        )
+
+    assert [node.summary for node in artifacts.nodes] == ["a section summary", ""]
+    assert artifacts.llm_enrichment_incomplete
+    assert artifacts.llm_enrichment_notes == ("summaries_raised",)
+    assert "caption" in client.calls, "captioning must still run after a failure"
+    assert artifacts.json_path is not None and artifacts.json_path.exists()

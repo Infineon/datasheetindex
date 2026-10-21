@@ -11,6 +11,7 @@ import pytest
 
 from datasheetindex.core.artifact_cache import read_sidecar, sidecar_path, write_sidecar
 from datasheetindex.index import TOC_FALLBACK_THRESHOLD, DatasheetIndex
+from datasheetindex.llm.client import LlmCredentialsMissingError
 from datasheetindex.models import TocNode, TocQuality
 from datasheetindex.tools.bound import DatasheetTools, _BuildOptions
 from datasheetindex.tools.defs import create_datasheet_tool_defs
@@ -1371,7 +1372,7 @@ def _keyless(monkeypatch, opened=None):
     def fake_create(*_args, **_kwargs):
         if opened is not None:
             opened.append(1)
-        raise ValueError("no credentials")
+        raise LlmCredentialsMissingError("no credentials")
 
     monkeypatch.setattr("datasheetindex.llm.client.create_llm_client", fake_create)
 
@@ -1516,7 +1517,7 @@ def test_no_path_returns_holding_an_unclosed_probe(
 
     def fake_create(*_args, **_kwargs):
         if keyless["now"]:
-            raise ValueError("no credentials")
+            raise LlmCredentialsMissingError("no credentials")
         return _VisionStub(opened, closed)
 
     monkeypatch.setattr("datasheetindex.llm.client.create_llm_client", fake_create)
@@ -1645,12 +1646,24 @@ def test_the_probe_does_not_upgrade_an_empty_model_to_the_default(monkeypatch):
 
     def fake_create(**kwargs):
         seen.append(kwargs)
-        raise ValueError("no credentials")
+        raise LlmCredentialsMissingError("no credentials")
 
     monkeypatch.setattr("datasheetindex.llm.client.create_llm_client", fake_create)
 
     assert _VisionResolver("").get() is None
     assert seen == [{"model": ""}]
+
+
+def test_the_probe_raises_on_a_malformed_llm_setting(monkeypatch):
+    """Only missing credentials mean "no vision client"; a typo must surface."""
+    from datasheetindex.tools.bound import _VisionResolver
+
+    monkeypatch.setenv("LITELLM_BASE_URL", "https://gateway.example")
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "secret")
+    monkeypatch.setenv("LITELLM_TIMEOUT_SECONDS", "soon")
+
+    with pytest.raises(ValueError, match="LITELLM_TIMEOUT_SECONDS"):
+        _VisionResolver(None).get()
 
 
 def test_a_missing_llm_client_no_longer_blocks_reuse(tmp_path):

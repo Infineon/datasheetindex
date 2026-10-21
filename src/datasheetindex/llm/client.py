@@ -147,6 +147,19 @@ class LlmIncompleteResponseError(RuntimeError):
     """
 
 
+class LlmCredentialsMissingError(ValueError):
+    """``LITELLM_BASE_URL`` or ``LITELLM_MASTER_KEY`` is not set.
+
+    The one ``create_llm_client`` failure that means "no client here": ``[llm]``
+    is optional and a keyless install is the default, so the self-creating
+    callers catch this type and build without an LLM. A malformed setting beside
+    valid credentials raises a plain ``ValueError`` instead and must reach the
+    operator -- caught as "no client", a one-letter typo silently disabled the
+    ToC fallback and captions. A ``ValueError`` subclass so callers that caught
+    the old type keep working.
+    """
+
+
 def _tls_verification_failure(
     exc: BaseException,
 ) -> ssl.SSLCertVerificationError | None:
@@ -940,7 +953,7 @@ def create_llm_client(
     api_key = os.environ.get("LITELLM_MASTER_KEY")
 
     if not base_url or not api_key:
-        raise ValueError(
+        raise LlmCredentialsMissingError(
             "LITELLM_BASE_URL and LITELLM_MASTER_KEY must be set "
             "in the environment or .env file"
         )

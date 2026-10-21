@@ -145,15 +145,22 @@ def _patch_fake_clients(
 
 
 def test_create_llm_client_raises_without_env(monkeypatch):
-    """Should raise ValueError when env vars are missing."""
+    """Missing credentials raise the type callers treat as "no client"."""
     monkeypatch.delenv("LITELLM_BASE_URL", raising=False)
     monkeypatch.delenv("LITELLM_MASTER_KEY", raising=False)
     _install_fake_dotenv(monkeypatch)
 
-    from datasheetindex.llm.client import create_llm_client
+    from datasheetindex.llm.client import LlmCredentialsMissingError, create_llm_client
 
-    with pytest.raises(ValueError, match="LITELLM_BASE_URL"):
+    with pytest.raises(LlmCredentialsMissingError, match="LITELLM_BASE_URL"):
         create_llm_client()
+
+
+def test_missing_credentials_is_still_a_value_error():
+    """Callers that caught ValueError before the subclass existed still do."""
+    from datasheetindex.llm.client import LlmCredentialsMissingError
+
+    assert issubclass(LlmCredentialsMissingError, ValueError)
 
 
 def test_create_llm_client_raises_partial_env(monkeypatch):
@@ -162,9 +169,9 @@ def test_create_llm_client_raises_partial_env(monkeypatch):
     monkeypatch.delenv("LITELLM_MASTER_KEY", raising=False)
     _install_fake_dotenv(monkeypatch)
 
-    from datasheetindex.llm.client import create_llm_client
+    from datasheetindex.llm.client import LlmCredentialsMissingError, create_llm_client
 
-    with pytest.raises(ValueError, match="LITELLM_BASE_URL"):
+    with pytest.raises(LlmCredentialsMissingError, match="LITELLM_BASE_URL"):
         create_llm_client()
 
 
