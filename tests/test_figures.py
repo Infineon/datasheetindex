@@ -187,9 +187,43 @@ def test_fig_abbreviation_is_accepted():
 
 
 @pytest.mark.parametrize(
+    ("text", "number", "title"),
+    [
+        # PIC16F887: ~200 uppercase captions, 5 found before.
+        ("FIGURE 6-2: TIMER0 BLOCK DIAGRAM", "6-2", "TIMER0 BLOCK DIAGRAM"),
+        # ESP32 TRM: 0 captions found before; dotted chapter numbering.
+        ("Figure 1.2-1. ULP Coprocessor Diagram", "1.2-1", "ULP Coprocessor Diagram"),
+        # Vishay 1N400x: a spaced dash as the separator.
+        ("Fig. 1 - Forward Current Derating Curve", "1", "Forward Current Derating"),
+        # ATmega328: no space after the period.
+        ("Figure 17-12.Prescaler Reset", "17-12", "Prescaler Reset"),
+        # JEDEC JESD216: an em dash.
+        ("Figure 6 — Fetch SFDP Mode Timing Diagram", "6", "Fetch SFDP Mode"),
+    ],
+)
+def test_vendor_caption_styles_are_recognised(text, number, title):
+    entries = caption_entries(4, text)
+
+    assert len(entries) == 1, entries
+    assert entries[0]["figure_number"] == number
+    assert title in str(entries[0]["caption"])
+
+
+def test_uppercase_split_form_is_recognised():
+    entries = caption_entries(4, "FIGURE 3-1:\nPORTA BLOCK DIAGRAM\n")
+
+    assert entries[0]["figure_number"] == "3-1"
+    assert entries[0]["caption"] == "FIGURE 3-1: PORTA BLOCK DIAGRAM"
+
+
+@pytest.mark.parametrize(
     "text",
     [
         "as Figure 5 shows the limit is 3V",
+        "FIGURE 6-2 SHOWS THE TIMER0 STRUCTURE",
+        "Figure 1.2-1 shows the ULP coprocessor",
+        "Figure 2 -shows a hyphen glued to prose",
+        "Figure 11 -> Figure 13 (2 instances on old page 19)",
         "Figure 2 shows the major subsystems of the device",
         "Figure 6-2 shows the structure of the 32 general purpose registers",
         "See Figure 3",

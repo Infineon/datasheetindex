@@ -22,19 +22,29 @@ if TYPE_CHECKING:
 #: groups placements by ``xref`` and describes each picture once.
 DEFAULT_MIN_AREA_PCT = 1.0
 
-#: Figure numbers are plain (``12``) or section-relative (``10-1``), with either
-#: a hyphen or an en-dash. Measured across 14 documents: the plain-only pattern
-#: found captions in 2 of them; this one finds them in 11.
-_FIGURE_NUMBER = r"(\d+(?:[-–]\d+)?)"
+#: Figure numbers are plain (``12``), section-relative (``10-1``, hyphen or
+#: en-dash) or dotted (``1.2-1``, the ESP32 TRM's chapter numbering). Measured
+#: across 14 documents: the plain-only pattern found captions in 2 of them; the
+#: section-relative one in 11. Atomic, so the number is taken whole: otherwise
+#: "Figure 1.2-1 shows ..." backtracks to number ``1`` and reads the ``.`` as
+#: the separator, turning prose into a caption.
+_FIGURE_NUMBER = r"((?>\d+(?:[-–.]\d+)*))"
+
+#: ``Figure``/``Fig.`` in any case: Microchip prints ``FIGURE 6-2:``.
+_LABEL = r"(?i:figure|fig\.)\s*"
 
 #: A line that is *only* a figure label. Its title is the next non-empty line.
-_SPLIT_FORM = re.compile(rf"^(?:Figure|Fig\.)\s+{_FIGURE_NUMBER}\s*[.:]?\s*$")
+_SPLIT_FORM = re.compile(rf"^{_LABEL}{_FIGURE_NUMBER}\s*[.:]?\s*$")
 
-#: Label, a **mandatory** ``.`` or ``:``, then the title on the same line. The
+#: Label, a **mandatory** separator, then the title on the same line. The
 #: separator is the whole prose filter: in "Figure 2 shows the major
 #: subsystems" it is a space, so that line matches neither form and emits
-#: nothing.
-_SAME_LINE_FORM = re.compile(rf"^(?:Figure|Fig\.)\s+{_FIGURE_NUMBER}\s*[.:]\s+(\S.*)$")
+#: nothing. Accepted: ``.`` or ``:`` (space after optional -- ATmega prints
+#: ``Figure 17-12.Prescaler``), or a hyphen, en or em dash spaced on both sides
+#: (Vishay's ``Fig. 1 - Forward Current``), which prose does not produce.
+_SAME_LINE_FORM = re.compile(
+    rf"^{_LABEL}{_FIGURE_NUMBER}(?:\s*[.:]\s*|\s+[-–—]\s+)(\S.*)$"
+)
 
 
 def raster_regions(
