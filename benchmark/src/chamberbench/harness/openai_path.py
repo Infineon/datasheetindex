@@ -263,7 +263,13 @@ def _parse_responses_output(
                     text_parts.append(text)
         elif itype == "function_call":
             function_calls.append(item)
-    raw_items = [item.model_dump() for item in output_items]
+    # Wire names, not Python names: openai 3.42 added `async` (held as
+    # `async_`) to function calls, and a plain model_dump() re-sent `async_`,
+    # which the API rejects. exclude_none drops unset optional fields, so a
+    # field a newer SDK adds cannot reach the wire as an unknown null.
+    raw_items = [
+        item.model_dump(by_alias=True, exclude_none=True) for item in output_items
+    ]
     return (
         "\n".join(reasoning_parts).strip(),
         "\n".join(text_parts).strip(),

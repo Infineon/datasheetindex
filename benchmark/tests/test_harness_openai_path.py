@@ -85,3 +85,26 @@ def test_create_openai_client_constructs_real_client_under_tls_bypass(monkeypatc
     assert isinstance(client, OpenAI)
     assert http_client is not None
     assert type(http_client).__module__.startswith("httpx2")
+
+
+def test_replayed_output_items_use_wire_field_names():
+    """Turn N's output items are re-sent as turn N+1's input, so they must be
+    serialized under their wire names. openai 3.42 added an optional `async`
+    field to function calls, held in Python as `async_`; a plain
+    `model_dump()` sent `async_` and the API rejected the whole turn with
+    "Unknown parameter: 'input[2].async_'" -- every GPT run broke on its
+    first tool result."""
+    from types import SimpleNamespace
+
+    from openai.types.responses import ResponseFunctionToolCall
+
+    call = ResponseFunctionToolCall(
+        type="function_call", call_id="c1", name="lookup", arguments="{}"
+    )
+    _, _, calls, raw_items = openai_path._parse_responses_output(
+        SimpleNamespace(output=[call])
+    )
+    assert calls == [call]
+    assert raw_items == [
+        {"type": "function_call", "call_id": "c1", "name": "lookup", "arguments": "{}"}
+    ]
