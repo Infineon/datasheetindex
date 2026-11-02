@@ -16,8 +16,8 @@ All notable changes to this project will be documented in this file.
     page's `--- PAGE N ---` marker, so the rows are cited on the right page.
   - If the heading cannot be located, a `=== NOTE ===` names the page instead of
     appending it.
-  - Across the 25-document corpus, 1,725 of 3,734 section reads gain a head
-    (median 439 characters, p90 1,532). 50 get the unlocated-heading NOTE. No
+  - Across the 25-document corpus, 1,673 of 3,734 section reads gain a head
+    (median 456 characters, p90 1,537). 34 get the unlocated-heading NOTE. No
     read loses text.
 - **Search hits take the breadcrumb of the section that owns their position.**
   On a page where a section starts mid-page, `search_text` attributes a hit to

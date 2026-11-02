@@ -1196,7 +1196,8 @@ class DatasheetTools:
             flat_nodes: list[TocNode] | None = None
             for match in matches:
                 page_number = match["page"]
-                if headings.get(page_number, PageHeadings()).mid:
+                entry = headings.get(page_number, PageHeadings())
+                if entry.mid and not entry.uncertain:
                     if flat_nodes is None:
                         flat_nodes = flatten_nodes(artifacts.nodes)
                     owner = section_at(

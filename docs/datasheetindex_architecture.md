@@ -1813,14 +1813,27 @@ prevent, so the matcher is biased late:
   limits") is ignored.
 - A line holding only the title is preferred to one that merely starts with it.
   A short title such as "Pressure" also starts table rows above the real heading.
-- A heading that could not be located has no position. Search ownership skips
-  it, and the first-page marker is not emitted when one is on that page.
+  With no title-only line, the *last* line starting with the title wins.
+- Printed numbering the bookmark omits is tolerated (`5.2`, `A.1`, `IV.`), and
+  so is a `Chapter`/`Section`/`Appendix`/`Part` keyword. The ESP32 TRM prints
+  bookmark "1 ULP Coprocessor (ULP)" as "Chapter 1", a blank line, then the
+  title.
+- Every heading is searched from the top of its page, because two-column pages
+  print headings out of ToC order (PIC16F887 prints FIGURE 3-5 above FIGURE
+  3-4). Only an offset another heading already holds moves the search on, so
+  duplicate titles on one page resolve to their own lines.
+- A heading that could not be located has no position, and search ownership
+  skips it. If it comes before the first located heading in ToC order, it may be
+  printed above it. The page then has no safe cut point: the NOTE replaces the
+  appended head, the first-page marker is withheld, and search falls back to
+  page-level breadcrumbs. ToC order is only a proxy for print order, so this
+  errs toward a NOTE, never toward lost rows.
 
 Corpus, 25 documents, every ToC node's own range read:
-- 1,725 of 3,734 reads (46%) gain a head; median 439 characters appended, p90
-  1,532.
-- 50 reads get the unlocated-heading NOTE instead, 34 of them on the ESP32 TRM.
-- 0.41 first-page markers per read.
+- 1,673 of 3,734 reads (45%) gain a head; median 456 characters appended, p90
+  1,537.
+- 34 reads get the unlocated-heading NOTE instead, 15 of them on the ESP32 TRM.
+- 0.44 first-page markers per read.
 - No read loses text.
 
 **Extending `end_page` instead was designed and rejected (2026-11-02).** Two

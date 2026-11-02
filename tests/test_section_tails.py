@@ -90,6 +90,33 @@ class TestLocateHeading:
         text = "Pressure 300 1100 hPa\nmore tail\nPressure\nrow"
         assert locate_heading(text, "Pressure") == text.index("Pressure\nrow")
 
+    def test_a_merged_heading_is_preferred_over_an_earlier_row(self):
+        """No title-only line: the fallback takes the LAST line starting with
+        the title, because an early answer silently drops the tail while a late
+        one only adds overlap."""
+        text = (
+            "Pressure 300 1100 hPa\n"
+            "Long term stability 1 hPa/year\n"
+            "1.4 Pressure MIN MAX\n"
+            "row"
+        )
+        assert locate_heading(text, "Pressure") == text.index("1.4 Pressure")
+
+    def test_appendix_numbering_is_tolerated(self):
+        text = "tail row B\nA.1 Recommended conditions\nnew data"
+        assert locate_heading(text, "Recommended conditions") == 11
+
+    def test_the_search_can_start_after_an_earlier_heading(self):
+        text = "2 Electrical\nLimits\nVCC 3.3\n3 Thermal\nLimits\nTJ 125"
+        second = text.index("Limits\nTJ")
+        assert locate_heading(text, "Limits", start=text.index("3 Thermal")) == second
+
+    def test_a_chapter_keyword_before_the_number_is_tolerated(self):
+        """ESP32 TRM prints bookmark "1 ULP Coprocessor (ULP)" as "Chapter 1",
+        a blank line, then the title."""
+        text = "tail\nChapter 1\n\nULP Coprocessor (ULP)\n\nbody"
+        assert locate_heading(text, "1 ULP Coprocessor (ULP)") == 5
+
     def test_absent_title_is_none(self):
         assert locate_heading("nothing here", "4 Ordering") is None
 
@@ -145,6 +172,24 @@ class TestNextPageHead:
         assert len(notes) == 1, out
         assert "page 3" in notes[0]
         assert "could not be located" in notes[0]
+
+    def test_an_unlocated_heading_before_the_cut_raises_the_note_instead(self):
+        """Headings print in ToC order. An unlocated heading earlier in that
+        order may sit above the located one, so the text above it may already
+        be the next section's: no safe cut point."""
+        pages = {**_PAGES, 3: "Thermal intro\nmore\n3.1 Child\nchild data"}
+        toc = [*_TOC[:2], [1, "3 Thermal limits", 3], [2, "3.1 Child", 3], _TOC[3]]
+        out = DatasheetTools.get_section_text(_tools(pages, toc), 2, 2)
+        assert "Thermal intro" not in out
+        assert _framing(out) == []
+        assert "could not be located" in out
+
+    def test_an_unlocated_heading_after_the_cut_does_not_block_it(self):
+        pages = {**_PAGES, 3: "tail row B\n3 Temperature\nrow C\nmore"}
+        toc = [*_TOC[:2], [1, "3 Temperature", 3], [2, "3.1 Hidden", 3], _TOC[3]]
+        out = DatasheetTools.get_section_text(_tools(pages, toc), 2, 2)
+        assert "tail row B" in out
+        assert "could not be located" not in out
 
     def test_the_head_stops_at_the_earliest_of_two_headings(self):
         pages = {
@@ -260,6 +305,40 @@ class TestSearchBreadcrumbs:
         toc = [[1, "1 A", 1], [1, "2 B", 2], [2, "2.1 Hidden", 2]]
         hits = DatasheetTools.search_text(_tools(pages, toc), "tail of A")
         assert hits[0].get("breadcrumb") == "1 A"
+
+    def test_duplicate_titles_on_one_page_resolve_in_order(self):
+        pages = {
+            1: "1 Overview\nintro",
+            2: ("tail\n2 Electrical\nLimits\nVCC 3.3\n3 Thermal\nLimits\nTJ 125"),
+        }
+        toc = [
+            [1, "1 Overview", 1],
+            [1, "2 Electrical", 2],
+            [2, "Limits", 2],
+            [1, "3 Thermal", 2],
+            [2, "Limits", 2],
+        ]
+        hits = DatasheetTools.search_text(_tools(pages, toc), ["VCC 3.3", "TJ 125"])
+        by_pattern = {hit.get("pattern"): hit.get("breadcrumb") for hit in hits}
+        assert by_pattern == {
+            "VCC 3.3": "2 Electrical > Limits",
+            "TJ 125": "3 Thermal > Limits",
+        }
+
+    def test_headings_printed_out_of_toc_order_are_all_found(self):
+        """Two-column pages print headings out of ToC order (PIC16F887 has
+        FIGURE 3-5 above FIGURE 3-4); a search resuming after the previous
+        heading lost them."""
+        from datasheetindex.core.headings import map_headings
+
+        pages = {1: "1 Overview\nintro", 2: "tail\n2.2 Second\nrow\n2.1 First\nrow"}
+        toc = [[1, "1 Overview", 1], [2, "2.1 First", 2], [2, "2.2 Second", 2]]
+        tools = _tools(pages, toc)
+        artifacts = tools._artifacts
+        assert artifacts is not None
+        entry = map_headings(artifacts.nodes, artifacts.text_content)[2]
+        assert [node.title for _, node in entry.mid] == ["2.2 Second", "2.1 First"]
+        assert entry.missing == ()
 
     def test_text_above_a_mid_page_child_belongs_to_the_parent_opening_the_page(
         self,

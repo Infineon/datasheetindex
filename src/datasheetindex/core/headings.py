@@ -28,8 +28,8 @@ from datasheetindex.models import flatten_nodes
 if TYPE_CHECKING:
     from datasheetindex.models import TocNode
 
-# Printed numbering a bookmark may leave out: "5.2", "A.1", "IV.", "7)".
-_NUMBERING = r"(?:[A-Z]?\d+(?:\.\d+)*[.)]?|[A-Z][.)]|[IVXLC]+[.)])"
+# Printed numbering a bookmark may leave out: "5.2", "A.1", "A-1", "IV.", "7)".
+_NUMBERING = r"(?:(?:[A-Z][.\-]?)?\d+(?:\.\d+)*[.)]?|[A-Z][.)]|[IVXLC]+[.)])"
 
 
 @lru_cache(maxsize=1024)
@@ -43,7 +43,10 @@ def _heading_patterns(title: str) -> tuple[re.Pattern[str], ...]:
     # line: a title mentioned mid-sentence ("see 3 Thermal limits") is not
     # where the section starts, and stopping there would cut the tail short --
     # the one error this module exists to prevent.
-    head = rf"(?:^|\n)([ \t]*(?:{_NUMBERING}[ \t]+)?{body})"
+    # "Chapter 1" + title: the ESP32 TRM prints bookmark "1 ULP Coprocessor"
+    # that way, and an unfound chapter heading blocks the cut on its page.
+    keyword = r"(?:(?:chapter|section|appendix|part)\s+)?"
+    head = rf"(?:^|\n)([ \t]*{keyword}(?:{_NUMBERING}[ \t]+)?{body})"
     return (
         # The title alone on its line. Tried first: a short title such as
         # "Pressure" also starts table rows ("Pressure 300 1100 hPa") above the
@@ -55,18 +58,25 @@ def _heading_patterns(title: str) -> tuple[re.Pattern[str], ...]:
     )
 
 
-def locate_heading(page_text: str, title: str) -> int | None:
+def locate_heading(page_text: str, title: str, start: int = 0) -> int | None:
     """Offset of the line where ``title`` starts as a heading, or ``None``.
 
     Tolerates case, whitespace and line wrapping inside the title, and printed
-    numbering the bookmark omits. A line holding only the title wins; failing
-    that, the first line that starts with it.
+    numbering the bookmark omits. Only lines starting after ``start`` count.
+    The first line holding only the title wins. Failing that, the LAST line
+    that starts with it: with no clean match the heading is ambiguous, and an
+    early answer silently drops the tail ("Pressure 300 1100 hPa" above
+    "1.4 Pressure MIN MAX") while a late one only adds overlap.
     """
-    for pattern in _heading_patterns(title):
-        match = pattern.search(page_text)
-        if match:
-            return match.start(1)
-    return None
+    patterns = _heading_patterns(title)
+    if not patterns:
+        return None
+    full_line, prefix = patterns
+    match = full_line.search(page_text, start)
+    if match:
+        return match.start(1)
+    matches = list(prefix.finditer(page_text, start))
+    return matches[-1].start(1) if matches else None
 
 
 @dataclass(frozen=True)
@@ -79,6 +89,10 @@ class PageHeadings:
     top: tuple[TocNode, ...] = ()
     #: Sections that start here but whose heading was not found on the page.
     missing: tuple[TocNode, ...] = ()
+    #: A missing heading precedes the first mid-page one in ToC order, so it
+    #: may be printed above it: the text above that heading may not be the
+    #: previous section's, and there is no safe cut point.
+    uncertain: bool = False
 
     @property
     def opens(self) -> bool:
@@ -102,17 +116,35 @@ def map_headings(nodes: list[TocNode], text_content: str) -> dict[int, PageHeadi
         mid: list[tuple[int, TocNode]] = []
         top: list[TocNode] = []
         missing: list[TocNode] = []
-        for node in page_nodes:
+        order: dict[int, int] = {}
+        # Each heading is searched from the top of the page: two-column pages
+        # print headings out of ToC order (PIC16F887 has FIGURE 3-5 above
+        # FIGURE 3-4), so resuming after the previous heading loses them. Only
+        # an offset another heading already holds moves the search on, so two
+        # children both titled "Limits" resolve to their own lines.
+        taken: set[int] = set()
+        for index, node in enumerate(page_nodes):
+            order[id(node)] = index
             offset = locate_heading(text, node.title)
+            while offset is not None and offset in taken:
+                offset = locate_heading(text, node.title, offset + 1)
             if offset is None:
                 missing.append(node)
-            elif text[:offset].strip():
+                continue
+            taken.add(offset)
+            if text[:offset].strip():
                 mid.append((offset, node))
             else:
                 top.append(node)
-        # sort() is stable, so equal offsets keep document order.
+        # sort() is stable, so equal offsets keep ToC order.
         mid.sort(key=lambda item: item[0])
-        result[page] = PageHeadings(tuple(mid), tuple(top), tuple(missing))
+        # A missing heading earlier in ToC order than the first mid-page one
+        # may be printed above it. ToC order is only a proxy for print order,
+        # so this errs toward uncertainty, which costs a NOTE, not rows.
+        uncertain = bool(mid) and any(
+            order[id(node)] < order[id(mid[0][1])] for node in missing
+        )
+        result[page] = PageHeadings(tuple(mid), tuple(top), tuple(missing), uncertain)
     return result
 
 
@@ -128,7 +160,7 @@ def next_page_head(
     markers: without it the tail's rows would be cited as ``page - 1``.
     """
     entry = headings.get(page)
-    if entry is None or entry.opens or not entry.mid:
+    if entry is None or entry.opens or not entry.mid or entry.uncertain:
         return None
     offset, node = entry.mid[0]
     head = extract_page_text(text_content, page)[:offset].rstrip()
@@ -148,7 +180,9 @@ def next_page_note(page: int, headings: dict[int, PageHeadings]) -> str | None:
     visible and leaves the fetch to the agent.
     """
     entry = headings.get(page)
-    if entry is None or entry.opens or entry.mid or not entry.unlocated:
+    if entry is None or entry.opens or not entry.unlocated:
+        return None
+    if entry.mid and not entry.uncertain:
         return None
     return (
         f"=== NOTE: a section starts on page {page}, but its heading could not "
@@ -174,9 +208,9 @@ def mark_section_start(
     strips after it, so it lands where search offsets point.
     """
     entry = headings.get(page)
-    # An unlocated heading may be the one that opens the page, and then the
-    # text above the mid-page heading is the read's own: claim nothing.
-    if entry is None or entry.opens or entry.unlocated or not entry.mid:
+    # An unlocated heading earlier in ToC order may be the one that opens the
+    # page, and then the text above the mid-page heading is the read's own.
+    if entry is None or entry.opens or entry.uncertain or not entry.mid:
         return section
     page_marker = f"--- PAGE {page} ---"
     found = section.find(page_marker)
