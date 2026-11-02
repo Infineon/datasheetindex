@@ -645,6 +645,21 @@ decision a future reader would otherwise redo.
   punctuation after the figure number is what divides **404 real captions from 70
   prose lines** across 998 pages, with no scoring and no heuristics. Without it,
   "Figure 6-2 shows the structure..." parses as a caption. Do not relax it.
+- **The label is matched in any case, numbers may be dotted, and the separator
+  set is wider -- all without relaxing the requirement above** (0.44.0, from the
+  PageIndex comparison). Three vendor styles found nothing before: Microchip's
+  `FIGURE 6-2:`, the ESP32 TRM's `Figure 1.2-1.`, and Vishay's `Fig. 1 - Title`.
+  A fourth, ATmega's `Figure 17-12.Prescaler`, was found only once.
+  - Accepted separators: `.` or `:`, with or without a following space; or a
+    hyphen, en dash or em dash with a space on both sides, which prose does not
+    produce.
+  - On the 25-document corpus captions rose from **969 to 1,368**, documents
+    with captions from 23 to 25, and rejected figure-keyword lines fell from 634
+    to 235.
+  - A scan of all 399 additions for prose markers (a lowercase title, "shows",
+    "is", "see") found **none**, and every sampled reject is prose.
+  - The number is an **atomic group**. Without it, "Figure 1.2-1 shows ..."
+    backtracks to number `1` and takes the `.` as the separator.
 - **Section-relative numbering is the common case, not an edge case.**
   `Figure 12` alone matched captions in only **2 of 14** documents; widening to
   `(\d+(?:[-–]\d+)?)` to admit `Figure 10-1` reached **11 of 14**. The same-line

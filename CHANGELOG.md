@@ -24,6 +24,14 @@ All notable changes to this project will be documented in this file.
   the last heading before it. A hit in the previous section's tail no longer
   carries the next section's breadcrumb.
 
+- **Figure captions from four more vendor styles are indexed.** Three found
+  nothing before: Microchip's uppercase `FIGURE 6-2:`, the ESP32 TRM's dotted
+  `Figure 1.2-1.`, and Vishay's `Fig. 1 - Title`. ATmega's
+  `Figure 17-12.Prescaler` was found only once. The mandatory separator after
+  the number still rejects prose ("Figure 6-2 shows ..."). On the 25-document
+  corpus, captions rose from 969 to 1,368 and every document now has some (was
+  23). None of the 399 additions is prose.
+
 ### Added
 - `=== SECTION STARTS: <title> (text above is the previous section's) ===` in
   `get_section_text` output, when a heading starts partway down the read's first
