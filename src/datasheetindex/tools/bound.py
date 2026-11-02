@@ -34,6 +34,13 @@ from datasheetindex.core.artifact_cache import (
     write_sidecar,
 )
 from datasheetindex.core.engine import layout_active, layout_engine
+from datasheetindex.core.headings import (
+    PageHeadings,
+    map_headings,
+    mark_section_start,
+    next_page_head,
+    section_at,
+)
 from datasheetindex.core.locate import TextLocation
 from datasheetindex.core.locate import locate_text as locate_text_core
 from datasheetindex.core.structure import (
@@ -493,6 +500,9 @@ class DatasheetTools:
         self.pdf_path = pdf_path
         self._index = DatasheetIndex(pdf_path)
         self._artifacts: DatasheetArtifacts | None = None
+        self._heading_cache: (
+            tuple[DatasheetArtifacts, dict[int, PageHeadings]] | None
+        ) = None
         self._build_options: _BuildOptions | None = None
 
     def __enter__(self) -> DatasheetTools:
@@ -1040,7 +1050,7 @@ class DatasheetTools:
     def get_section_text(self, start_page: int, end_page: int) -> str:
         """Return extracted text for a page range from the latest build.
 
-        The result has three parts, in order:
+        The result has up to four parts, in order:
 
         1. A position header: ``=== Page X of N ===`` for a single-page read,
            ``=== Pages X-Y of N ===`` for a multi-page range.
@@ -1057,7 +1067,16 @@ class DatasheetTools:
            content: real datasheets sometimes contain their own literal
            ``NOTE:`` lines in body text.
         3. The section text, WITH ``--- PAGE N ---`` markers so the agent can
-           orient within the range.
+           orient within the range. When a section heading starts partway down
+           the first page, a ``=== SECTION STARTS: ... ===`` line precedes it:
+           the text above it is the previous section's tail.
+        4. When a section starts partway down page ``end_page + 1``, the text
+           above its heading -- the tail of the section this range ends in --
+           after a ``=== Continued from the top of page N ... ===`` line. If a
+           section starts there but its heading cannot be located, the whole
+           page follows instead, and the line says so. Ranges tile whole pages,
+           so without this a read of a section's own range dropped every row
+           printed above the next heading.
 
         The absence of a NOTE means none was detected. It is not a completeness
         claim: content can spill across a page break with no marker at all.
@@ -1075,8 +1094,18 @@ class DatasheetTools:
             header = f"=== Pages {start_page}-{end_page} of {total_pages} ==="
         notes = _variant_note(artifacts, start_page, end_page)
         notes += _continuation_notes(artifacts.text_content, start_page, end_page)
-        section = extract_section_text(artifacts.text_content, start_page, end_page)
-        return "\n".join([header, *notes, section])
+        headings = self._headings(artifacts)
+        section = mark_section_start(
+            extract_section_text(artifacts.text_content, start_page, end_page),
+            start_page,
+            headings,
+        )
+        parts = [header, *notes, section]
+        if end_page < total_pages:
+            head = next_page_head(artifacts.text_content, end_page + 1, headings)
+            if head is not None:
+                parts.append(head)
+        return "\n".join(parts)
 
     def variant_search_note(
         self, query: str | list[str], matches: list[TextSearchMatch]
@@ -1151,16 +1180,25 @@ class DatasheetTools:
             max_results=max_results,
         )
         if artifacts.nodes:
+            headings = self._headings(artifacts)
             # Matches commonly cluster on a few pages; resolve each page's
-            # breadcrumb once rather than re-walking the ToC per match.
+            # breadcrumb once rather than re-walking the ToC per match. A page
+            # where a section starts mid-page has more than one owner, so
+            # there the lookup goes by the match's position instead.
             breadcrumb_by_page: dict[int, str | None] = {}
             for match in matches:
                 page_number = match["page"]
-                if page_number not in breadcrumb_by_page:
-                    breadcrumb_by_page[page_number] = find_breadcrumb_for_page(
-                        artifacts.nodes, page_number
+                if headings.get(page_number, PageHeadings()).mid:
+                    owner = section_at(
+                        artifacts.nodes, headings, page_number, match["start"]
                     )
-                breadcrumb = breadcrumb_by_page[page_number]
+                    breadcrumb = owner.breadcrumb if owner else None
+                else:
+                    if page_number not in breadcrumb_by_page:
+                        breadcrumb_by_page[page_number] = find_breadcrumb_for_page(
+                            artifacts.nodes, page_number
+                        )
+                    breadcrumb = breadcrumb_by_page[page_number]
                 if breadcrumb:
                     match["breadcrumb"] = breadcrumb
         return matches
@@ -1198,6 +1236,19 @@ class DatasheetTools:
                 "No datasheet artifacts available. Call build_datasheet first."
             )
         return self._artifacts
+
+    def _headings(self, artifacts: DatasheetArtifacts) -> dict[int, PageHeadings]:
+        """Heading positions for ``artifacts``, located once per loaded build.
+
+        Derived from the text and the ToC alone, so a cold build and a disk
+        reuse get the same answer and nothing needs persisting.
+        """
+        cached = getattr(self, "_heading_cache", None)
+        if cached is not None and cached[0] is artifacts:
+            return cached[1]
+        headings = map_headings(artifacts.nodes, artifacts.text_content)
+        self._heading_cache = (artifacts, headings)
+        return headings
 
     def _total_pages(self, artifacts: DatasheetArtifacts) -> int:
         total_pages = artifacts.json_data.get("total_pages")

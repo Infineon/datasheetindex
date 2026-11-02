@@ -2,6 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.44.0] - 2026-11-02
+
+### Fixed
+- **A section read no longer drops rows printed above the next heading.** Page
+  ranges tile whole pages, so a section ends on the page before its next sibling
+  starts. When that sibling's heading sat partway down its page, everything above
+  it was silently left out of every read of the earlier section. Bosch BME280
+  "1.3 Pressure sensor specification" (pages 10-10) lost its accuracy, noise,
+  solder-drift and long-term-stability rows, which sit on page 11 above "1.4".
+  - `get_section_text` now appends the head of the next page, up to that
+    heading, after a `=== Continued from the top of page N ... ===` line. If the
+    heading cannot be located, it appends the whole page and says so.
+  - Across the 25-document corpus, 1,725 of 3,734 section reads gain a head
+    (median 422 characters, p90 1,516). 50 append a whole page. No read loses
+    text.
+- **Search hits take the breadcrumb of the section that owns their position.**
+  On a page where a section starts mid-page, `search_text` attributes a hit to
+  the last heading before it. A hit in the previous section's tail no longer
+  carries the next section's breadcrumb.
+
+### Added
+- `=== SECTION STARTS: <title> (text above is the previous section's) ===` in
+  `get_section_text` output, when a heading starts partway down the read's first
+  page. Without it, a read of BME280 "1.4 Temperature" opens with pressure rows
+  that belong to 1.3. Only the first page is marked: marking every mid-page
+  heading cost a median 5-10% of read characters. One marker costs about 2.5%.
+
+### Notes
+- The artifact is unchanged: `end_page`, `table_count` and `has_tables` still
+  describe the tiled page range. Extending `end_page` instead was designed and
+  rejected on review: it changed suppression, de-duplication and breadcrumb
+  semantics, and would have extended about 44% of boundaries by a whole page on
+  TI datasheets, whose running part-list header survives furniture stripping.
+  The architecture doc, under "Section tails on a shared page", has the reasoning.
+- Found by comparing against PageIndex 0.5.0, whose Flash engine shares the
+  boundary page unless the next heading opens it.
+
 ## [0.43.0] - 2026-10-21
 
 ### Changed
