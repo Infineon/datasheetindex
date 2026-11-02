@@ -438,6 +438,11 @@ def extract_page_text(text_content: str, page: int) -> str:
     return section.lstrip("\r\n").rstrip()
 
 
+def page_texts(text_content: str) -> dict[int, str]:
+    """Each page's text by page number, as search offsets index it."""
+    return {entry.page: entry.text for entry in _iter_page_text(text_content)}
+
+
 @lru_cache(maxsize=4)
 def _iter_page_text(text_content: str) -> tuple[_PageText, ...]:
     matches = list(_PAGE_MARKER_RE.finditer(text_content))

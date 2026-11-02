@@ -292,6 +292,11 @@ block diagram boxes.
 - If no next sibling, it inherits the parent's `end_page`
 - The last top-level section extends to `total_pages`
 
+Ranges deliberately tile whole pages. When the next sibling's heading sits
+partway down its page, the text above it still belongs to this node. `end_page`
+does not include it, but `get_section_text` appends it at read time. See
+"Section tails on a shared page".
+
 ```python
 # Flat ToC from get_toc():  [level, title, start_page]
 # [1, "Block diagram",              5]
@@ -1761,6 +1766,91 @@ page often repeats its headers), and never claims a range is complete.
 
 This is a different concept from `TocNode.continued_tables`, which keeps its own
 narrower contract: tables captioned `Table N ... (Continued)`.
+
+### Section tails on a shared page
+
+Page ranges tile the document (see "Computing `end_page`"), so a section ends on
+the page *before* its next sibling starts. That is only right when the next
+heading opens its page. When the heading sits partway down, the text above it
+belongs to the earlier section and fell outside every read of that section's
+range, with no marker to say so. On Bosch BME280, "1.3 Pressure sensor
+specification" is pages 10-10. Its accuracy, noise, solder-drift and long-term
+stability rows are on page 11, above "1.4 Temperature sensor specification".
+Across the corpus, 24% of sibling boundaries had 150+ characters above the next
+heading.
+
+The fix is at **read time** (`core/headings.py`), and the artifact is unchanged:
+- `get_section_text(start, end)` appends the text of page `end + 1` up to the
+  earliest heading that starts partway down it. The appended text follows a
+  `=== Continued from the top of page N, up to the next section heading "..." ===`
+  line and that page's `--- PAGE N ---` marker. The marker is there because
+  agents cite pages from the markers; without it the tail's rows were cited as
+  page `end`.
+- Nothing is appended when no section starts on that page (the ranges already
+  cover it), when a heading opens it, or after the last page.
+- If a section starts there but its heading cannot be located, there is no safe
+  cut point. A `=== NOTE ===` names the page instead of appending it. Appending
+  the whole page was the first design, and code review rejected it: on a ToC
+  whose titles do not match the printed headings (a paraphrased LLM ToC) it
+  doubled every read.
+- When a heading starts partway down the read's *first* page,
+  `=== SECTION STARTS: <title> (text above is the previous section's) ===`
+  precedes it, so the rows above are not attributed to the section that was
+  requested. A read of "1.4 Temperature" on BME280 otherwise opens with pressure
+  rows. Only the first page is marked: marking every mid-page heading in a read
+  cost a median 5-10% of read characters (p90 13-20%) while repeating headings
+  already visible as text. One marker by title costs a median ~2.5%.
+- In `search_text`, a hit on a page where a section starts mid-page takes the
+  breadcrumb of the last heading before the hit's offset in document order,
+  rather than the deepest node covering the page. Other pages are unchanged.
+
+Heading positions come from `text_content` and the ToC alone. They are located
+once per loaded build, so cold builds and disk reuse agree and nothing is
+persisted. Offsets index the page text exactly as `TextSearchMatch.start` does.
+An offset that is too early cuts the tail short, the error this exists to
+prevent, so the matcher is biased late:
+- A heading must begin a line, so a mid-sentence mention ("see 3 Thermal
+  limits") is ignored.
+- A line holding only the title is preferred to one that merely starts with it.
+  A short title such as "Pressure" also starts table rows above the real heading.
+  With no title-only line, the *last* line starting with the title wins.
+- Printed numbering the bookmark omits is tolerated (`5.2`, `A.1`, `IV.`), and
+  so is a `Chapter`/`Section`/`Appendix`/`Part` keyword. The ESP32 TRM prints
+  bookmark "1 ULP Coprocessor (ULP)" as "Chapter 1", a blank line, then the
+  title.
+- Every heading is searched from the top of its page, because two-column pages
+  print headings out of ToC order (PIC16F887 prints FIGURE 3-5 above FIGURE
+  3-4). Only an offset another heading already holds moves the search on, so
+  duplicate titles on one page resolve to their own lines.
+- A heading that could not be located has no position, and search ownership
+  skips it. If it comes before the first located heading in ToC order, it may be
+  printed above it. The page then has no safe cut point: the NOTE replaces the
+  appended head, the first-page marker is withheld, and search falls back to
+  page-level breadcrumbs. ToC order is only a proxy for print order, so this
+  errs toward a NOTE, never toward lost rows.
+
+Corpus, 25 documents, every ToC node's own range read:
+- 1,673 of 3,734 reads (45%) gain a head; median 456 characters appended, p90
+  1,537.
+- 34 reads get the unlocated-heading NOTE instead, 15 of them on the ESP32 TRM.
+- 0.44 first-page markers per read.
+- No read loses text.
+
+**Extending `end_page` instead was designed and rejected (2026-11-02).** Two
+independent reviews found its blast radius:
+- Overlapping ranges needed separate rules in search breadcrumbs, multi-variant
+  suppression, evidence-lead de-duplication (which infers nesting from range
+  containment), the summarizer and persistence.
+- It would have fired the "Do NOT report a per-part answer" note on the agent's
+  full read of a comparison table whose last page became shared.
+- A strict "heading opens the page" test fails on TI, where the part-list running
+  header survives furniture stripping. About 44% of boundaries would have
+  extended by a whole page, against the few lines of residue a read now appends
+  there.
+
+The accepted cost: `end_page`, `table_count` and `has_tables` in the JSON still
+describe the tiled range, so a consumer that unions node page ranges itself
+(datasheet-agent's `_spec_pages`) still misses the tail page.
 
 ### Agent System Prompt Guidance
 
