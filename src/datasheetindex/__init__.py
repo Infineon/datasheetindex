@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     )
     from datasheetindex.mcp_server import create_local_mcp_server, run_mcp_server
     from datasheetindex.tools import (
+        DATASHEET_TOOL_INSTRUCTIONS,
         DatasheetToolDef,
         DatasheetTools,
         DatasheetToolSession,
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
     )
 
 __all__ = [
+    "DATASHEET_TOOL_INSTRUCTIONS",
     "BatchResult",
     "DatasheetIndex",
     "DatasheetToolDef",
@@ -60,6 +62,7 @@ _ATTR_MODULES = {
     "run_mcp_server": "datasheetindex.mcp_server",
     # Delegated to the tools package's own lazy table, so each of these names
     # has one home to update when a tool class moves between its modules.
+    "DATASHEET_TOOL_INSTRUCTIONS": "datasheetindex.tools",
     "DatasheetTools": "datasheetindex.tools",
     "DatasheetToolDef": "datasheetindex.tools",
     "DatasheetToolSession": "datasheetindex.tools",

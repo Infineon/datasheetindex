@@ -369,6 +369,10 @@ for d in tool_defs:
         # async (args: dict) -> {"content": [...], "is_error": bool}
         handler=d.handler,
     )
+
+# The orientation text the stdio MCP server sends as its `instructions`.
+# Other hosts, the Agent-SDK adapter included, put it in the system prompt.
+from datasheetindex import DATASHEET_TOOL_INSTRUCTIONS
 ```
 
 Text blocks are `{"type": "text", "text": ...}`. `inspect_page` is the only tool

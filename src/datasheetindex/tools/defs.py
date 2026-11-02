@@ -27,6 +27,23 @@ from typing import Any
 from datasheetindex.llm.figure_captions import DEFAULT_MAX_FIGURE_CAPTIONS
 from datasheetindex.tools.bound import DatasheetTools
 
+#: Orientation for an agent meeting these tools. The stdio MCP server sends it
+#: as its ``instructions``. Every other host -- ``create_datasheet_tool_defs``,
+#: and the Agent-SDK adapter, whose ``create_sdk_mcp_server`` takes no
+#: instructions -- must put it in the system prompt itself; exporting it is
+#: what makes that one copy rather than a hand-written paraphrase.
+#: ``tests/test_defs.py`` fails if it leaves a tool out or names a snake_case
+#: tool or parameter that does not exist.
+DATASHEET_TOOL_INSTRUCTIONS = (
+    "Extract technical parameters from PDF datasheets. Call "
+    "build_datasheet FIRST with a pdf_source (local path or URL) to load "
+    "a document -- it returns the full enriched ToC for navigation "
+    "planning. Then use get_section_text to read page ranges, search_text "
+    "to locate keywords, inspect_page for visual content, and "
+    "extract_table_markdown for a clean Markdown table when "
+    "get_section_text shows a garbled one."
+)
+
 #: Attached to a ``search_text`` result only when the search found nothing AND
 #: the document carries raster regions -- the one case where a miss is genuinely
 #: uninformative. It names the next action, because a limitation stated without

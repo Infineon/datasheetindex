@@ -19,6 +19,7 @@ from typing import Any
 
 from datasheetindex._version import package_version
 from datasheetindex.tools.defs import (
+    DATASHEET_TOOL_INSTRUCTIONS,
     DatasheetToolSession,
     create_datasheet_tool_session,
 )
@@ -91,15 +92,9 @@ def _envelope_to_content(envelope: dict[str, Any], types_module: Any) -> list[An
 
 
 #: The server's ``instructions``: an agent's first impression of this server.
-SERVER_INSTRUCTIONS = (
-    "Extract technical parameters from PDF datasheets. Call "
-    "build_datasheet FIRST with a pdf_source (local path or URL) to load "
-    "a document -- it returns the full enriched ToC for navigation "
-    "planning. Then use get_section_text to read page ranges, search_text "
-    "to locate keywords, inspect_page for visual content, and "
-    "extract_table_markdown for a clean Markdown table when "
-    "get_section_text shows a garbled one."
-)
+#: Defined in ``tools.defs`` and exported there for hosts that are not this
+#: server; this module-level name is kept for existing importers.
+SERVER_INSTRUCTIONS = DATASHEET_TOOL_INSTRUCTIONS
 
 
 def _text_error(message: str) -> dict[str, Any]:

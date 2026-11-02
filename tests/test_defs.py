@@ -1091,3 +1091,40 @@ def test_zero_hit_note_does_not_steer_by_captions_that_cannot_exist():
     assert set(row) == {"page", "figures", "caption"}
     assert "raster count" not in _EMPTY_SEARCH_BLOCKED_CAPTIONS_NOTE
     assert "'pages'" in _EMPTY_SEARCH_BLOCKED_CAPTIONS_NOTE
+
+
+def test_agent_instructions_are_exported_for_sdk_hosts():
+    """Hosts built on ``create_datasheet_tool_defs`` get the same orientation
+    text the MCP server sends as its ``instructions``, from one source."""
+    import datasheetindex
+    from datasheetindex import mcp_server
+    from datasheetindex.tools import DATASHEET_TOOL_INSTRUCTIONS
+
+    assert mcp_server.SERVER_INSTRUCTIONS is DATASHEET_TOOL_INSTRUCTIONS
+    # Beside create_datasheet_tool_defs, where the README sends hosts.
+    assert datasheetindex.DATASHEET_TOOL_INSTRUCTIONS is DATASHEET_TOOL_INSTRUCTIONS
+
+
+def test_agent_instructions_name_exactly_the_registered_tools():
+    """Every tool is introduced, and nothing the instructions name is stale.
+
+    Snake_case identifiers in the text must each be a registered tool or one of
+    their parameters: a renamed or dropped tool fails here instead of steering
+    the agent toward a call that does not exist. Single-word parameters
+    ("query") cannot be told apart from English and are not checked; nor is
+    which tool a parameter is attributed to.
+    """
+    import re
+
+    from datasheetindex.tools import DATASHEET_TOOL_INSTRUCTIONS
+    from datasheetindex.tools.defs import create_datasheet_tool_defs
+
+    defs = create_datasheet_tool_defs()
+    tools = {d.name for d in defs}
+    params = {p for d in defs for p in d.input_schema.get("properties", {})}
+    named = set(
+        re.findall(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b", DATASHEET_TOOL_INSTRUCTIONS)
+    )
+
+    assert tools <= named, f"not introduced: {sorted(tools - named)}"
+    assert named <= tools | params, f"unknown: {sorted(named - tools - params)}"
