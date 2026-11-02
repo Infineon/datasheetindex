@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
-from datasheetindex.core.textfile import page_texts
+from datasheetindex.core.textfile import extract_page_text, page_texts
 from datasheetindex.models import flatten_nodes
 
 if TYPE_CHECKING:
@@ -33,19 +33,25 @@ _NUMBERING = r"(?:[A-Z]?\d+(?:\.\d+)*[.)]?|[A-Z][.)]|[IVXLC]+[.)])"
 
 
 @lru_cache(maxsize=1024)
-def _heading_pattern(title: str) -> re.Pattern[str] | None:
+def _heading_patterns(title: str) -> tuple[re.Pattern[str], ...]:
     tokens = title.split()
     if not tokens:
-        return None
+        return ()
     body = r"\s+".join(re.escape(token) for token in tokens)
     # Group 1 starts at the beginning of the line, so a marker inserted there
     # precedes any indentation instead of splitting it. A heading must begin a
     # line: a title mentioned mid-sentence ("see 3 Thermal limits") is not
     # where the section starts, and stopping there would cut the tail short --
     # the one error this module exists to prevent.
-    return re.compile(
-        rf"(?:^|\n)([ \t]*(?:{_NUMBERING}[ \t]+)?{body})(?=\s|$)",
-        re.IGNORECASE,
+    head = rf"(?:^|\n)([ \t]*(?:{_NUMBERING}[ \t]+)?{body})"
+    return (
+        # The title alone on its line. Tried first: a short title such as
+        # "Pressure" also starts table rows ("Pressure 300 1100 hPa") above the
+        # real heading.
+        re.compile(rf"{head}(?=[ \t]*(?:\n|$))", re.IGNORECASE),
+        # The title starting a line that continues, as when PyMuPDF merges a
+        # heading with the next line's text.
+        re.compile(rf"{head}(?=\s|$)", re.IGNORECASE),
     )
 
 
@@ -53,13 +59,14 @@ def locate_heading(page_text: str, title: str) -> int | None:
     """Offset of the line where ``title`` starts as a heading, or ``None``.
 
     Tolerates case, whitespace and line wrapping inside the title, and printed
-    numbering the bookmark omits. The first line-starting occurrence wins.
+    numbering the bookmark omits. A line holding only the title wins; failing
+    that, the first line that starts with it.
     """
-    pattern = _heading_pattern(title)
-    if pattern is None:
-        return None
-    match = pattern.search(page_text)
-    return match.start(1) if match else None
+    for pattern in _heading_patterns(title):
+        match = pattern.search(page_text)
+        if match:
+            return match.start(1)
+    return None
 
 
 @dataclass(frozen=True)
@@ -68,10 +75,18 @@ class PageHeadings:
 
     #: ``(offset, node)`` for each heading found below other content, by offset.
     mid: tuple[tuple[int, TocNode], ...] = ()
-    #: Some section's heading is the first content of the page.
-    opens: bool = False
-    #: Some section starts here but its heading was not found on the page.
-    unlocated: bool = False
+    #: Sections whose heading is the first content of the page.
+    top: tuple[TocNode, ...] = ()
+    #: Sections that start here but whose heading was not found on the page.
+    missing: tuple[TocNode, ...] = ()
+
+    @property
+    def opens(self) -> bool:
+        return bool(self.top)
+
+    @property
+    def unlocated(self) -> bool:
+        return bool(self.missing)
 
 
 def map_headings(nodes: list[TocNode], text_content: str) -> dict[int, PageHeadings]:
@@ -85,18 +100,19 @@ def map_headings(nodes: list[TocNode], text_content: str) -> dict[int, PageHeadi
     for page, page_nodes in by_page.items():
         text = texts.get(page, "")
         mid: list[tuple[int, TocNode]] = []
-        opens = unlocated = False
+        top: list[TocNode] = []
+        missing: list[TocNode] = []
         for node in page_nodes:
             offset = locate_heading(text, node.title)
             if offset is None:
-                unlocated = True
+                missing.append(node)
             elif text[:offset].strip():
                 mid.append((offset, node))
             else:
-                opens = True
-        # sorted() is stable, so equal offsets keep document order.
+                top.append(node)
+        # sort() is stable, so equal offsets keep document order.
         mid.sort(key=lambda item: item[0])
-        result[page] = PageHeadings(tuple(mid), opens, unlocated)
+        result[page] = PageHeadings(tuple(mid), tuple(top), tuple(missing))
     return result
 
 
@@ -105,30 +121,40 @@ def next_page_head(
 ) -> str | None:
     """The framed text that continues a read ending on ``page - 1``, if any.
 
-    Nothing when no section starts on ``page`` (its content is the previous
-    section's, and the ranges already cover it) or when a heading opens it.
-    Otherwise the text above the earliest mid-page heading. When a section
-    starts here but no heading was found, the whole page: a page of overlap
-    is the safe error, a lost tail the unsafe one.
+    The text above the earliest heading found partway down ``page``. Nothing
+    when no section starts there (the ranges already cover it), when a heading
+    opens it, or when no heading was located (see ``next_page_note``). The
+    page marker follows the framing line because agents cite pages from the
+    markers: without it the tail's rows would be cited as ``page - 1``.
     """
     entry = headings.get(page)
-    if entry is None or entry.opens:
+    if entry is None or entry.opens or not entry.mid:
         return None
-    text = page_texts(text_content).get(page, "")
-    if entry.mid:
-        offset, node = entry.mid[0]
-        framing = (
-            f"=== Continued from the top of page {page}, up to the next section "
-            f'heading "{node.title.strip()}" ==='
-        )
-        return f"{framing}\n{text[:offset].rstrip()}"
-    if entry.unlocated:
-        framing = (
-            f"=== Continued: all of page {page}. A section starts on it, but its "
-            "heading could not be located ==="
-        )
-        return f"{framing}\n{text}"
-    return None
+    offset, node = entry.mid[0]
+    head = extract_page_text(text_content, page)[:offset].rstrip()
+    framing = (
+        f"=== Continued from the top of page {page}, up to the next section "
+        f'heading "{node.title.strip()}" ==='
+    )
+    return f"{framing}\n--- PAGE {page} ---\n{head}"
+
+
+def next_page_note(page: int, headings: dict[int, PageHeadings]) -> str | None:
+    """A NOTE when a section starts on ``page`` but no heading could be placed.
+
+    There is no safe cut point then, and appending the whole page doubled
+    every read on a ToC whose titles do not match the printed headings (a
+    paraphrased LLM ToC). Saying where the section may continue keeps the miss
+    visible and leaves the fetch to the agent.
+    """
+    entry = headings.get(page)
+    if entry is None or entry.opens or entry.mid or not entry.unlocated:
+        return None
+    return (
+        f"=== NOTE: a section starts on page {page}, but its heading could not "
+        "be located there, so this range may end before its section does. Read "
+        f"page {page} too if values seem to be missing. ==="
+    )
 
 
 def mark_section_start(
@@ -140,14 +166,17 @@ def mark_section_start(
     are the previous section's tail. Later headings in a read are its own
     structure, already visible as headings, and marking them all cost a median
     5-10% of read characters on the corpus. No marker when a heading opens the
-    page, since the text above a later heading is then the opening section's.
+    page or could not be located, since the text above a later heading may
+    then be the read's own section.
 
     ``section`` is the raw slice ``extract_section_text`` returns. The offset is
     rebased past the ``--- PAGE N ---`` marker and the line breaks ``page_texts``
     strips after it, so it lands where search offsets point.
     """
     entry = headings.get(page)
-    if entry is None or entry.opens or not entry.mid:
+    # An unlocated heading may be the one that opens the page, and then the
+    # text above the mid-page heading is the read's own: claim nothing.
+    if entry is None or entry.opens or entry.unlocated or not entry.mid:
         return section
     page_marker = f"--- PAGE {page} ---"
     found = section.find(page_marker)
@@ -167,22 +196,37 @@ def mark_section_start(
 
 
 def section_at(
-    nodes: list[TocNode],
+    flat_nodes: list[TocNode],
     headings: dict[int, PageHeadings],
     page: int,
     offset: int,
 ) -> TocNode | None:
-    """The section owning ``offset`` on ``page``: the last heading before it.
+    """The section owning ``offset`` on ``page``: the latest heading before it.
 
-    Walks headings in document order, so the result is the most recently
-    started section -- which is how an outline divides text. A heading that
-    opens its page or was not found counts as starting at offset 0.
+    ``flat_nodes`` is ``flatten_nodes(nodes)``, passed in so a search resolves
+    it once rather than per match. Candidates are sections whose range reaches
+    the previous page, plus those whose heading on ``page`` opens it or sits
+    above ``offset``. The latest by position wins, and among equal positions
+    the later in document order, which is the deeper one. Position, not ToC
+    order, so an outline bookmarked out of page order cannot pick a section
+    that ended long before. A heading that could not be located has no
+    position and is skipped: counting it at offset 0 handed a child the text
+    above its own parent's heading.
     """
-    mid_offsets = {id(node): at for at, node in headings.get(page, PageHeadings()).mid}
-    owner: TocNode | None = None
-    for node in flatten_nodes(nodes):
-        if node.start_page < page or (
-            node.start_page == page and mid_offsets.get(id(node), 0) <= offset
-        ):
-            owner = node
-    return owner
+    entry = headings.get(page, PageHeadings())
+    placed = {id(node): 0 for node in entry.top}
+    placed.update({id(node): at for at, node in entry.mid})
+    best: TocNode | None = None
+    best_key: tuple[int, int, int] | None = None
+    for index, node in enumerate(flat_nodes):
+        if node.start_page < page:
+            if node.end_page < page - 1:
+                continue
+            key = (node.start_page, 0, index)
+        elif node.start_page == page and placed.get(id(node), offset + 1) <= offset:
+            key = (page, placed[id(node)], index)
+        else:
+            continue
+        if best_key is None or key > best_key:
+            best, best_key = node, key
+    return best

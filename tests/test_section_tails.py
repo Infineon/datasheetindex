@@ -5,8 +5,8 @@ sibling starts. When that sibling's heading is partway down its page, the text
 above it belongs to the earlier section, and before this change a read of the
 earlier section's range silently dropped it -- BME280 "1.3 Pressure sensor
 specification" lost half its spec table that way. These tests pin the read-time
-fix: the head of the next page is appended up to the heading, every mid-page
-heading inside a read is marked, and search breadcrumbs follow position.
+fix: the head of the next page is appended up to the heading, a heading partway
+down the read's first page is marked, and search breadcrumbs follow position.
 """
 
 from __future__ import annotations
@@ -84,6 +84,12 @@ class TestLocateHeading:
         text = "tail row\n5.2 Recommended Operating Conditions\nrow"
         assert locate_heading(text, "Recommended Operating Conditions") == 9
 
+    def test_a_table_row_starting_with_a_short_title_is_not_the_heading(self):
+        """A full-line match wins over a line that merely starts with the title:
+        stopping at the row would cut the tail short."""
+        text = "Pressure 300 1100 hPa\nmore tail\nPressure\nrow"
+        assert locate_heading(text, "Pressure") == text.index("Pressure\nrow")
+
     def test_absent_title_is_none(self):
         assert locate_heading("nothing here", "4 Ordering") is None
 
@@ -101,9 +107,15 @@ class TestNextPageHead:
         assert len(framing) == 1, out
         assert "page 3" in framing[0]
         assert "3 Temperature specification" in framing[0]
-        # The framing line comes before the appended text, never a page marker.
         assert out.index(framing[0]) < out.index("Long term stability row B")
-        assert "--- PAGE 3 ---" not in out
+
+    def test_the_appended_head_carries_its_page_marker(self):
+        """Agents cite pages from the markers: without one, the tail's rows
+        would be attributed to the last page of the requested range."""
+        out = DatasheetTools.get_section_text(_tools(), 2, 2)
+        framing = _framing(out)[0]
+        marker = out.index("--- PAGE 3 ---")
+        assert out.index(framing) < marker < out.index("Long term stability row B")
 
     def test_nothing_is_appended_when_the_next_heading_opens_its_page(self):
         tools = _tools()
@@ -120,15 +132,19 @@ class TestNextPageHead:
         out = DatasheetTools.get_section_text(_tools(), 4, 4)
         assert out.rstrip().endswith("Order row D")
 
-    def test_unlocated_heading_appends_the_whole_page_and_says_so(self):
+    def test_unlocated_heading_raises_a_note_instead_of_appending_the_page(self):
+        """Without a located heading there is no safe cut point. Appending the
+        whole page doubled every read on a ToC whose titles do not match the
+        printed headings (a paraphrased LLM ToC), so the read says where its
+        section may continue and leaves the fetch to the agent."""
         toc = [*_TOC[:2], [1, "3 Thermal limits", 3], _TOC[3]]
         out = DatasheetTools.get_section_text(_tools(toc=toc), 2, 2)
-        assert "Long term stability row B" in out
-        assert "Temp row C" in out
-        framing = _framing(out)
-        assert len(framing) == 1, out
-        assert "page 3" in framing[0]
-        assert "could not be located" in framing[0]
+        assert "Long term stability row B" not in out
+        assert _framing(out) == []
+        notes = [line for line in out.splitlines() if line.startswith("=== NOTE")]
+        assert len(notes) == 1, out
+        assert "page 3" in notes[0]
+        assert "could not be located" in notes[0]
 
     def test_the_head_stops_at_the_earliest_of_two_headings(self):
         pages = {
@@ -177,6 +193,14 @@ class TestSectionStartMarkers:
         """Text above a later heading then belongs to the opening section."""
         pages = {**_PAGES, 3: "3 Temperature\nintro\n3.1 Limits\nrow E"}
         toc = [*_TOC[:2], [1, "3 Temperature", 3], [2, "3.1 Limits", 3], _TOC[3]]
+        out = DatasheetTools.get_section_text(_tools(pages, toc), 3, 3)
+        assert "SECTION STARTS" not in out
+
+    def test_no_marker_when_a_heading_on_the_first_page_is_unlocated(self):
+        """An unlocated heading may be the one opening the page, in which case
+        the text above the mid-page heading is the read's own section."""
+        pages = {**_PAGES, 3: "Thermal intro\nmore\n3.1 Limits\nrow E"}
+        toc = [*_TOC[:2], [1, "3 Thermal limits", 3], [2, "3.1 Limits", 3], _TOC[3]]
         out = DatasheetTools.get_section_text(_tools(pages, toc), 3, 3)
         assert "SECTION STARTS" not in out
 
@@ -230,6 +254,12 @@ class TestSearchBreadcrumbs:
         toc = [[1, "1 A", 1], [2, "1.1 A one", 2], [1, "2 B", 3], [2, "2.1 B one", 4]]
         hits = DatasheetTools.search_text(_tools(pages, toc), "tail of A one")
         assert hits[0].get("breadcrumb") == "1 A > 1.1 A one"
+
+    def test_an_unlocated_child_does_not_claim_text_above_its_parent(self):
+        pages = {1: "1 A\nrow", 2: "tail of A\n2 B\nrow of B"}
+        toc = [[1, "1 A", 1], [1, "2 B", 2], [2, "2.1 Hidden", 2]]
+        hits = DatasheetTools.search_text(_tools(pages, toc), "tail of A")
+        assert hits[0].get("breadcrumb") == "1 A"
 
     def test_text_above_a_mid_page_child_belongs_to_the_parent_opening_the_page(
         self,

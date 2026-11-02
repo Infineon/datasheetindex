@@ -1781,14 +1781,18 @@ heading.
 
 The fix is at **read time** (`core/headings.py`), and the artifact is unchanged:
 - `get_section_text(start, end)` appends the text of page `end + 1` up to the
-  earliest heading that starts partway down it, after a
+  earliest heading that starts partway down it. The appended text follows a
   `=== Continued from the top of page N, up to the next section heading "..." ===`
-  line.
+  line and that page's `--- PAGE N ---` marker. The marker is there because
+  agents cite pages from the markers; without it the tail's rows were cited as
+  page `end`.
 - Nothing is appended when no section starts on that page (the ranges already
   cover it), when a heading opens it, or after the last page.
-- If a section starts there but its heading cannot be located, the whole page is
-  appended and the line says so. A page of overlap is the safe error; a lost
-  tail is the one this exists to prevent.
+- If a section starts there but its heading cannot be located, there is no safe
+  cut point. A `=== NOTE ===` names the page instead of appending it. Appending
+  the whole page was the first design, and code review rejected it: on a ToC
+  whose titles do not match the printed headings (a paraphrased LLM ToC) it
+  doubled every read.
 - When a heading starts partway down the read's *first* page,
   `=== SECTION STARTS: <title> (text above is the previous section's) ===`
   precedes it, so the rows above are not attributed to the section that was
@@ -1802,15 +1806,21 @@ The fix is at **read time** (`core/headings.py`), and the artifact is unchanged:
 
 Heading positions come from `text_content` and the ToC alone. They are located
 once per loaded build, so cold builds and disk reuse agree and nothing is
-persisted. Offsets index the page text exactly as `TextSearchMatch.start` does;
-the matcher requires a heading to begin a line, because a mid-sentence mention
-("see 3 Thermal limits") taken for the heading would cut the tail short.
+persisted. Offsets index the page text exactly as `TextSearchMatch.start` does.
+An offset that is too early cuts the tail short, the error this exists to
+prevent, so the matcher is biased late:
+- A heading must begin a line, so a mid-sentence mention ("see 3 Thermal
+  limits") is ignored.
+- A line holding only the title is preferred to one that merely starts with it.
+  A short title such as "Pressure" also starts table rows above the real heading.
+- A heading that could not be located has no position. Search ownership skips
+  it, and the first-page marker is not emitted when one is on that page.
 
 Corpus, 25 documents, every ToC node's own range read:
-- 1,725 of 3,734 reads (46%) gain a head; median 422 characters appended, p90
-  1,516.
-- 50 reads append a whole page because the heading could not be located, 34 of
-  them on the ESP32 TRM.
+- 1,725 of 3,734 reads (46%) gain a head; median 439 characters appended, p90
+  1,532.
+- 50 reads get the unlocated-heading NOTE instead, 34 of them on the ESP32 TRM.
+- 0.41 first-page markers per read.
 - No read loses text.
 
 **Extending `end_page` instead was designed and rejected (2026-11-02).** Two

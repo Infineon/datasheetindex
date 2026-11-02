@@ -39,6 +39,7 @@ from datasheetindex.core.headings import (
     map_headings,
     mark_section_start,
     next_page_head,
+    next_page_note,
     section_at,
 )
 from datasheetindex.core.locate import TextLocation
@@ -79,6 +80,7 @@ from datasheetindex.models import (
     DatasheetArtifacts,
     TocNode,
     TocQuality,
+    flatten_nodes,
 )
 from datasheetindex.tools.vision import Detail, inspect_page
 
@@ -1072,11 +1074,12 @@ class DatasheetTools:
            the text above it is the previous section's tail.
         4. When a section starts partway down page ``end_page + 1``, the text
            above its heading -- the tail of the section this range ends in --
-           after a ``=== Continued from the top of page N ... ===`` line. If a
-           section starts there but its heading cannot be located, the whole
-           page follows instead, and the line says so. Ranges tile whole pages,
-           so without this a read of a section's own range dropped every row
-           printed above the next heading.
+           after a ``=== Continued from the top of page N ... ===`` line and
+           that page's ``--- PAGE N ---`` marker. Ranges tile whole pages, so
+           without this a read of a section's own range dropped every row
+           printed above the next heading. If a section starts there but its
+           heading cannot be located, nothing is appended; a NOTE in part 2
+           names the page instead.
 
         The absence of a NOTE means none was detected. It is not a completeness
         claim: content can spill across a page break with no marker at all.
@@ -1095,6 +1098,10 @@ class DatasheetTools:
         notes = _variant_note(artifacts, start_page, end_page)
         notes += _continuation_notes(artifacts.text_content, start_page, end_page)
         headings = self._headings(artifacts)
+        if end_page < total_pages:
+            note = next_page_note(end_page + 1, headings)
+            if note is not None:
+                notes.append(note)
         section = mark_section_start(
             extract_section_text(artifacts.text_content, start_page, end_page),
             start_page,
@@ -1186,11 +1193,14 @@ class DatasheetTools:
             # where a section starts mid-page has more than one owner, so
             # there the lookup goes by the match's position instead.
             breadcrumb_by_page: dict[int, str | None] = {}
+            flat_nodes: list[TocNode] | None = None
             for match in matches:
                 page_number = match["page"]
                 if headings.get(page_number, PageHeadings()).mid:
+                    if flat_nodes is None:
+                        flat_nodes = flatten_nodes(artifacts.nodes)
                     owner = section_at(
-                        artifacts.nodes, headings, page_number, match["start"]
+                        flat_nodes, headings, page_number, match["start"]
                     )
                     breadcrumb = owner.breadcrumb if owner else None
                 else:

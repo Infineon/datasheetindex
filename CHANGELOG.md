@@ -12,11 +12,13 @@ All notable changes to this project will be documented in this file.
   "1.3 Pressure sensor specification" (pages 10-10) lost its accuracy, noise,
   solder-drift and long-term-stability rows, which sit on page 11 above "1.4".
   - `get_section_text` now appends the head of the next page, up to that
-    heading, after a `=== Continued from the top of page N ... ===` line. If the
-    heading cannot be located, it appends the whole page and says so.
+    heading, after a `=== Continued from the top of page N ... ===` line and the
+    page's `--- PAGE N ---` marker, so the rows are cited on the right page.
+  - If the heading cannot be located, a `=== NOTE ===` names the page instead of
+    appending it.
   - Across the 25-document corpus, 1,725 of 3,734 section reads gain a head
-    (median 422 characters, p90 1,516). 50 append a whole page. No read loses
-    text.
+    (median 439 characters, p90 1,532). 50 get the unlocated-heading NOTE. No
+    read loses text.
 - **Search hits take the breadcrumb of the section that owns their position.**
   On a page where a section starts mid-page, `search_text` attributes a hit to
   the last heading before it. A hit in the previous section's tail no longer
