@@ -33,11 +33,24 @@ All notable changes to this project will be documented in this file.
   23). None of the 399 additions is prose.
 
 ### Added
+- **`datasheetindex.tools.DATASHEET_TOOL_INSTRUCTIONS`**, the orientation text
+  the MCP server sends as its `instructions`. Hosts that wire
+  `create_datasheet_tool_defs` into their own runtime got none of it before.
+  - It is defined once, in `tools/defs.py`. `mcp_server.SERVER_INSTRUCTIONS`
+    remains as an alias.
+  - A test now fails if the text leaves a tool out, or names a tool or
+    parameter that does not exist.
 - `=== SECTION STARTS: <title> (text above is the previous section's) ===` in
   `get_section_text` output, when a heading starts partway down the read's first
   page. Without it, a read of BME280 "1.4 Temperature" opens with pressure rows
   that belong to 1.3. Only the first page is marked: marking every mid-page
   heading cost a median 5-10% of read characters. One marker costs about 2.5%.
+
+### Fixed (docs)
+- The architecture doc no longer says the preamble is reachable through the
+  agent tools. Its agent workflow now says to read pages 1-2 with
+  `get_section_text(1, 2)`, and its furniture "known limits" table says which
+  hosts still have the unstripped cover title.
 
 ### Notes
 - The artifact is unchanged: `end_page`, `table_count` and `has_tables` still

@@ -33,6 +33,21 @@ from datasheetindex.tools.bound import DatasheetTools
 #: a remedy just stops the agent: the observed failure was an agent reporting
 #: "the document does not contain SUMITOMO" after one empty search, when the
 #: word was in a supplier table exported as an image.
+#: Orientation for an agent meeting these tools: the MCP server sends it as
+#: its ``instructions``, and a host wiring ``create_datasheet_tool_defs`` into
+#: its own runtime should put it in the system prompt. One source for both, so
+#: the two surfaces cannot drift; ``tests/test_defs.py`` fails if it names a
+#: tool or parameter that does not exist, or leaves a tool out.
+DATASHEET_TOOL_INSTRUCTIONS = (
+    "Extract technical parameters from PDF datasheets. Call "
+    "build_datasheet FIRST with a pdf_source (local path or URL) to load "
+    "a document -- it returns the full enriched ToC for navigation "
+    "planning. Then use get_section_text to read page ranges, search_text "
+    "to locate keywords, inspect_page for visual content, and "
+    "extract_table_markdown for a clean Markdown table when "
+    "get_section_text shows a garbled one."
+)
+
 _EMPTY_SEARCH_RASTER_NOTE = (
     "No text-layer match. This document contains raster figures whose contents "
     "are pixels, not text, so a term inside one is unreachable from here. Check "

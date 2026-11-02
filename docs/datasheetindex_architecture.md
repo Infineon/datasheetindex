@@ -1042,7 +1042,7 @@ constants above read as decisions rather than taste.
 | Furniture confined to one **part** of a document | `ti_lm358.pdf` is a 32-page datasheet bound ahead of 36 pages of package-option and mechanical appendices with their own furniture. Each header variant covers 16 of its parity's 34 pages, so neither the overall nor the parity threshold is met, and the document still strips nothing. Not a parity problem; reaching it needs a lower fraction, which is worse (above) |
 | Page-number-only footers | A letterless key would delete numeric content (above) |
 | A repeated **table header row** on a table-heavy document | It is in-band, caption-free and recurrent. On the PSoC the repeated `Spec ID Parameter Description Min Typ Max Unit` row reaches 38/134 -- under threshold there, but not necessarily elsewhere. No cheap guard exists; `DATASHEETINDEX_FURNITURE=0` is the escape |
-| A product title on a cover page | Dropped when the same string also runs as a header on most other pages (observed on the PSoC). Still reachable via the unstripped preamble and `search_text` |
+| A product title on a cover page | Dropped when the same string also runs as a header on most other pages (observed on the PSoC). A Python API host still has it in the unstripped `preamble` (`json_data["preamble"]`). The agent tools do not expose the preamble, so for an MCP or Agent-SDK agent it survives only where the name also appears in body text, which `search_text` finds |
 
 #### Alternatives measured and rejected
 
@@ -1882,8 +1882,10 @@ You have access to a datasheet with:
 WORKFLOW:
 
 Phase 1 — ORIENT (do this once, before any extraction):
-  1. Read the JSON "preamble" — this is pages 1-2 of the datasheet,
-     giving you the product name(s), key features, and performance summary.
+  1. Read pages 1-2 of the datasheet, giving you the product name(s), key
+     features, and performance summary. A host on the Python API can hand you
+     the JSON "preamble" (raw, unstripped); over the agent tools, which do not
+     expose it, call get_section_text(1, 2).
      From this you can tell immediately if it's single or multi-product,
      and what the key differentiators are (voltage, speed, package, etc.)
   2. Scan the JSON tree to find relevant structural sections:

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from datasheetindex.tools.bound import DatasheetTools
     from datasheetindex.tools.defs import (
+        DATASHEET_TOOL_INSTRUCTIONS,
         DatasheetToolDef,
         DatasheetToolSession,
         create_datasheet_tool_defs,
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
     from datasheetindex.tools.vision import inspect_page
 
 __all__ = [
+    "DATASHEET_TOOL_INSTRUCTIONS",
     "DatasheetToolDef",
     "DatasheetToolSession",
     "DatasheetTools",
@@ -38,6 +40,7 @@ __all__ = [
 ]
 
 _ATTR_MODULES = {
+    "DATASHEET_TOOL_INSTRUCTIONS": "datasheetindex.tools.defs",
     "DatasheetTools": "datasheetindex.tools.bound",
     "DatasheetToolDef": "datasheetindex.tools.defs",
     "DatasheetToolSession": "datasheetindex.tools.defs",
