@@ -61,9 +61,9 @@ def _create_client() -> tuple[AsyncAnthropic, Any]:
 
     http_client = None
     if tls_verify_disabled():
-        # anthropic==1.0.0 requires an httpx2 client -- it rejects a plain
-        # httpx.AsyncClient at construction with a TypeError ("Expected an
-        # instance of `httpx2.AsyncClient`"). openai==3.3.1 accepts either,
+        # anthropic requires an httpx2 client -- it rejects a plain
+        # httpx.AsyncClient at construction with a TypeError (checked on
+        # 1.0.0 and 2.3.0). openai (3.3.1, 3.42.1) accepts either,
         # so httpx2 is used at every client-construction site in this
         # package for one consistent library rather than two.
         import httpx2
