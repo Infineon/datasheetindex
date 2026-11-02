@@ -47,9 +47,9 @@ harness = [
     "anthropic>=0.69",
     "openai>=1.60",
     "httpx>=0.28",
-    # The locked anthropic==1.0.0 rejects a plain httpx.AsyncClient/Client
-    # as its `http_client` override (TypeError at construction: "Expected
-    # an instance of `httpx2.AsyncClient`"). openai==3.3.1 accepts either,
+    # anthropic rejects a plain httpx.AsyncClient/Client as its
+    # `http_client` override (TypeError at construction: "this SDK uses
+    # `httpx2`"; checked on 1.0.0 and 2.3.0). openai (3.3.1, 3.42.1) accepts either,
     # so every client-construction site in this package (datasheet_tools,
     # classifier, openai_path) standardizes on httpx2. Declared explicitly
     # rather than relying on it arriving transitively through anthropic's
