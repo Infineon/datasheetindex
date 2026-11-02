@@ -27,12 +27,6 @@ from typing import Any
 from datasheetindex.llm.figure_captions import DEFAULT_MAX_FIGURE_CAPTIONS
 from datasheetindex.tools.bound import DatasheetTools
 
-#: Attached to a ``search_text`` result only when the search found nothing AND
-#: the document carries raster regions -- the one case where a miss is genuinely
-#: uninformative. It names the next action, because a limitation stated without
-#: a remedy just stops the agent: the observed failure was an agent reporting
-#: "the document does not contain SUMITOMO" after one empty search, when the
-#: word was in a supplier table exported as an image.
 #: Orientation for an agent meeting these tools: the MCP server sends it as
 #: its ``instructions``, and a host wiring ``create_datasheet_tool_defs`` into
 #: its own runtime should put it in the system prompt. One source for both, so
@@ -48,6 +42,12 @@ DATASHEET_TOOL_INSTRUCTIONS = (
     "get_section_text shows a garbled one."
 )
 
+#: Attached to a ``search_text`` result only when the search found nothing AND
+#: the document carries raster regions -- the one case where a miss is genuinely
+#: uninformative. It names the next action, because a limitation stated without
+#: a remedy just stops the agent: the observed failure was an agent reporting
+#: "the document does not contain SUMITOMO" after one empty search, when the
+#: word was in a supplier table exported as an image.
 _EMPTY_SEARCH_RASTER_NOTE = (
     "No text-layer match. This document contains raster figures whose contents "
     "are pixels, not text, so a term inside one is unreachable from here. Check "
