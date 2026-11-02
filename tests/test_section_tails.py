@@ -97,9 +97,7 @@ class TestNextPageHead:
 
     def test_the_appended_head_is_framed_and_names_where_it_stops(self):
         out = DatasheetTools.get_section_text(_tools(), 2, 2)
-        framing = [
-            line for line in out.splitlines() if line.startswith("=== Continued")
-        ]
+        framing = _framing(out)
         assert len(framing) == 1, out
         assert "page 3" in framing[0]
         assert "3 Temperature specification" in framing[0]
@@ -127,9 +125,7 @@ class TestNextPageHead:
         out = DatasheetTools.get_section_text(_tools(toc=toc), 2, 2)
         assert "Long term stability row B" in out
         assert "Temp row C" in out
-        framing = [
-            line for line in out.splitlines() if line.startswith("=== Continued")
-        ]
+        framing = _framing(out)
         assert len(framing) == 1, out
         assert "page 3" in framing[0]
         assert "could not be located" in framing[0]
