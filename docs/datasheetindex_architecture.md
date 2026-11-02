@@ -1884,8 +1884,12 @@ WORKFLOW:
 Phase 1 — ORIENT (do this once, before any extraction):
   1. Read pages 1-2 of the datasheet, giving you the product name(s), key
      features, and performance summary. A host on the Python API can hand you
-     the JSON "preamble" (raw, unstripped); over the agent tools, which do not
-     expose it, call get_section_text(1, 2).
+     the JSON "preamble" (raw, unstripped). Over the agent tools, which do not
+     expose it, call get_section_text(1, 2), or (1, 1) on a one-page document.
+     That text is furniture-stripped: a cover title that also runs as a page
+     header is gone from it (see "Known limits" under running header/footer
+     stripping), so take the product name from the ToC or a search if page 1
+     does not show it.
      From this you can tell immediately if it's single or multi-product,
      and what the key differentiators are (voltage, speed, package, etc.)
   2. Scan the JSON tree to find relevant structural sections:

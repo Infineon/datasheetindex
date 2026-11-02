@@ -92,7 +92,8 @@ def _envelope_to_content(envelope: dict[str, Any], types_module: Any) -> list[An
 
 
 #: The server's ``instructions``: an agent's first impression of this server.
-#: Defined in ``tools.defs`` so SDK hosts get the same text.
+#: Defined in ``tools.defs`` and exported there for hosts that are not this
+#: server; this module-level name is kept for existing importers.
 SERVER_INSTRUCTIONS = DATASHEET_TOOL_INSTRUCTIONS
 
 

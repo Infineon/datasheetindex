@@ -28,6 +28,11 @@ def create_datasheet_tools_server():
     ``create_sdk_mcp_server``. Tool names, descriptions, and JSON schemas are
     therefore identical to the neutral defs -- non-SDK hosts can realize the same
     tools without importing ``claude-agent-sdk`` (see ``create_datasheet_tool_defs``).
+
+    ``create_sdk_mcp_server`` takes no server instructions, so the orientation
+    text the stdio MCP server sends cannot ride along here: put
+    :data:`datasheetindex.DATASHEET_TOOL_INSTRUCTIONS` in the agent's system
+    prompt yourself.
     """
     try:
         from claude_agent_sdk import (  # type: ignore[import-not-found]  # ty: ignore[unresolved-import]
