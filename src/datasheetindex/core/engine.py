@@ -1,8 +1,10 @@
 """Ownership of the process-wide PyMuPDF state that ``pymupdf4llm`` changes.
 
-PyMuPDF 2.x bundles ``pymupdf4llm`` and the ONNX layout engine, and a plain
-``import pymupdf`` imports both. That import changes two module globals, and
-both alter what *every* later PyMuPDF call in the process returns:
+PyMuPDF 2.x bundles ``pymupdf4llm`` and the ONNX layout engine. PyMuPDF 2.0
+imports both with a plain ``import pymupdf``; 2.1 defers them to first use,
+which can be inside ``find_tables()`` (see :func:`find_classic_tables`). The
+import changes two module globals, and both alter what *every* later PyMuPDF
+call in the process returns:
 
 * ``pymupdf._get_layout`` -- an ONNX-backed callable that
   ``Page.find_tables()`` consults on every call, switching it to the ML engine.
@@ -20,17 +22,18 @@ So which table engine runs, and what text comes back, are properties of the
 that imports ``pymupdf4llm`` or writes either global. It resets the flag to
 PyMuPDF's own default at import and never turns it back on, and:
 
-* :func:`classic_tables` suppresses the hook and holds the flag off, so
-  ``find_tables()`` uses PyMuPDF's classic geometric detector on corrected
-  character boxes.
+* :func:`classic_tables` suppresses the hook and holds the flag off, and
+  :func:`find_classic_tables`, called inside it, keeps ``find_tables()`` from
+  re-importing either, so the scan uses PyMuPDF's classic geometric detector
+  on corrected character boxes.
 * :func:`layout_engine` yields ``pymupdf4llm`` with its hook installed, and
   resets the flag again after importing it, since a first import sets it.
 
 Both serialize on one re-entrant lock. The import inside
-:func:`layout_engine` stays under it although PyMuPDF 2.x has already done the
-import: with a pymupdf4llm that is imported separately, the import *is* what
-installs the hook, and one racing :func:`classic_tables` lets the guard restore
-a stale ``None`` while ``pymupdf4llm._use_layout`` stays ``True``.
+:func:`layout_engine` must stay under it: on 2.1, or with a pymupdf4llm
+imported separately, the import *is* what installs the hook, and one racing
+:func:`classic_tables` lets the guard restore a stale ``None`` while
+``pymupdf4llm._use_layout`` stays ``True``.
 ``to_markdown`` then routes into ``_layout_to_markdown``, iterates a ``None``
 ``page.layout_information``, and raises ``TypeError`` -- permanently, since the
 module is cached.
@@ -115,6 +118,27 @@ def classic_tables() -> Generator[None]:
                 pymupdf._get_layout = saved
         finally:
             pymupdf.TOOLS.unset_quad_corrections(saved_quads)
+
+
+def find_classic_tables(page: Any) -> Any:
+    """``page.find_tables()`` on the classic detector; call inside ``classic_tables()``.
+
+    The guard alone is not enough from PyMuPDF 2.1 on. There the default
+    ``use_layout=True`` branch of ``find_tables()`` does two things no guard
+    can undo from outside the call:
+
+    * it calls ``page.get_layout()``, which imports ``pymupdf.layout`` on first
+      use; the import's ``activate()`` installs the hook the guard has just
+      cleared, so every page scanned under that guard ran the ML engine;
+    * it turns quad corrections off for the rest of the call, so the classic
+      detector read uncorrected character boxes.
+
+    On a sequential build of the TI ADS1115 that took the count from 392
+    tables to 99, and the Bosch BME280 build segfaulted. ``use_layout=False``
+    skips that branch. PyMuPDF 2.0 counts identically with or without it:
+    with the hook cleared, its branch did nothing.
+    """
+    return page.find_tables(use_layout=False)
 
 
 @contextmanager

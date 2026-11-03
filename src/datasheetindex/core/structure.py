@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from datasheetindex._scan_worker import init_pool_worker
 from datasheetindex.core.boilerplate import flag_boilerplate
-from datasheetindex.core.engine import classic_tables
+from datasheetindex.core.engine import classic_tables, find_classic_tables
 from datasheetindex.core.textfile import extract_page_text, extract_section_text
 from datasheetindex.models import TocNode
 
@@ -269,8 +269,7 @@ def _count_tables_on_page(args: tuple[str, int]) -> tuple[int, int]:
     doc = _pymupdf.open(pdf_path)
     try:
         with classic_tables():
-            tables = doc[page_idx].find_tables()  # type: ignore[attr-defined]
-        return page_idx, len(tables.tables)
+            return page_idx, len(find_classic_tables(doc[page_idx]).tables)
     finally:
         doc.close()
 
@@ -663,8 +662,7 @@ def _build_table_count_cache_sequential(
     cache: dict[int, int] = {}
     with classic_tables():
         for page_idx in range(len(doc)):
-            tables = doc[page_idx].find_tables()  # type: ignore[attr-defined]
-            cache[page_idx] = len(tables.tables)
+            cache[page_idx] = len(find_classic_tables(doc[page_idx]).tables)
     return cache
 
 

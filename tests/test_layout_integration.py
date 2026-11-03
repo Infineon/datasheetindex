@@ -17,7 +17,7 @@ from pathlib import Path
 import pymupdf
 import pytest
 
-from datasheetindex.core.engine import classic_tables
+from datasheetindex.core.engine import classic_tables, find_classic_tables
 from datasheetindex.tools.defs import create_datasheet_tool_session
 from tests.test_structure import _expected_classic_counts, _write_mixed_table_pdf
 
@@ -109,7 +109,7 @@ def _classic_counts(pdf: Path) -> dict[int, int]:
     doc = pymupdf.open(str(pdf))
     try:
         with classic_tables():
-            return {i: len(doc[i].find_tables().tables) for i in range(len(doc))}
+            return {i: len(find_classic_tables(doc[i]).tables) for i in range(len(doc))}
     finally:
         doc.close()
 
@@ -409,7 +409,7 @@ def test_layout_use_leaves_classic_reads_unchanged():
 
     def read(page: pymupdf.Page) -> tuple[list, list]:
         with classic_tables():
-            found = [t.extract() for t in page.find_tables()]
+            found = [t.extract() for t in find_classic_tables(page)]
         return found, page.get_text("blocks")
 
     doc = pymupdf.open(str(pdf))

@@ -2,18 +2,24 @@
 
 Run as a script by tests/test_layout_integration.py, never collected. A fresh
 interpreter is the only way to observe the state ``import pymupdf`` leaves
-behind: PyMuPDF 2.x imports pymupdf4llm and the ONNX engine with it, which
-installs ``pymupdf._get_layout`` and turns ``TOOLS.unset_quad_corrections`` on,
-and by the time pytest reaches this file other tests have long since been
-through ``layout_engine()``.
+behind, and by the time pytest reaches this file other tests have long since
+been through ``layout_engine()``. That state depends on the PyMuPDF version:
+
+* 2.0 imports pymupdf4llm and the ONNX engine with ``import pymupdf``, which
+  installs ``pymupdf._get_layout`` and turns ``TOOLS.unset_quad_corrections``
+  on;
+* 2.1 defers both to first use, and ``find_tables()``'s default
+  ``use_layout=True`` branch is such a use -- the first scanned page then ran
+  the ML engine, and every page read uncorrected character boxes.
 
 What this proves, precisely:
 
 * importing DatasheetTools resets the quad-corrections flag that pymupdf4llm
   set, and leaves the layout hook PyMuPDF installed alone;
 * a build in that process reports the *classic* counts, and afterwards the hook
-  is the very callable it was and the flag is still off -- so the build's
-  classic_tables() round-trip restored both;
+  is the very callable it was (on 2.1: the engine was never imported at all)
+  and the flag is still off -- so the build's classic_tables() round-trip
+  restored both;
 * after that round-trip, extract_table_markdown still returns layout-aware
   markdown and leaves the flag off -- the leak this guards is what made every
   later read in a long-lived process see different table cells and text-block
@@ -37,10 +43,15 @@ import sys
 
 import pymupdf
 
-if not pymupdf.TOOLS.unset_quad_corrections():
-    raise AssertionError("precondition failed: import pymupdf left the flag off")
-if not callable(getattr(pymupdf, "_get_layout", None)):
-    raise AssertionError("precondition failed: import pymupdf installed no hook")
+# PyMuPDF 2.0 imports the engine with pymupdf; 2.1 defers it to first use.
+EAGER = "pymupdf4llm" in sys.modules
+if EAGER:
+    if not pymupdf.TOOLS.unset_quad_corrections():
+        raise AssertionError("precondition failed: import pymupdf left the flag off")
+    if not callable(getattr(pymupdf, "_get_layout", None)):
+        raise AssertionError("precondition failed: import pymupdf installed no hook")
+elif pymupdf._get_layout is not None or "pymupdf.layout" in sys.modules:
+    raise AssertionError("precondition failed: lazy import pymupdf loaded the engine")
 HOOK = pymupdf._get_layout
 
 from datasheetindex.tools.bound import DatasheetTools  # noqa: E402
@@ -56,11 +67,18 @@ def _sum_table_counts(nodes: list[dict]) -> int:
     return total
 
 
-def _assert_process_state(when: str) -> None:
+def _assert_process_state(when: str, *, layout_used: bool = False) -> None:
     if pymupdf.TOOLS.unset_quad_corrections():
         raise AssertionError(f"quad corrections are unset {when}")
-    if pymupdf._get_layout is not HOOK:
-        raise AssertionError(f"the layout hook was replaced {when}")
+    if EAGER:
+        if pymupdf._get_layout is not HOOK:
+            raise AssertionError(f"the layout hook was replaced {when}")
+    elif layout_used:
+        if not callable(pymupdf._get_layout):
+            raise AssertionError(f"layout use installed no hook {when}")
+    elif "pymupdf.layout" in sys.modules:
+        # The classic scan must never be what loads the engine.
+        raise AssertionError(f"the layout engine was imported {when}")
 
 
 def main(pdf_path: str, output_dir: str) -> None:
@@ -78,7 +96,7 @@ def main(pdf_path: str, output_dir: str) -> None:
 
         # First layout use in this process, after the build's guard round-trip.
         markdown = tools.extract_table_markdown(1)
-        _assert_process_state("after extract_table_markdown")
+        _assert_process_state("after extract_table_markdown", layout_used=True)
 
     if "|" not in markdown:
         raise AssertionError(f"markdown is not layout-aware: {markdown!r}")

@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **Table counts are classic again on PyMuPDF 2.1.** Installs that resolved
+  `pymupdf` 2.1 (released 2026-11-02, allowed by the previous `>=2.0` floor) got
+  wrong `table_count`s. The sequential scan was hit hardest. It is the default
+  below 12 pages, and also runs with `DATASHEETINDEX_PARALLEL=0` and after a
+  pool failure. Measured with 0.44.0 on PyMuPDF 2.1:
+  - TI ADS1115: 392 tables -> 99.
+  - TI MSP430F5529: 559 -> 379.
+  - Bosch BME280: the build segfaulted.
+  - The parallel scan drifted slightly (ADS1115 392 -> 389).
+
+  The cause: 2.1 imports the layout engine on first use
+  (pymupdf/PyMuPDF#5196), and `find_tables()`'s default `use_layout=True`
+  branch is such a use, which `classic_tables()` cannot guard:
+  - the lazy import's `activate()` reinstalls the layout hook the guard has
+    just cleared, and the sequential scan holds one guard for every page, so
+    from the first page on it ran the ML engine;
+  - the branch turns quad corrections off for the rest of the call, so
+    classic detection read uncorrected character boxes.
+
+  Every scan call now goes through `engine.find_classic_tables()`, which passes
+  `use_layout=False`. Artifacts for 32 documents are byte-identical to 0.44.0
+  on PyMuPDF 2.0, on both the parallel and the sequential scan path.
+
+### Dependencies
+- Lockfiles refreshed: pymupdf / pymupdf4llm / pymupdf-layout 2.0 -> 2.1
+  (MuPDF 1.28.5 -> 1.28.6), claude-agent-sdk 0.2.176 -> 0.2.177, ty 0.0.95 ->
+  0.0.96; benchmark: anthropic 2.3.0 -> 2.4.0.
+- Pre-commit hooks: uv-pre-commit 0.13.6 -> 0.13.7, ty v0.0.95 -> v0.0.96.
+
 ## [0.44.0] - 2026-11-02
 
 ### Fixed
