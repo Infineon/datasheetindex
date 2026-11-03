@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from datasheetindex._scan_worker import init_pool_worker
 from datasheetindex.core.boilerplate import flag_boilerplate
-from datasheetindex.core.engine import classic_tables, find_classic_tables
+from datasheetindex.core.engine import find_classic_tables
 from datasheetindex.core.textfile import extract_page_text, extract_section_text
 from datasheetindex.models import TocNode
 
@@ -259,17 +259,15 @@ def _count_tables_on_page(args: tuple[str, int]) -> tuple[int, int]:
     it on first use, and ``find_classic_tables`` never asks for it. A host
     ``__main__`` that imported pymupdf4llm is re-imported by ``spawn`` in
     every worker, though, which installs the layout hook and unsets quad
-    corrections there. The classic_tables() guard suppresses both, so
-    "classic" is a property of this function rather than of the worker's
-    import graph.
+    corrections there. find_classic_tables() suppresses both, so "classic"
+    is a property of this function rather than of the worker's import graph.
     """
     import pymupdf as _pymupdf
 
     pdf_path, page_idx = args
     doc = _pymupdf.open(pdf_path)
     try:
-        with classic_tables():
-            return page_idx, len(find_classic_tables(doc[page_idx]).tables)
+        return page_idx, len(find_classic_tables(doc[page_idx]).tables)
     finally:
         doc.close()
 
@@ -659,11 +657,10 @@ def _build_table_count_cache_sequential(
     Pinned to the classic detector: this runs in the caller's process, which may
     have imported pymupdf4llm and installed the layout hook.
     """
-    cache: dict[int, int] = {}
-    with classic_tables():
-        for page_idx in range(len(doc)):
-            cache[page_idx] = len(find_classic_tables(doc[page_idx]).tables)
-    return cache
+    return {
+        page_idx: len(find_classic_tables(doc[page_idx]).tables)
+        for page_idx in range(len(doc))
+    }
 
 
 def enrich_with_table_counts(

@@ -23,3 +23,15 @@ def package_version() -> str:
         return version("datasheetindex")
     except PackageNotFoundError:
         return _FALLBACK
+
+
+def pymupdf_version() -> str:
+    """Return the version of the PyMuPDF this process imported.
+
+    From the module, not the distribution metadata: ``pymupdf-lite`` installs
+    the same ``pymupdf`` module under another distribution name. Imported here
+    rather than at module level so importing this helper stays cheap.
+    """
+    import pymupdf
+
+    return str(pymupdf.VersionBind)

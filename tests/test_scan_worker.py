@@ -24,6 +24,20 @@ def _run(code: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def test_package_import_does_not_import_pymupdf():
+    """Every worker imports this package first, to resolve its initializer.
+
+    An eager re-export in datasheetindex/__init__.py would import PyMuPDF and
+    datasheetindex.core in every worker and in the Windows helper just to find
+    init_pool_worker, which needs neither.
+    """
+    proc = _run(
+        "import sys, datasheetindex, datasheetindex._scan_worker; "
+        "assert 'pymupdf' not in sys.modules, sorted(sys.modules)"
+    )
+    assert proc.returncode == 0, proc.stderr
+
+
 def test_classic_scan_keeps_the_engine_out():
     """A classic scan neither imports the engine nor prints anything.
 
@@ -34,10 +48,9 @@ def test_classic_scan_keeps_the_engine_out():
     code = f"""
 import sys
 import pymupdf
-from datasheetindex.core.engine import classic_tables, find_classic_tables
+from datasheetindex.core.engine import find_classic_tables
 doc = pymupdf.open()
-with classic_tables():
-    find_classic_tables(doc.new_page())
+find_classic_tables(doc.new_page())
 loaded = [m for m in {_ENGINE_MODULES!r} if sys.modules.get(m)]
 assert not loaded, loaded
 assert pymupdf._get_layout is None

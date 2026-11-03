@@ -20,7 +20,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from datasheetindex._version import package_version
+from datasheetindex._version import package_version, pymupdf_version
 from datasheetindex.core.artifact_cache import (
     ArtifactRecord,
     is_editable_install,
@@ -857,6 +857,7 @@ class DatasheetTools:
                 source_path=source_path,
                 build_options=options.to_dict(),
                 running_version=package_version(),
+                running_pymupdf_version=pymupdf_version(),
             )
         except OSError:
             logger.debug("Not reusing on-disk artifacts: %s", "source_unreadable")
@@ -981,6 +982,7 @@ class DatasheetTools:
                 source_size=source_size,
                 build_options=options.to_dict(),
                 datasheetindex_version=package_version(),
+                pymupdf_version=pymupdf_version(),
                 json_name=artifacts.json_path.name,
                 json_sha256=sha256_file(artifacts.json_path),
                 text_name=artifacts.text_path.name,

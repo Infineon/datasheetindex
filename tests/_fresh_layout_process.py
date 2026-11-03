@@ -20,9 +20,10 @@ What this proves, precisely:
   DatasheetTools.extract_table_markdown, so a regression in that wiring fails
   here even if engine.py itself is fine.
 
-What this does NOT prove: the permanent-TypeError corruption needs a
-pymupdf4llm import to land *between* classic_tables()'s save and restore, which
-cannot happen on one thread. That interleaving is guarded deterministically by
+What this does NOT prove: the stale-None corruption needs an engine import
+(``pymupdf.layout``, whose ``activate()`` installs the hook) to land *between*
+classic_tables()'s save and restore, which cannot happen on one thread. That
+interleaving is guarded deterministically by
 test_layout_engine_installs_the_hook_under_the_lock in tests/test_engine.py,
 which asserts the lock is held across the import.
 

@@ -28,6 +28,17 @@ All notable changes to this project will be documented in this file.
   `use_layout=False`. Artifacts for 32 documents are byte-identical to 0.44.0
   on PyMuPDF 2.0, on both the parallel and the sequential scan path.
 
+- **A broken `onnxruntime` degrades `extract_table_markdown` again instead of
+  failing inside it.** pymupdf4llm 2.1 decides to use layout from `find_spec`
+  alone and imports the engine at the first `page.get_layout()`, deep inside
+  `to_markdown`. `layout_engine()` now imports `pymupdf.layout` itself, under
+  its lock, and on failure logs a warning and switches pymupdf4llm to the
+  classic renderer, which is what PyMuPDF 2.0 did on its own.
+- **A host's `use_layout(False)` no longer changes table counts.** It turns
+  `pymupdf._layout_enabled` off process-wide, and 2.1 builds the scan's text
+  page with `TEXT_ACCURATE_BBOXES` only while it is on. `classic_tables()`
+  now holds it on, alongside the quad-corrections flag.
+
 ### Changed
 - **`pymupdf>=2.1`** (was `>=2.0`). 2.1 no longer imports the ONNX layout
   engine with `import pymupdf` (~2 s and ~90 MB per process on 2.0). It loads on
@@ -41,6 +52,14 @@ All notable changes to this project will be documented in this file.
   Tests now pin that neither the pool workers, the Windows helper nor a build
   imports the engine. Building the 134-page PSoC 6 datasheet took 7.5-11.9 s,
   against 11.0-15.0 s for 0.44.0 on PyMuPDF 2.0 (three runs each).
+
+- **Artifact reuse is keyed on the PyMuPDF version too.** The build sidecar
+  records `pymupdf_version`, and a different one blocks reuse
+  (`pymupdf_version_changed`), because this release shows a PyMuPDF minor can
+  change artifacts under an unchanged datasheetindex version. A sidecar
+  without the field never matches.
+- `engine.find_classic_tables()` enters `classic_tables()` itself, so the scan
+  cannot read with whatever state the host left behind.
 
 ### Dependencies
 - Lockfiles refreshed: pymupdf / pymupdf4llm / pymupdf-layout 2.0 -> 2.1

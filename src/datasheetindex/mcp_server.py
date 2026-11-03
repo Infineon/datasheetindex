@@ -46,8 +46,8 @@ def _silence_pymupdf_stdout_notice() -> None:
     the stdio transport carries JSON-RPC on -- once per process, unless
     ``pymupdf.layout`` is importable (it is with the full ``pymupdf`` 2.x wheel,
     not with ``pymupdf-lite``). Our table scan calls ``find_tables()`` on
-    every page, and ``engine.classic_tables()`` sets ``pymupdf._get_layout =
-    None``, which *satisfies* the notice's trigger rather than avoiding it.
+    every page, so on ``pymupdf-lite`` the notice is certain. Since PyMuPDF
+    2.1 the trigger is ``find_spec`` alone; the full wheel never fires it.
 
     The parallel scan is already immune: ``_scan_worker.init_pool_worker`` puts
     worker stdin/stdout on devnull. The sequential path
