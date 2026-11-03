@@ -7,12 +7,15 @@ requires-python = ">=3.13"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Infineon Technologies AG" }]
-# PyMuPDF 2.0 bundles pymupdf4llm and the ONNX layout engine, and imports both
-# whenever `pymupdf` is imported. The floor is what lets core/engine.py rely on
-# that: the layout hook and the quad-corrections flag are both already set by
-# the time our code runs, so it owns them from a known state (see engine.py).
+# PyMuPDF 2.x bundles pymupdf4llm and the ONNX layout engine. 2.0 imported
+# both with every `import pymupdf` (~2s and ~90MB per process); 2.1 defers them
+# to first use (pymupdf/PyMuPDF#5196). The floor is 2.1 because the table scan
+# relies on that: a scan process that never asks for layout never loads the
+# engine, which is what used to take `_scan_worker.skip_layout_engine` and its
+# sys.modules block to arrange. That block also made layout look uninstalled
+# to PyMuPDF, which on 2.1 changes the text-page flags workers scan with.
 #
-# It also narrows the platforms this installs on, deliberately: pymupdf 2.0
+# The 2.x major also narrows the platforms this installs on, deliberately: pymupdf 2.0
 # requires onnxruntime, which ships no sdist, and between them there are no
 # wheels for Intel macOS, musl, glibc < 2.28, Windows ARM64 or 32-bit Windows.
 # README -> "Supported platforms" lists them; 0.40.0 is the last release that
@@ -20,7 +23,7 @@ authors = [{ name = "Infineon Technologies AG" }]
 # `[layout]` would resolve the empty pymupdf4llm 2.x and break
 # extract_table_markdown, and every guard would need a test per major.
 dependencies = [
-    "pymupdf>=2.0",
+    "pymupdf>=2.1",
 ]
 
 [project.optional-dependencies]

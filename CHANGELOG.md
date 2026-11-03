@@ -28,6 +28,20 @@ All notable changes to this project will be documented in this file.
   `use_layout=False`. Artifacts for 32 documents are byte-identical to 0.44.0
   on PyMuPDF 2.0, on both the parallel and the sequential scan path.
 
+### Changed
+- **`pymupdf>=2.1`** (was `>=2.0`). 2.1 no longer imports the ONNX layout
+  engine with `import pymupdf` (~2 s and ~90 MB per process on 2.0). It loads on
+  the first `extract_table_markdown`, so a build, the CLI and an MCP server that
+  never extracts table markdown never load it. Same wheel platforms as 2.0.
+- **Removed `_scan_worker.skip_layout_engine`.** It blocked `pymupdf.layout` and
+  `pymupdf4llm` in `sys.modules` to keep 2.0's eager import out of scan workers.
+  2.1 makes that unnecessary, and on 2.1 the block was harmful: with layout
+  looking uninstalled, PyMuPDF drops `TEXT_ACCURATE_BBOXES` from the text page
+  it scans, so workers ran with different flags than the in-process fallback.
+  Tests now pin that neither the pool workers, the Windows helper nor a build
+  imports the engine. Building the 134-page PSoC 6 datasheet took 7.5-11.9 s,
+  against 11.0-15.0 s for 0.44.0 on PyMuPDF 2.0 (three runs each).
+
 ### Dependencies
 - Lockfiles refreshed: pymupdf / pymupdf4llm / pymupdf-layout 2.0 -> 2.1
   (MuPDF 1.28.5 -> 1.28.6), claude-agent-sdk 0.2.176 -> 0.2.177, ty 0.0.95 ->

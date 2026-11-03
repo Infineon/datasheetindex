@@ -255,13 +255,13 @@ def _count_tables_on_page(args: tuple[str, int]) -> tuple[int, int]:
     Each worker opens the PDF independently because PyMuPDF document
     objects cannot be pickled across process boundaries.
 
-    The worker's initializer normally keeps PyMuPDF's layout engine out of the
-    process (``_scan_worker.skip_layout_engine``), but it cannot when the
-    host's ``__main__`` imported PyMuPDF first: ``spawn`` re-imports it before
-    the initializer runs. Then the worker's ``import pymupdf`` has imported
-    pymupdf4llm, which installs the layout hook and unsets quad corrections.
-    The classic_tables() guard suppresses both, so "classic" is a property of
-    this function rather than of the worker's import graph.
+    The worker normally never loads PyMuPDF's layout engine: PyMuPDF imports
+    it on first use, and ``find_classic_tables`` never asks for it. A host
+    ``__main__`` that imported pymupdf4llm is re-imported by ``spawn`` in
+    every worker, though, which installs the layout hook and unsets quad
+    corrections there. The classic_tables() guard suppresses both, so
+    "classic" is a property of this function rather than of the worker's
+    import graph.
     """
     import pymupdf as _pymupdf
 
