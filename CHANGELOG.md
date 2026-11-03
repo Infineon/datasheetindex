@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.45.0] - 2026-11-03
 
 ### Fixed
 - **Table counts are classic again on PyMuPDF 2.1.** Installs that resolved
