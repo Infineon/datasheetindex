@@ -470,10 +470,10 @@ def test_stdio_wire_carries_only_json_even_on_the_sequential_scan(tmp_path):
 
     Two things make this worth an integration test rather than a unit one:
 
-    * It only reproduces end to end. ``engine.classic_tables()`` sets
-      ``pymupdf._get_layout = None``, which *satisfies* the notice's trigger
-      rather than avoiding it, so the condition is live in exactly the
-      configuration the server runs in.
+    * It only reproduces end to end. Since PyMuPDF 2.1 the notice keys only on
+      whether ``pymupdf.layout`` can be found, so it fires on ``pymupdf-lite``
+      and not on the full wheel; what the test pins either way is that nothing
+      the in-process scan prints reaches the wire.
     * **The corruption can arrive after the last response.** Under mcp 2.x,
       ``stdio_server`` dup2s a private fd for the wire, so the ``print`` lands in
       ``sys.stdout``'s block buffer instead; the interpreter's final flush then

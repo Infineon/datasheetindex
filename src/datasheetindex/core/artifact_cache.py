@@ -148,6 +148,11 @@ class ArtifactRecord:
     source_size: int
     build_options: dict[str, object]
     datasheetindex_version: str
+    #: The PyMuPDF that built the artifacts (``pymupdf.VersionBind``). A
+    #: fingerprint field: a PyMuPDF minor release can change artifact content
+    #: under an unchanged datasheetindex version -- 2.1 took one datasheet's
+    #: table count from 392 to 99 until 0.45.0 pinned the scan.
+    pymupdf_version: str
     json_name: str
     json_sha256: str
     text_name: str
@@ -172,6 +177,7 @@ class ArtifactRecord:
             "source_size": self.source_size,
             "build_options": dict(self.build_options),
             "datasheetindex_version": self.datasheetindex_version,
+            "pymupdf_version": self.pymupdf_version,
             "artifacts": {
                 "json": {"name": self.json_name, "sha256": self.json_sha256},
                 "text": {"name": self.text_name, "sha256": self.text_sha256},
@@ -198,6 +204,12 @@ class ArtifactRecord:
         defaulting to 0 / False reproduces exactly the reuse behaviour that
         artifact already had. Requiring them would instead log a
         diverged-shape warning on every pre-existing sidecar.
+
+        ``pymupdf_version`` *is* a fingerprint, but a missing one defaults to
+        ``""``, which equals no real version, so it can only block reuse, never
+        grant it. Only sidecars written before 0.45.0 lack it, and those fail
+        the datasheetindex version check anyway; requiring it would add a
+        misleading "unexpected shape" warning to that rebuild.
         """
         artifacts = data["artifacts"]
         return cls(
@@ -205,6 +217,7 @@ class ArtifactRecord:
             source_size=data["source_size"],
             build_options=dict(data["build_options"]),
             datasheetindex_version=data["datasheetindex_version"],
+            pymupdf_version=str(data.get("pymupdf_version", "")),
             json_name=artifacts["json"]["name"],
             json_sha256=artifacts["json"]["sha256"],
             text_name=artifacts["text"]["name"],
@@ -266,6 +279,7 @@ def reuse_blocker(
     source_path: str | Path,
     build_options: dict[str, object],
     running_version: str,
+    running_pymupdf_version: str,
 ) -> str | None:
     """Return why ``record`` cannot be reused, or None when it can.
 
@@ -286,6 +300,8 @@ def reuse_blocker(
     """
     if record.datasheetindex_version != running_version:
         return "version_changed"
+    if record.pymupdf_version != running_pymupdf_version:
+        return "pymupdf_version_changed"
     if record.llm_enrichment_incomplete:
         return "llm_enrichment_incomplete"
     if dict(record.build_options) != dict(build_options):

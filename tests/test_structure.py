@@ -1233,8 +1233,11 @@ def _fake_layout_hook(page, **kwargs):
 
 
 def test_sequential_ignores_an_active_layout_hook(tmp_path, monkeypatch):
-    """The sequential path must report classic counts even in a process that
-    has imported pymupdf4llm. Without the guard it reports the hook's answer."""
+    """The sequential path must report classic counts even in a process whose
+    layout hook is installed. find_classic_tables() keeps it out twice over:
+    use_layout=False never consults the hook, and its guard clears it. A scan
+    with neither reports the hook's answer, so this pins that at least one
+    holds; tests/test_engine.py pins each separately."""
     pages = 6
     pdf = tmp_path / "mixed.pdf"
     _write_mixed_table_pdf(pdf, pages=pages)

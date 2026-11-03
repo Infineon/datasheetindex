@@ -320,6 +320,7 @@ def make_record(**overrides) -> ArtifactRecord:
             "model": None,
         },
         datasheetindex_version="0.24.0",
+        pymupdf_version="2.1",
         json_name="ds.json",
         json_sha256="b" * 64,
         text_name="ds.txt",
@@ -445,6 +446,7 @@ def test_reuse_blocker_returns_none_when_everything_matches(source_file):
         source_path=source_file,
         build_options=record.build_options,
         running_version="0.24.0",
+        running_pymupdf_version="2.1",
     )
 
     assert blocker is None
@@ -458,6 +460,7 @@ def test_reuse_blocker_rejects_a_different_version(source_file):
         source_path=source_file,
         build_options=record.build_options,
         running_version="0.25.0",
+        running_pymupdf_version="2.1",
     )
 
     assert blocker == "version_changed"
@@ -472,6 +475,7 @@ def test_reuse_blocker_rejects_changed_source_bytes(source_file):
         source_path=source_file,
         build_options=record.build_options,
         running_version="0.24.0",
+        running_pymupdf_version="2.1",
     )
 
     assert blocker in {"source_size_changed", "source_content_changed"}
@@ -488,6 +492,7 @@ def test_reuse_blocker_detects_a_same_size_source_edit(source_file):
         source_path=source_file,
         build_options=record.build_options,
         running_version="0.24.0",
+        running_pymupdf_version="2.1",
     )
 
     assert blocker == "source_content_changed"
@@ -502,6 +507,7 @@ def test_reuse_blocker_rejects_a_missing_source(source_file):
         source_path=source_file,
         build_options=record.build_options,
         running_version="0.24.0",
+        running_pymupdf_version="2.1",
     )
 
     assert blocker == "source_missing"
@@ -517,6 +523,7 @@ def test_reuse_blocker_rejects_changed_build_options(source_file):
         source_path=source_file,
         build_options=changed,
         running_version="0.24.0",
+        running_pymupdf_version="2.1",
     )
 
     assert blocker == "build_options_changed"
@@ -535,6 +542,7 @@ def test_reuse_blocker_rejects_incomplete_enrichment(source_file):
         source_path=source_file,
         build_options=record.build_options,
         running_version="0.24.0",
+        running_pymupdf_version="2.1",
     )
 
     assert blocker == "llm_enrichment_incomplete"
@@ -554,6 +562,43 @@ def test_reuse_blocker_checks_the_cheap_fields_before_hashing(source_file, monke
         source_path=source_file,
         build_options=record.build_options,
         running_version="9.9.9",
+        running_pymupdf_version="2.1",
     )
 
     assert blocker == "version_changed"
+
+
+def test_reuse_blocker_rejects_a_different_pymupdf(source_file):
+    """A PyMuPDF release can change artifact content on its own: 2.1 moved
+    table counts under an unchanged datasheetindex version."""
+    record = matching_record(source_file)
+
+    blocker = reuse_blocker(
+        record,
+        source_path=source_file,
+        build_options=record.build_options,
+        running_version="0.24.0",
+        running_pymupdf_version="2.2",
+    )
+
+    assert blocker == "pymupdf_version_changed"
+
+
+def test_a_sidecar_without_a_pymupdf_version_never_matches(source_file):
+    """Pre-0.45.0 sidecars lack the field. Defaulting it must block reuse,
+    never grant it, and must not be logged as a diverged shape."""
+    payload = matching_record(source_file).to_dict()
+    del payload["pymupdf_version"]
+    record = ArtifactRecord.from_dict(payload)
+
+    assert record.pymupdf_version == ""
+    assert (
+        reuse_blocker(
+            record,
+            source_path=source_file,
+            build_options=record.build_options,
+            running_version="0.24.0",
+            running_pymupdf_version="2.1",
+        )
+        == "pymupdf_version_changed"
+    )

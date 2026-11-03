@@ -29,6 +29,8 @@ def _absent_hook(*args: Any, **kwargs: Any) -> Any:
 
 _HOOK = _hook
 _ABSENT = _absent_hook
+# PyMuPDF leaves _layout_enabled unannotated, so ty types it Literal[True].
+_SWITCH: Any = pymupdf
 
 
 @pytest.fixture(autouse=True)
@@ -55,6 +57,14 @@ def _restore_quad_corrections():
     saved = bool(pymupdf.TOOLS.unset_quad_corrections())
     yield
     pymupdf.TOOLS.unset_quad_corrections(saved)
+
+
+@pytest.fixture(autouse=True)
+def _restore_layout_enabled():
+    """PyMuPDF 2.1's layout switch, which classic_tables() holds on."""
+    saved = _SWITCH._layout_enabled
+    yield
+    _SWITCH._layout_enabled = saved
 
 
 def _quad_corrections_unset() -> bool:
@@ -116,88 +126,177 @@ def test_classic_tables_holds_the_lock():
 
 
 def _fake_module(*, use_layout: bool, on_use_layout=None) -> Any:
-    # Annotated Any: a bare ModuleType has no _use_layout/use_layout attributes,
+    # Any, not ModuleType: these attributes are not in ModuleType's stub,
     # so ty rejects setting them on a types.ModuleType-typed name.
     module: Any = types.ModuleType("pymupdf4llm")
     module._use_layout = use_layout
-    module.use_layout = on_use_layout or (lambda yes: None)
+
+    def _use_layout(yes: bool) -> None:
+        module._use_layout = yes
+        if on_use_layout is not None:
+            on_use_layout(yes)
+
+    module.use_layout = _use_layout
     return module
+
+
+def _fake_engine(on_activate=None) -> Any:
+    """Stand-in for ``pymupdf.layout``; ``activate()`` installs the hook."""
+    layout: Any = types.ModuleType("pymupdf.layout")
+
+    def activate() -> None:
+        pymupdf._get_layout = _HOOK
+        if on_activate is not None:
+            on_activate()
+
+    layout.activate = activate
+    return layout
+
+
+def _importer(monkeypatch, modules: dict[str, Any], on_import=None) -> list[str]:
+    """Route engine.importlib to ``modules``; an exception value is raised.
+
+    Returns the names imported, in order.
+    """
+    imported: list[str] = []
+
+    def import_module(name: str) -> Any:
+        imported.append(name)
+        if on_import is not None:
+            on_import(name)
+        found = modules[name]
+        if isinstance(found, BaseException):
+            raise found
+        return found
+
+    monkeypatch.setattr(
+        engine, "importlib", types.SimpleNamespace(import_module=import_module)
+    )
+    return imported
 
 
 def test_layout_engine_yields_the_module_and_holds_the_lock(monkeypatch):
     module = _fake_module(use_layout=True)
     pymupdf._get_layout = _HOOK
-    monkeypatch.setattr(
-        engine, "importlib", types.SimpleNamespace(import_module=lambda name: module)
-    )
+    _importer(monkeypatch, {"pymupdf4llm": module, "pymupdf.layout": _fake_engine()})
     with layout_engine() as yielded:
         assert yielded is module
         assert _lock_is_held_by_another_thread()
 
 
 def test_layout_engine_installs_the_hook_under_the_lock(monkeypatch):
-    """The import is what installs the hook, so it must happen inside the lock.
+    """The engine import is what installs the hook, so it happens in the lock.
 
-    An import outside the lock can interleave with classic_tables(), which then
-    restores a stale None while pymupdf4llm._use_layout stays True -- and every
-    later to_markdown() raises TypeError for the life of the process.
+    Since PyMuPDF 2.1 pymupdf4llm no longer imports the engine itself; left to
+    the first get_layout() inside to_markdown, the import -- and the hook --
+    would land outside the lock. One interleaving with classic_tables() then
+    restores a stale None over the fresh hook.
     """
     held: list[bool] = []
 
-    def import_module(name: str) -> types.ModuleType:
-        assert name == "pymupdf4llm"
+    def on_import(name: str) -> None:
         held.append(_lock_is_held_by_another_thread())
-        pymupdf._get_layout = _HOOK  # the real import does exactly this
-        return _fake_module(use_layout=True)
+        if name == "pymupdf.layout":
+            pymupdf._get_layout = _HOOK  # activate() at import does this
 
     pymupdf._get_layout = None
-    monkeypatch.setattr(
-        engine, "importlib", types.SimpleNamespace(import_module=import_module)
+    imported = _importer(
+        monkeypatch,
+        {
+            "pymupdf4llm": _fake_module(use_layout=True),
+            "pymupdf.layout": _fake_engine(),
+        },
+        on_import=on_import,
     )
     with layout_engine():
         assert pymupdf._get_layout is _HOOK
-    assert held == [True]
+    assert imported == ["pymupdf4llm", "pymupdf.layout"]
+    assert held == [True, True]
 
 
 def test_layout_engine_repairs_a_missing_hook(monkeypatch):
-    calls: list[bool] = []
-
-    def on_use_layout(yes: bool) -> None:
-        calls.append(yes)
-        pymupdf._get_layout = _HOOK
-
-    module = _fake_module(use_layout=True, on_use_layout=on_use_layout)
+    """An imported engine with no hook was clobbered by a stale restore."""
+    activated: list[bool] = []
     pymupdf._get_layout = None
-    monkeypatch.setattr(
-        engine, "importlib", types.SimpleNamespace(import_module=lambda name: module)
+    _importer(
+        monkeypatch,
+        {
+            "pymupdf4llm": _fake_module(use_layout=True),
+            "pymupdf.layout": _fake_engine(on_activate=lambda: activated.append(True)),
+        },
     )
     with layout_engine():
         assert pymupdf._get_layout is _HOOK
-    assert calls == [True]
+    assert activated == [True]
 
 
-def test_layout_engine_does_not_repair_when_layout_is_off(monkeypatch):
-    """A pymupdf4llm whose `import pymupdf.layout` failed has no engine to
-    reinstall. Repairing it would call use_layout(True) into an ImportError."""
-    calls: list[bool] = []
-    module = _fake_module(use_layout=False, on_use_layout=calls.append)
+def test_layout_engine_leaves_the_engine_alone_when_layout_is_off(monkeypatch):
+    """pymupdf4llm decided against layout: importing the engine would be waste,
+    and a broken onnxruntime would fail where it never needed to load."""
     pymupdf._get_layout = None
-    monkeypatch.setattr(
-        engine, "importlib", types.SimpleNamespace(import_module=lambda name: module)
-    )
+    imported = _importer(monkeypatch, {"pymupdf4llm": _fake_module(use_layout=False)})
     with layout_engine():
         assert pymupdf._get_layout is None
-    assert calls == []
+    assert imported == ["pymupdf4llm"]
+
+
+def test_layout_engine_degrades_when_the_engine_cannot_be_imported(monkeypatch, caplog):
+    """A broken onnxruntime routes to_markdown to the classic renderer.
+
+    That is what PyMuPDF 2.0 did on its own. Since 2.1 pymupdf4llm decides from
+    find_spec alone, so without this the error would surface from inside
+    to_markdown -- and layout_active() would let layout-only keywords through
+    to the classic renderer, which prints them to stdout.
+    """
+    calls: list[bool] = []
+    module = _fake_module(use_layout=True, on_use_layout=calls.append)
+    _importer(
+        monkeypatch,
+        {
+            "pymupdf4llm": module,
+            "pymupdf.layout": ImportError("libonnxruntime.so: cannot open"),
+        },
+    )
+    with caplog.at_level("WARNING"), layout_engine() as yielded:
+        assert not engine.layout_active(yielded)
+    assert calls == [False]
+    assert "onnxruntime" in caplog.text
 
 
 def test_layout_engine_raises_a_helpful_import_error(monkeypatch):
-    def boom(name: str):
-        raise ImportError(name)
-
-    monkeypatch.setattr(engine, "importlib", types.SimpleNamespace(import_module=boom))
+    _importer(monkeypatch, {"pymupdf4llm": ImportError("pymupdf4llm")})
     with pytest.raises(ImportError, match="Install pymupdf instead of pymupdf-lite"):
         with layout_engine():
             pass
+
+
+def test_classic_tables_holds_layout_enabled_on_and_restores():
+    """use_layout(False) anywhere in the process must not change the counts.
+
+    PyMuPDF 2.1 adds TEXT_ACCURATE_BBOXES to the scan's text page only while
+    _layout_enabled is on, so a sequential scan in a process that switched it
+    off would read different character boxes than a fresh pool worker.
+    """
+    _SWITCH._layout_enabled = False
+    with classic_tables():
+        assert _SWITCH._layout_enabled is True
+    assert _SWITCH._layout_enabled is False
+
+
+def test_find_classic_tables_enters_the_guard_itself():
+    """No caller can forget the guard: the read sees the guard's state."""
+    seen: list[tuple[bool, bool]] = []
+
+    class _Page:
+        def find_tables(self, **kwargs: Any) -> Any:
+            assert kwargs == {"use_layout": False}
+            seen.append((_quad_corrections_unset(), _lock_is_held_by_another_thread()))
+            return types.SimpleNamespace(tables=[])
+
+    pymupdf.TOOLS.unset_quad_corrections(True)
+    engine.find_classic_tables(_Page())
+    assert seen == [(False, True)]
+    assert _quad_corrections_unset()
 
 
 def test_classic_tables_holds_quad_corrections_on_and_restores():
@@ -226,9 +325,12 @@ def test_layout_engine_keeps_quad_corrections_on_for_every_thread(monkeypatch):
     Turning it on for the duration would let a build on another thread -- whose
     page reads take no lock -- read mangled text into its cached artifact.
     """
-    module = _fake_module(use_layout=True)
-    monkeypatch.setattr(
-        engine, "importlib", types.SimpleNamespace(import_module=lambda name: module)
+    _importer(
+        monkeypatch,
+        {
+            "pymupdf4llm": _fake_module(use_layout=True),
+            "pymupdf.layout": _fake_engine(),
+        },
     )
     pymupdf.TOOLS.unset_quad_corrections(False)
     with layout_engine():
@@ -249,9 +351,9 @@ def test_layout_engine_keeps_quad_corrections_on_for_every_thread(monkeypatch):
 def test_every_page_reading_entry_point_resets_quad_corrections(entry_point):
     """By the time any page is read, the import-time reset has happened.
 
-    PyMuPDF 2.x turns the flag on while `import pymupdf` runs, so a process
-    that never touched layout_engine() would otherwise read every page with it
-    on. Asserted in a fresh interpreter, since this one has been through every
+    A host that imported pymupdf4llm before us has turned the flag on, so a
+    process that never touched layout_engine() would otherwise read every page
+    with it on. Asserted in a fresh interpreter, since this one has been through every
     other test's toggling. The package root itself no longer implies the reset
     (it resolves its exports lazily, see datasheetindex/__init__.py), so this
     pins the entry points a host actually reads pages through.
@@ -260,7 +362,8 @@ def test_every_page_reading_entry_point_resets_quad_corrections(entry_point):
     import sys
 
     code = (
-        f"import pymupdf; {entry_point}; "
+        # The host imported pymupdf4llm first, which turns the flag on.
+        f"import pymupdf, pymupdf4llm; {entry_point}; "
         "assert not pymupdf.TOOLS.unset_quad_corrections()"
     )
     proc = subprocess.run(
@@ -270,21 +373,23 @@ def test_every_page_reading_entry_point_resets_quad_corrections(entry_point):
 
 
 def test_layout_engine_resets_a_flag_its_first_import_set(monkeypatch):
-    """The reset follows the import, because the import is what sets the flag.
+    """The reset follows the imports, because an import is what sets the flag.
 
-    Under PyMuPDF 2.x `import pymupdf` has normally imported pymupdf4llm
-    already, but not when its own `import pymupdf.layout` failed, nor for a
-    pymupdf4llm installed separately: then the import inside layout_engine() is
-    the first, and its helpers turn the flag on as it runs.
+    Since PyMuPDF 2.1 `import pymupdf` no longer imports pymupdf4llm, so the
+    import inside layout_engine() is normally the first, and its helpers turn
+    the flag on as it runs.
     """
-    module = _fake_module(use_layout=True)
 
-    def first_import(name: str) -> Any:
+    def on_import(name: str) -> None:
         pymupdf.TOOLS.unset_quad_corrections(True)
-        return module
 
-    monkeypatch.setattr(
-        engine, "importlib", types.SimpleNamespace(import_module=first_import)
+    _importer(
+        monkeypatch,
+        {
+            "pymupdf4llm": _fake_module(use_layout=True),
+            "pymupdf.layout": _fake_engine(),
+        },
+        on_import=on_import,
     )
     pymupdf.TOOLS.unset_quad_corrections(False)
     with layout_engine():

@@ -2,6 +2,71 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.45.0] - 2026-11-03
+
+### Fixed
+- **Table counts are classic again on PyMuPDF 2.1.** Installs that resolved
+  `pymupdf` 2.1 (released 2026-11-02, allowed by the previous `>=2.0` floor) got
+  wrong `table_count`s. The sequential scan was hit hardest. It is the default
+  below 12 pages, and also runs with `DATASHEETINDEX_PARALLEL=0` and after a
+  pool failure. Measured with 0.44.0 on PyMuPDF 2.1:
+  - TI ADS1115: 392 tables -> 99.
+  - TI MSP430F5529: 559 -> 379.
+  - Bosch BME280: the build segfaulted.
+  - The parallel scan drifted slightly (ADS1115 392 -> 389).
+
+  The cause: 2.1 imports the layout engine on first use
+  (pymupdf/PyMuPDF#5196), and `find_tables()`'s default `use_layout=True`
+  branch is such a use, which `classic_tables()` cannot guard:
+  - the lazy import's `activate()` reinstalls the layout hook the guard has
+    just cleared, and the sequential scan holds one guard for every page, so
+    from the first page on it ran the ML engine;
+  - the branch turns quad corrections off for the rest of the call, so
+    classic detection read uncorrected character boxes.
+
+  Every scan call now goes through `engine.find_classic_tables()`, which passes
+  `use_layout=False`. Artifacts for 32 documents are byte-identical to 0.44.0
+  on PyMuPDF 2.0, on both the parallel and the sequential scan path.
+
+- **A broken `onnxruntime` degrades `extract_table_markdown` again instead of
+  failing inside it.** pymupdf4llm 2.1 decides to use layout from `find_spec`
+  alone and imports the engine at the first `page.get_layout()`, deep inside
+  `to_markdown`. `layout_engine()` now imports `pymupdf.layout` itself, under
+  its lock, and on failure logs a warning and switches pymupdf4llm to the
+  classic renderer, which is what PyMuPDF 2.0 did on its own.
+- **A host's `use_layout(False)` no longer changes table counts.** It turns
+  `pymupdf._layout_enabled` off process-wide, and 2.1 builds the scan's text
+  page with `TEXT_ACCURATE_BBOXES` only while it is on. `classic_tables()`
+  now holds it on, alongside the quad-corrections flag.
+
+### Changed
+- **`pymupdf>=2.1`** (was `>=2.0`). 2.1 no longer imports the ONNX layout
+  engine with `import pymupdf` (~2 s and ~90 MB per process on 2.0). It loads on
+  the first `extract_table_markdown`, so a build, the CLI and an MCP server that
+  never extracts table markdown never load it. Same wheel platforms as 2.0.
+- **Removed `_scan_worker.skip_layout_engine`.** It blocked `pymupdf.layout` and
+  `pymupdf4llm` in `sys.modules` to keep 2.0's eager import out of scan workers.
+  2.1 makes that unnecessary, and on 2.1 the block was harmful: with layout
+  looking uninstalled, PyMuPDF drops `TEXT_ACCURATE_BBOXES` from the text page
+  it scans, so workers ran with different flags than the in-process fallback.
+  Tests now pin that neither the pool workers, the Windows helper nor a build
+  imports the engine. Building the 134-page PSoC 6 datasheet took 7.5-11.9 s,
+  against 11.0-15.0 s for 0.44.0 on PyMuPDF 2.0 (three runs each).
+
+- **Artifact reuse is keyed on the PyMuPDF version too.** The build sidecar
+  records `pymupdf_version`, and a different one blocks reuse
+  (`pymupdf_version_changed`), because this release shows a PyMuPDF minor can
+  change artifacts under an unchanged datasheetindex version. A sidecar
+  without the field never matches.
+- `engine.find_classic_tables()` enters `classic_tables()` itself, so the scan
+  cannot read with whatever state the host left behind.
+
+### Dependencies
+- Lockfiles refreshed: pymupdf / pymupdf4llm / pymupdf-layout 2.0 -> 2.1
+  (MuPDF 1.28.5 -> 1.28.6), claude-agent-sdk 0.2.176 -> 0.2.177, ty 0.0.95 ->
+  0.0.96; benchmark: anthropic 2.3.0 -> 2.4.0.
+- Pre-commit hooks: uv-pre-commit 0.13.6 -> 0.13.7, ty v0.0.95 -> v0.0.96.
+
 ## [0.44.0] - 2026-11-02
 
 ### Fixed

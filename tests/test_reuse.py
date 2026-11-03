@@ -1693,6 +1693,7 @@ def test_a_missing_llm_client_no_longer_blocks_reuse(tmp_path):
         source_size=src.stat().st_size,
         build_options={},
         datasheetindex_version=v,
+        pymupdf_version="2.1",
         json_name="a.json",
         json_sha256="x",
         text_name="a.txt",
@@ -1701,7 +1702,13 @@ def test_a_missing_llm_client_no_longer_blocks_reuse(tmp_path):
         toc_fallback_pending=True,
     )
     assert (
-        reuse_blocker(record, source_path=src, build_options={}, running_version=v)
+        reuse_blocker(
+            record,
+            source_path=src,
+            build_options={},
+            running_version=v,
+            running_pymupdf_version="2.1",
+        )
         is None
     )
 
@@ -1729,6 +1736,7 @@ def test_a_transient_llm_failure_still_blocks_reuse(tmp_path):
         source_size=src.stat().st_size,
         build_options={},
         datasheetindex_version=v,
+        pymupdf_version="2.1",
         json_name="a.json",
         json_sha256="x",
         text_name="a.txt",
@@ -1738,7 +1746,13 @@ def test_a_transient_llm_failure_still_blocks_reuse(tmp_path):
         llm_enrichment_notes=("toc_fallback_raised",),
     )
     assert (
-        reuse_blocker(record, source_path=src, build_options={}, running_version=v)
+        reuse_blocker(
+            record,
+            source_path=src,
+            build_options={},
+            running_version=v,
+            running_pymupdf_version="2.1",
+        )
         == "llm_enrichment_incomplete"
     )
 
