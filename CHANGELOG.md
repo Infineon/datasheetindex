@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.46.0] - 2026-11-05
+
+### Added
+- **`find_documents` MCP tool.** Lists PDFs under the folders named in the new
+  `DATASHEETINDEX_LIBRARY_ROOTS` setting (separated like `PATH`), matching every
+  query term against the file name and folder path, so an agent whose shell
+  cannot see a network share can still find the PDF to pass to
+  `build_datasheet`. Results carry the full server-side path, last-modified date
+  and size, and a status per root.
+- **On-disk library cache.** One file per root, valid for one day, refreshed in
+  a background thread at server startup and on `refresh=true`. An unreachable
+  root or unreadable folder is reported in the response, never raised.
+- Nothing changes when `DATASHEETINDEX_LIBRARY_ROOTS` is unset or blank: the
+  tool is not registered and the server serves its five tools as before. The
+  tool is MCP-server-only and is not in `create_datasheet_tool_defs()`.
+
 ## [0.45.0] - 2026-11-03
 
 ### Fixed

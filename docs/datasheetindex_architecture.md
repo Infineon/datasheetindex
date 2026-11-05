@@ -1726,6 +1726,45 @@ So the SDK server, the local MCP server, and non-SDK hosts all present identical
 tool names, descriptions, and JSON schemas -- a change to a tool def propagates to
 every surface from one place.
 
+### Library discovery: `find_documents`
+
+`mcp_server.py` registers a sixth tool, `find_documents`, only when
+`DATASHEETINDEX_LIBRARY_ROOTS` names at least one folder (roots separated by
+`os.pathsep`). It lists PDFs by file name and folder path, never by content. The
+reason it exists: an agent can only call `build_datasheet` on a path it can name,
+and when the agent's shell and the server see different filesystems (a dev
+container against a Windows share) only the server can do the finding.
+
+- **MCP-only.** It is added in `mcp_server.py`, not in
+  `create_datasheet_tool_defs()`. Embedders of the shared defs did not opt into a
+  filesystem lister, and the five-tool surface stays true for them. Unset or
+  blank, the tool is not registered at all (not a tool that answers "not
+  configured"), so nothing changes for anyone who does not use it.
+- **Full paths.** Each result carries the full server-side path, in the server's
+  own format (`\\server\share\...`), which the agent passes to
+  `build_datasheet` unchanged. `build_datasheet`'s contract is untouched, and
+  there is no root-plus-relative join for an agent on a different OS to get wrong.
+- **Matching.** Every whitespace-separated term must appear, case-insensitively,
+  in the path relative to its root (folders and file name, either separator).
+  The root is excluded, or a root named `Datasheets` would match `data`. Results
+  are sorted by relative path, capped by `limit`, and the response says
+  `total_matches` and `truncated`. Files under overlapping roots are listed once.
+- **Cache.** One JSON file per root under the artifact output directory
+  (`library/`), written atomically, valid for one day (not configurable). It is
+  loaded and, if missing or stale, rescanned in a background thread at server
+  startup, so the slow scan of a share happens before the agent asks.
+- **Failure rules.** One bad root or folder never becomes a tool error. An
+  unreadable subfolder is skipped and counted (`skipped_folders`); an unreachable
+  root keeps its previous list, if any, with its `status` and `error`. A stale
+  list is served at once while a rescan runs (`refreshing`). Only a root with no
+  list makes a call wait, for at most 30 seconds, after which it reports
+  `scanning` with the elapsed time. A corrupt or old-format cache is treated as
+  missing. Symlinks and junctions are not followed. Scans are de-duplicated
+  within one process only; several server processes may each scan a stale share.
+- **Threads, not processes.** A process pool inside the MCP stdio server
+  deadlocks on Windows (see the scan-worker notes), and the scan is I/O bound, so
+  scans run in daemon threads that never hold the state lock while scanning.
+
 ### Page-cut truncation signal
 
 A section's ToC page range does not always contain the whole of its table. In
@@ -2113,6 +2152,8 @@ datasheetindex/
 │   │                      #   bounded by max_figure_captions
 │   └── untrusted.py       # Framing for document text sent to an LLM
 │                          #   (PDF text is untrusted input, not instructions)
+├── mcp_server.py          # Local MCP server (stdio / streamable-http / sse)
+├── library.py             # find_documents: library scan, disk cache, matching
 ├── index.py               # Main DatasheetIndex class
 └── models.py              # Data models
 ```

@@ -11,7 +11,7 @@ Agent-first parameter extraction from technical datasheets.
 - [What it does](#what-it-does) · [Philosophy](#philosophy) · [Supported products](#supported-products)
 - [Token economy](#token-economy) · [Benchmark](#benchmark) · [Links](#links)
 - **Getting started** — [Setup](#setup) · [Development](#development) · [Input sources](#input-sources)
-- **Using it from an agent** — [Hand the MCP server to an agent](#hand-the-mcp-server-to-an-agent) · [Realize the tools without the Claude Agent SDK](#realize-the-tools-without-the-claude-agent-sdk) · [Run a local MCP server](#run-a-local-mcp-server)
+- **Using it from an agent** — [Hand the MCP server to an agent](#hand-the-mcp-server-to-an-agent) · [Realize the tools without the Claude Agent SDK](#realize-the-tools-without-the-claude-agent-sdk) · [Run a local MCP server](#run-a-local-mcp-server) · [Find documents in a library](#find-documents-in-a-library)
 - **What the artifacts tell an agent** — [Datasheets without a ToC](#datasheets-without-a-toc) · [Knowing where the ToC came from](#knowing-where-the-toc-came-from) · [Asking for a better ToC](#asking-for-a-better-toc) · [Datasheets that cover a product family](#datasheets-that-cover-a-product-family) · [Figure indexing and captions](#figure-indexing-and-captions)
 - **Reference** — [Python API](#python-api) · [CLI](#cli) · [Project structure](#project-structure) · [License](#license)
 
@@ -513,6 +513,44 @@ server object inside another Python runtime, use
 `create_datasheet_tools_server()` instead; it exposes the same tool surface, with
 the document loaded at runtime via the `build_datasheet` tool.
 
+### Find documents in a library
+
+`build_datasheet` needs a PDF path the server can open. When the datasheets sit
+on a network share, the agent's own shell often cannot see it (a Linux dev
+container, say), so it cannot tell which PDF to load -- but the server can.
+Set `DATASHEETINDEX_LIBRARY_ROOTS` and the server adds a sixth tool,
+`find_documents`, which lists PDFs under those folders. Unset or blank, the
+tool is not registered and the server serves exactly its five datasheet tools.
+
+```json
+{
+  "servers": {
+    "datasheetindex": {
+      "command": "uvx",
+      "args": ["--from", "datasheetindex[mcp]", "datasheetindex-mcp-server"],
+      "env": {
+        "DATASHEETINDEX_LIBRARY_ROOTS": "\\\\server\\share\\Datasheets;D:\\Manuals"
+      }
+    }
+  }
+}
+```
+
+- Several roots are separated like `PATH`: `;` on Windows, `:` on Linux and macOS.
+- A mapped drive (`Z:\...`) works only if the server process itself sees the
+  mapping; a UNC path does not depend on that.
+- Arguments: `query` (whitespace-separated terms; a document matches when its
+  path below a root contains every term, case-insensitively), `limit` (default
+  50, maximum 500) and `refresh` (rescan now).
+- Results are path matches, not content matches: only file and folder names are
+  searched, and the root itself never matches. Each result has `path`,
+  `modified` (date) and `size_kb`; pass `path` to `build_datasheet` unchanged.
+  The response also carries `total_matches`, `truncated` and a status per root.
+- The list is cached on disk for one day (fixed), so a restarted server does not
+  rescan. The server refreshes a missing or stale list in the background at
+  startup, and `refresh=true` forces a rescan. An unreachable root or an
+  unreadable folder is reported in the response, never raised.
+
 ### Datasheets without a ToC
 
 The enriched ToC comes from the PDF's own bookmarks, and plenty of real
@@ -796,6 +834,7 @@ src/datasheetindex/
         defs.py            # create_datasheet_tool_defs (framework-neutral defs)
         registry.py        # Claude Agent SDK adapter (re-exports DatasheetTools)
     mcp_server.py          # Local stdio/HTTP MCP server entry point
+    library.py             # find_documents: PDF listing for MCP library roots
     llm/
         client.py          # LLM client factory (free-text + structured_json + vision)
         toc_fallback.py    # LLM-based ToC generation fallback
