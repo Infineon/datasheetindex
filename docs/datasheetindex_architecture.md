@@ -1749,17 +1749,26 @@ container against a Windows share) only the server can do the finding.
   The root is excluded, or a root named `Datasheets` would match `data`. Results
   are sorted by relative path, capped by `limit`, and the response says
   `total_matches` and `truncated`. Files under overlapping roots are listed once.
-- **Cache.** One JSON file per root under the artifact output directory
-  (`library/`), written atomically, valid for one day (not configurable). It is
-  loaded and, if missing or stale, rescanned in a background thread at server
-  startup, so the slow scan of a share happens before the agent asks.
+- **Cache.** One JSON file per root at `<output dir>/library`, where the output
+  dir is the artifacts' (`DATASHEETINDEX_OUTPUT_DIR`, else the temp default),
+  written atomically, valid for one day (not configurable). It is loaded and, if
+  missing or stale, rescanned in a background thread at server startup, so the
+  slow scan of a share happens before the agent asks. A list whose `listed_at`
+  lies in the future (a host with its clock ahead sharing the folder) counts as
+  stale. The server loads `.env` before reading either setting, since both are
+  read once, at startup.
 - **Failure rules.** One bad root or folder never becomes a tool error. An
-  unreadable subfolder is skipped and counted (`skipped_folders`); an unreachable
-  root keeps its previous list, if any, with its `status` and `error`. A stale
+  unreadable subfolder is skipped and counted (`skipped_folders`). A PDF that
+  cannot be stat'ed, or whose path is not valid UTF-8 (a non-UTF-8 name on POSIX,
+  an unpaired surrogate on Windows), is skipped and counted (`skipped_files`):
+  no cache file or JSON-RPC message can carry such a path, and returning one
+  killed the stdio transport. A root whose rescan fails keeps its previous list,
+  if any: its `status` stays `ok` (or `refreshing`) and an `error` field says
+  what failed; it is `unavailable` only when there is no list at all. A stale
   list is served at once while a rescan runs (`refreshing`). Only a root with no
   list makes a call wait, for at most 30 seconds, after which it reports
-  `scanning` with the elapsed time. A corrupt or old-format cache is treated as
-  missing. Symlinks and junctions are not followed. Scans are de-duplicated
+  `scanning` with the elapsed time. A corrupt, damaged (non-finite numbers, deep
+  nesting) or old-format cache is treated as missing. Symlinks and junctions are not followed. Scans are de-duplicated
   within one process only; several server processes may each scan a stale share.
 - **Threads, not processes.** A process pool inside the MCP stdio server
   deadlocks on Windows (see the scan-worker notes), and the scan is I/O bound, so

@@ -537,6 +537,9 @@ tool is not registered and the server serves exactly its five datasheet tools.
 ```
 
 - Several roots are separated like `PATH`: `;` on Windows, `:` on Linux and macOS.
+  A server running under WSL (or any Linux) therefore takes `/mnt/z/...`-style
+  roots: a `Z:\...` root would split at its colon. Quotes around a root and
+  blank entries are tolerated. The variable may also be set in `.env`.
 - A mapped drive (`Z:\...`) works only if the server process itself sees the
   mapping; a UNC path does not depend on that.
 - Arguments: `query` (whitespace-separated terms; a document matches when its
@@ -549,7 +552,9 @@ tool is not registered and the server serves exactly its five datasheet tools.
 - The list is cached on disk for one day (fixed), so a restarted server does not
   rescan. The server refreshes a missing or stale list in the background at
   startup, and `refresh=true` forces a rescan. An unreachable root or an
-  unreadable folder is reported in the response, never raised.
+  unreadable folder is reported in the response, never raised. A PDF that
+  cannot be read, or whose name is not valid UTF-8, is left out and counted in
+  its root's `skipped_files`.
 
 ### Datasheets without a ToC
 

@@ -13,7 +13,11 @@ All notable changes to this project will be documented in this file.
   and size, and a status per root.
 - **On-disk library cache.** One file per root, valid for one day, refreshed in
   a background thread at server startup and on `refresh=true`. An unreachable
-  root or unreadable folder is reported in the response, never raised.
+  root or unreadable folder is reported in the response, never raised; a PDF
+  that cannot be read or whose name is not valid UTF-8 is left out and counted
+  in `skipped_files`.
+- `DATASHEETINDEX_LIBRARY_ROOTS` (and `DATASHEETINDEX_OUTPUT_DIR`, which places
+  the cache) can be set in `.env`: the MCP server loads it at startup.
 - Nothing changes when `DATASHEETINDEX_LIBRARY_ROOTS` is unset or blank: the
   tool is not registered and the server serves its five tools as before. The
   tool is MCP-server-only and is not in `create_datasheet_tool_defs()`.
