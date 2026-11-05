@@ -59,6 +59,14 @@ def parse_library_roots(value: str | None) -> list[str]:
         if not part:
             continue
         root = os.path.abspath(part)
+        try:
+            root.encode("utf-8")
+        except UnicodeEncodeError:
+            # Not valid UTF-8 (POSIX bytes): no cache name, tool description or
+            # JSON-RPC message can carry it, and one such root must not stop
+            # the server from starting.
+            logger.warning("ignoring library root that is not valid UTF-8: %r", root)
+            continue
         key = os.path.normcase(root)
         if key not in seen:
             seen.add(key)
@@ -102,6 +110,8 @@ def scan_root(root: str, *, clock: Callable[[], float] = time.time) -> ScanResul
                 ):
                     continue
             except OSError:
+                # Its type is unknown, and a folder is what loses the most.
+                skipped += 1
                 continue
             try:
                 child.path.encode("utf-8")
@@ -197,6 +207,9 @@ def load_cache(path: Path, root: str) -> ScanResult | None:
             DocumentEntry(relpath=str(r), path=str(p), mtime=float(m), size=int(z))
             for r, p, m, z in data["entries"]
         )
+        for e in entries:  # a lone surrogate would kill the stdio writer
+            e.relpath.encode("utf-8")
+            e.path.encode("utf-8")
         return ScanResult(
             root=root,
             listed_at=listed_at,

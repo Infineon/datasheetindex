@@ -1756,7 +1756,9 @@ container against a Windows share) only the server can do the finding.
   slow scan of a share happens before the agent asks. A list whose `listed_at`
   lies in the future (a host with its clock ahead sharing the folder) counts as
   stale. The server loads `.env` before reading either setting, since both are
-  read once, at startup.
+  read once, at startup. `load_dotenv()` finds `.env` by walking up from the
+  installed package, not the CWD, so this works on a source checkout only; an
+  installed server takes both from the MCP client config's `env` block.
 - **Failure rules.** One bad root or folder never becomes a tool error. An
   unreadable subfolder is skipped and counted (`skipped_folders`). A PDF that
   cannot be stat'ed, or whose path is not valid UTF-8 (a non-UTF-8 name on POSIX,

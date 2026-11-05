@@ -53,6 +53,15 @@ def test_parse_roots_dedupes_and_makes_absolute(tmp_path, monkeypatch):
     assert parse_library_roots(raw) == [str(tmp_path / "lib")]
 
 
+def test_parse_roots_drops_root_that_is_not_valid_utf8(caplog):
+    good = os.path.abspath("good")
+    bad = "/data/Datenbl\udce4tter"
+    with caplog.at_level(logging.WARNING, logger=library.logger.name):
+        roots = parse_library_roots(os.pathsep.join([bad, good]))
+    assert roots == [good]
+    assert "UTF-8" in caplog.text
+
+
 def test_scan_lists_pdfs_recursively_with_stat_fields(tmp_path):
     name = "Infineon-TLE987x-UM-v01_92-EN.pdf"
     _touch(tmp_path / "TLE" / "TLE987x" / name, size=2048)
@@ -155,6 +164,41 @@ def test_scan_skips_and_counts_name_not_encodable_as_utf8(tmp_path):
     # The listing it produces must survive the cache and the JSON response.
     save_cache(tmp_path / "c.json", result)
     assert load_cache(tmp_path / "c.json", result.root) == result
+
+
+def test_scan_counts_child_whose_type_cannot_be_determined(tmp_path, monkeypatch):
+    _touch(tmp_path / "ok.pdf")
+    _touch(tmp_path / "odd" / "hidden.pdf")
+    real_scandir = os.scandir
+
+    class _TypeUnknownEntry:
+        def __init__(self, entry):
+            self._entry = entry
+            self.name, self.path = entry.name, entry.path
+
+        def __getattr__(self, attr):
+            return getattr(self._entry, attr)
+
+        def is_dir(self, *, follow_symlinks=True):
+            raise PermissionError(13, "denied", self.path)
+
+    class _Listing:
+        def __init__(self, path):
+            self._it = real_scandir(path)
+
+        def __enter__(self):
+            return [
+                _TypeUnknownEntry(e) if e.name == "odd" else e
+                for e in self._it.__enter__()
+            ]
+
+        def __exit__(self, *exc):
+            return self._it.__exit__(*exc)
+
+    monkeypatch.setattr(library.os, "scandir", _Listing)
+    result = scan_root(str(tmp_path))
+    assert result.skipped_folders == 1
+    assert [e.relpath for e in result.entries] == ["ok.pdf"]
 
 
 def test_scan_raises_when_root_is_missing(tmp_path):
@@ -315,6 +359,26 @@ def test_load_cache_unrepresentable_mtime_is_kept(tmp_path):
     path.write_text(_cache_text("R", mtime="1e400"), encoding="utf-8")
     loaded = load_cache(path, "R")
     assert loaded is not None and loaded.entries[0].mtime == float("inf")
+
+
+@pytest.mark.parametrize("field", [0, 1])
+def test_load_cache_with_unencodable_path_is_none(tmp_path, field):
+    entry = ["a.pdf", "a.pdf", 1.0, 1]
+    entry[field] = "TLE\udc80.pdf"
+    text = json.dumps(
+        {
+            "schema": library.CACHE_SCHEMA_VERSION,
+            "root": "R",
+            "listed_at": 1.0,
+            "skipped_folders": 0,
+            "skipped_files": 0,
+            "entries": [entry],
+        }
+    )
+    assert "\\udc80" in text  # json.dumps escaped the lone surrogate
+    path = tmp_path / "c.json"
+    path.write_text(text, encoding="utf-8")
+    assert load_cache(path, "R") is None
 
 
 def test_load_cache_for_other_root_is_none(tmp_path):

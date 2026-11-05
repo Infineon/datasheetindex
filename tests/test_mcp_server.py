@@ -765,6 +765,18 @@ def test_unreachable_root_does_not_stop_server_start(tmp_path, monkeypatch):
         server.library.wait_for_scans(10)
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX byte env values only")
+def test_root_that_is_not_valid_utf8_does_not_stop_server_start(tmp_path, monkeypatch):
+    pytest.importorskip("mcp.types")
+    from datasheetindex.tools.defs import create_datasheet_tool_defs
+
+    server = _library_server(tmp_path, monkeypatch, root="/data/Datenbl\udce4tter")
+    assert server.library is None
+    assert {t.name for t in _list_tools(server.mcp_server)} == {
+        d.name for d in create_datasheet_tool_defs()
+    }
+
+
 def test_library_roots_from_dotenv_register_find_documents(tmp_path, monkeypatch):
     """A ``.env`` that names the roots configures the library like the env does.
 

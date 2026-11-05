@@ -539,7 +539,9 @@ tool is not registered and the server serves exactly its five datasheet tools.
 - Several roots are separated like `PATH`: `;` on Windows, `:` on Linux and macOS.
   A server running under WSL (or any Linux) therefore takes `/mnt/z/...`-style
   roots: a `Z:\...` root would split at its colon. Quotes around a root and
-  blank entries are tolerated. The variable may also be set in `.env`.
+  blank entries are tolerated. On a source checkout the variable may also be set
+  in `.env`; an installed server takes it from the MCP client config's `env`
+  block.
 - A mapped drive (`Z:\...`) works only if the server process itself sees the
   mapping; a UNC path does not depend on that.
 - Arguments: `query` (whitespace-separated terms; a document matches when its
