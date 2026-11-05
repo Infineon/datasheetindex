@@ -5,7 +5,9 @@ This server is a thin adapter over the framework-neutral tool session
 same five tools -- with the same names, descriptions, and JSON schemas -- that the
 Claude Agent SDK surface (``create_datasheet_tools_server``) and non-SDK hosts
 get. There is a single source of truth for the tool definitions; this module only
-wires them onto MCP transports (stdio / streamable-http / sse).
+wires them onto MCP transports (stdio / streamable-http / sse). The one addition
+is opt-in and MCP-only: a sixth tool, ``find_documents``, served only when
+``DATASHEETINDEX_LIBRARY_ROOTS`` names a folder (see ``datasheetindex.library``).
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ from datasheetindex.library import (
     default_cache_dir,
     parse_library_roots,
 )
+from datasheetindex.llm.client import ensure_dotenv_loaded
 from datasheetindex.tools.defs import (
     DATASHEET_TOOL_INSTRUCTIONS,
     DatasheetToolDef,
@@ -411,6 +414,10 @@ def create_local_mcp_server(
     """
     server_cls, types_module = _load_mcp_modules()
     session = create_datasheet_tool_session()
+    # Read .env before the library settings below: nothing else loads it until
+    # the first build_datasheet, and the roots and the cache's output dir are
+    # read only here, at startup.
+    ensure_dotenv_loaded()
     roots = parse_library_roots(os.environ.get(LIBRARY_ROOTS_ENV_VAR))
     library: DocumentLibrary | None = None
     extra_defs: list[DatasheetToolDef] = []

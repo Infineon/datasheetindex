@@ -21,7 +21,7 @@ from datasheetindex.index import resolve_default_output_dir
 from datasheetindex.tools.defs import DatasheetToolDef
 
 LIBRARY_ROOTS_ENV_VAR = "DATASHEETINDEX_LIBRARY_ROOTS"
-CACHE_SCHEMA_VERSION = 1
+CACHE_SCHEMA_VERSION = 2
 CACHE_TTL_SECONDS = 86400.0
 SCAN_WAIT_SECONDS = 30.0
 DEFAULT_LIMIT = 50
@@ -45,6 +45,7 @@ class ScanResult:
     listed_at: float
     entries: tuple[DocumentEntry, ...]
     skipped_folders: int
+    skipped_files: int = 0
 
 
 def parse_library_roots(value: str | None) -> list[str]:
@@ -69,10 +70,14 @@ def scan_root(root: str, *, clock: Callable[[], float] = time.time) -> ScanResul
     """List every PDF under ``root``, never following symlinks or junctions.
 
     Raises ``OSError`` only when ``root`` itself cannot be listed; an unreadable
-    subfolder is skipped and counted.
+    subfolder is skipped and counted, and so is a PDF that cannot be read or
+    whose path is not valid UTF-8 (a lone surrogate from a non-UTF-8 name on
+    POSIX or an unpaired one on Windows), which no cache file or JSON-RPC
+    message can carry.
     """
     entries: list[DocumentEntry] = []
     skipped = 0
+    skipped_files = 0
     stack = [root]
     while stack:
         folder = stack.pop()
@@ -90,25 +95,34 @@ def scan_root(root: str, *, clock: Callable[[], float] = time.time) -> ScanResul
                     continue
                 if child.is_dir(follow_symlinks=False):
                     stack.append(child.path)
-                elif child.is_file(follow_symlinks=False) and (
-                    child.name.lower().endswith(".pdf")
+                    continue
+                if not (
+                    child.is_file(follow_symlinks=False)
+                    and child.name.lower().endswith(".pdf")
                 ):
-                    st = child.stat(follow_symlinks=False)
-                    entries.append(
-                        DocumentEntry(
-                            relpath=os.path.relpath(child.path, root),
-                            path=child.path,
-                            mtime=st.st_mtime,
-                            size=st.st_size,
-                        )
-                    )
+                    continue
             except OSError:
                 continue
+            try:
+                child.path.encode("utf-8")
+                st = child.stat(follow_symlinks=False)
+            except (OSError, UnicodeEncodeError):
+                skipped_files += 1
+                continue
+            entries.append(
+                DocumentEntry(
+                    relpath=os.path.relpath(child.path, root),
+                    path=child.path,
+                    mtime=st.st_mtime,
+                    size=st.st_size,
+                )
+            )
     return ScanResult(
         root=root,
         listed_at=clock(),
         entries=tuple(entries),
         skipped_folders=skipped,
+        skipped_files=skipped_files,
     )
 
 
@@ -139,6 +153,7 @@ def save_cache(path: Path, result: ScanResult) -> None:
         "root": result.root,
         "listed_at": result.listed_at,
         "skipped_folders": result.skipped_folders,
+        "skipped_files": result.skipped_files,
         "entries": [[e.relpath, e.path, e.mtime, e.size] for e in result.entries],
     }
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -153,6 +168,9 @@ def save_cache(path: Path, result: ScanResult) -> None:
             os.unlink(tmp_name)
             raise
     try:
+        # On Windows this fails (access denied) while another server process
+        # has the file open for reading. The caller logs it and still serves
+        # the fresh list from memory; only the next start's warm load misses.
         os.replace(tmp_name, path)
     except BaseException:
         os.unlink(tmp_name)
@@ -160,12 +178,20 @@ def save_cache(path: Path, result: ScanResult) -> None:
 
 
 def load_cache(path: Path, root: str) -> ScanResult | None:
-    """Read a cache written by ``save_cache``; ``None`` if absent or unusable."""
+    """Read a cache written by ``save_cache``; ``None`` if absent or unusable.
+
+    Any failure means unusable: a damaged file can raise far more than the
+    obvious errors (``OverflowError`` for an ``Infinity`` size,
+    ``RecursionError`` for deep nesting), and the caller must rescan, not fail.
+    """
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         if data["schema"] != CACHE_SCHEMA_VERSION:
             return None
         if os.path.normcase(data["root"]) != os.path.normcase(root):
+            return None
+        listed_at = float(data["listed_at"])
+        if not math.isfinite(listed_at):  # NaN would never go stale
             return None
         entries = tuple(
             DocumentEntry(relpath=str(r), path=str(p), mtime=float(m), size=int(z))
@@ -173,11 +199,12 @@ def load_cache(path: Path, root: str) -> ScanResult | None:
         )
         return ScanResult(
             root=root,
-            listed_at=float(data["listed_at"]),
+            listed_at=listed_at,
             entries=entries,
             skipped_folders=int(data["skipped_folders"]),
+            skipped_files=int(data["skipped_files"]),
         )
-    except (OSError, ValueError, KeyError, TypeError):
+    except Exception:
         return None
 
 
@@ -299,7 +326,10 @@ class DocumentLibrary:
         return not any(t.is_alive() for t in threads)
 
     def _is_stale(self, result: ScanResult) -> bool:
-        return self._clock() - result.listed_at > self._ttl
+        age = self._clock() - result.listed_at
+        # A list from the future was written by a host whose clock runs ahead
+        # of ours (a shared cache folder); its age is unknown, so rescan.
+        return age < 0 or age > self._ttl
 
     def _load(self, state: _RootState) -> None:
         """Adopt the root's on-disk cache once; read outside the lock."""
@@ -392,6 +422,7 @@ class DocumentLibrary:
                 ),
                 "documents": len(result.entries) if result else 0,
                 "skipped_folders": result.skipped_folders if result else 0,
+                "skipped_files": result.skipped_files if result else 0,
             }
             if error is not None:
                 entry["error"] = error

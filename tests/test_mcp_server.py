@@ -11,6 +11,8 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import os
+import sys
 import types
 
 import pymupdf
@@ -759,5 +761,64 @@ def test_unreachable_root_does_not_stop_server_start(tmp_path, monkeypatch):
         result = _call(server.mcp_server, "find_documents", {})
         assert not result.is_error
         assert _payload(result)["roots"][0]["status"] == "unavailable"
+    finally:
+        server.library.wait_for_scans(10)
+
+
+def test_library_roots_from_dotenv_register_find_documents(tmp_path, monkeypatch):
+    """A ``.env`` that names the roots configures the library like the env does.
+
+    The roots are read when the server is created, before any tool call has
+    loaded ``.env``; ``_hermetic_llm_env`` keeps a developer's real one out.
+    """
+    pytest.importorskip("mcp.types")
+    from datasheetindex.mcp_server import create_local_mcp_server
+
+    (tmp_path / "lib").mkdir()
+
+    def load_dotenv(*_args, **_kwargs):
+        monkeypatch.setenv("DATASHEETINDEX_LIBRARY_ROOTS", str(tmp_path / "lib"))
+        monkeypatch.setenv("DATASHEETINDEX_OUTPUT_DIR", str(tmp_path / "out"))
+        return True
+
+    monkeypatch.delenv("DATASHEETINDEX_OUTPUT_DIR", raising=False)
+    monkeypatch.setitem(
+        sys.modules, "dotenv", types.SimpleNamespace(load_dotenv=load_dotenv)
+    )
+    server = create_local_mcp_server()
+    try:
+        assert server.library is not None
+        assert "find_documents" in {t.name for t in _list_tools(server.mcp_server)}
+        assert server.library.wait_for_scans(10)
+        # The cache follows the .env output dir, beside the artifacts.
+        assert list((tmp_path / "out" / "library").glob("*.json"))
+    finally:
+        server.library.wait_for_scans(10)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX byte file names only")
+def test_find_documents_result_with_unencodable_name_reaches_the_wire(
+    tmp_path, monkeypatch
+):
+    """The stdio transport serializes the result; a lone surrogate killed it."""
+    pytest.importorskip("mcp.types")
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    (lib / "TLE-UM.pdf").write_bytes(b"x")
+    try:
+        with open(os.path.join(os.fsencode(lib), b"TLE\xff-DS.pdf"), "wb") as f:
+            f.write(b"x")
+    except (OSError, ValueError):
+        pytest.skip("this filesystem cannot hold a non-UTF-8 file name")
+    server = _library_server(tmp_path, monkeypatch)
+    try:
+        result = _call(server.mcp_server, "find_documents", {})
+        assert not result.is_error
+        result.model_dump_json(by_alias=True, exclude_none=True)
+        payload = _payload(result)
+        assert [os.path.basename(d["path"]) for d in payload["documents"]] == [
+            "TLE-UM.pdf"
+        ]
+        assert payload["roots"][0]["skipped_files"] == 1
     finally:
         server.library.wait_for_scans(10)

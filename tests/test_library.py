@@ -95,6 +95,68 @@ def test_scan_skips_and_counts_unreadable_folder(tmp_path, monkeypatch):
     assert [e.relpath for e in result.entries] == ["ok.pdf"]
 
 
+class _UnstattableEntry:
+    """A scandir entry whose ``stat`` fails, as a file deleted mid-scan does."""
+
+    def __init__(self, entry):
+        self._entry = entry
+        self.name, self.path = entry.name, entry.path
+
+    def __getattr__(self, attr):
+        return getattr(self._entry, attr)
+
+    def stat(self, *, follow_symlinks=True):
+        raise PermissionError(13, "denied", self.path)
+
+
+def test_scan_skips_and_counts_pdf_that_cannot_be_read(tmp_path, monkeypatch):
+    _touch(tmp_path / "ok.pdf")
+    _touch(tmp_path / "gone.pdf")
+    real_scandir = os.scandir
+
+    class _Listing:
+        def __init__(self, path):
+            self._it = real_scandir(path)
+
+        def __enter__(self):
+            return [
+                _UnstattableEntry(e) if e.name == "gone.pdf" else e
+                for e in self._it.__enter__()
+            ]
+
+        def __exit__(self, *exc):
+            return self._it.__exit__(*exc)
+
+    monkeypatch.setattr(library.os, "scandir", _Listing)
+    result = scan_root(str(tmp_path))
+    assert [e.relpath for e in result.entries] == ["ok.pdf"]
+    assert result.skipped_files == 1 and result.skipped_folders == 0
+
+
+def _make_unencodable_pdf(folder):
+    """Create ``TLE\xff-DS.pdf``, a name that is not valid UTF-8, or skip."""
+    name = b"TLE\xff-DS.pdf"
+    try:
+        with open(os.path.join(os.fsencode(folder), name), "wb") as f:
+            f.write(b"x")
+    except (OSError, ValueError):
+        pytest.skip("this filesystem cannot hold a non-UTF-8 file name")
+    if os.fsencode(os.fsdecode(name)) != name:
+        pytest.skip("file names do not round-trip through surrogateescape")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX byte file names only")
+def test_scan_skips_and_counts_name_not_encodable_as_utf8(tmp_path):
+    _touch(tmp_path / "ok.pdf")
+    _make_unencodable_pdf(tmp_path)
+    result = scan_root(str(tmp_path))
+    assert [e.relpath for e in result.entries] == ["ok.pdf"]
+    assert result.skipped_files == 1
+    # The listing it produces must survive the cache and the JSON response.
+    save_cache(tmp_path / "c.json", result)
+    assert load_cache(tmp_path / "c.json", result.root) == result
+
+
 def test_scan_raises_when_root_is_missing(tmp_path):
     with pytest.raises(OSError):
         scan_root(str(tmp_path / "absent"))
@@ -183,8 +245,14 @@ def test_load_cache_missing_corrupt_or_old_schema_is_none(tmp_path):
     "payload",
     [
         [],
-        {"schema": 1},
-        {"schema": 1, "root": "R", "listed_at": 1.0, "skipped_folders": 0},
+        {"schema": library.CACHE_SCHEMA_VERSION},
+        {
+            "schema": library.CACHE_SCHEMA_VERSION,
+            "root": "R",
+            "listed_at": 1.0,
+            "skipped_folders": 0,
+            "skipped_files": 0,
+        },
         {
             "schema": 1,
             "root": "R",
@@ -212,6 +280,41 @@ def test_load_cache_wrong_shape_is_none(tmp_path, payload):
     path = tmp_path / "x.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     assert load_cache(path, "R") is None
+
+
+def _cache_text(root, *, listed_at="1.0", size="1", mtime="1.0"):
+    """A cache file's text with raw JSON literals spliced into its numbers."""
+    return (
+        f'{{"schema": {library.CACHE_SCHEMA_VERSION}, "root": {json.dumps(root)}, '
+        f'"listed_at": {listed_at}, "skipped_folders": 0, "skipped_files": 0, '
+        f'"entries": [["a.pdf", "a.pdf", {mtime}, {size}]]}}'
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        _cache_text("R", size="Infinity"),
+        _cache_text("R", size="1e400"),
+        _cache_text("R", listed_at="1e400"),
+        _cache_text("R", listed_at="Infinity"),
+        _cache_text("R", listed_at="NaN"),
+        "[" * 100_000 + "]" * 100_000,
+    ],
+    ids=["size-inf", "size-1e400", "listed-1e400", "listed-inf", "listed-nan", "deep"],
+)
+def test_load_cache_damaged_numbers_or_nesting_is_none(tmp_path, text):
+    path = tmp_path / "x.json"
+    path.write_text(text, encoding="utf-8")
+    assert load_cache(path, "R") is None
+
+
+def test_load_cache_unrepresentable_mtime_is_kept(tmp_path):
+    # One file's date is unknown; the response renders it as None (_local_time).
+    path = tmp_path / "x.json"
+    path.write_text(_cache_text("R", mtime="1e400"), encoding="utf-8")
+    loaded = load_cache(path, "R")
+    assert loaded is not None and loaded.entries[0].mtime == float("inf")
 
 
 def test_load_cache_for_other_root_is_none(tmp_path):
@@ -547,6 +650,68 @@ def test_cache_save_failure_is_logged_not_raised(
     assert _names(got) == ["a.pdf"]
     assert got["roots"][0]["status"] == "ok"
     assert "disk full" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        _cache_text("ROOT", size="Infinity"),
+        _cache_text("ROOT", listed_at="NaN"),
+        "[" * 100_000 + "]" * 100_000,
+    ],
+    ids=["size-inf", "listed-nan", "deep"],
+)
+def test_warm_on_a_damaged_cache_rescans_instead_of_raising(
+    tmp_path, cache_dir, make_library, text
+):
+    root = str(tmp_path / "lib")
+    path = cache_file(cache_dir, root)
+    path.parent.mkdir(parents=True)
+    path.write_text(text.replace('"ROOT"', json.dumps(root)), encoding="utf-8")
+    scanner = FakeScanner(_lists("new.pdf"))
+    lib = make_library([root], scanner)
+    lib.warm()
+    assert lib.wait_for_scans(timeout=5)
+    assert scanner.calls == [root]
+    assert _names(lib.find()) == ["new.pdf"]
+
+
+def test_list_from_the_future_is_stale(tmp_path, cache_dir, make_library):
+    # Another host sharing the cache folder, with its clock ahead of ours.
+    root = str(tmp_path / "lib")
+    _seed(cache_dir, root, ["old.pdf"], age=-3600)
+    scanner = FakeScanner(_lists("new.pdf"))
+    lib = make_library([root], scanner)
+    lib.warm()
+    assert lib.wait_for_scans(timeout=5)
+    assert scanner.calls == [root]
+    assert _names(lib.find()) == ["new.pdf"]
+
+
+def test_skipped_files_are_reported_per_root(tmp_path, cache_dir, make_library):
+    root = str(tmp_path / "lib")
+    listing = _listing(root, ["a.pdf"])
+    save_cache(
+        cache_file(cache_dir, root),
+        ScanResult(listing.root, listing.listed_at, listing.entries, 0, 3),
+    )
+    got = make_library([root], FakeScanner(_lists())).find()
+    assert got["roots"][0]["skipped_files"] == 3
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX byte file names only")
+def test_unencodable_name_is_left_out_of_the_response(
+    tmp_path, cache_dir, make_library
+):
+    lib_dir = tmp_path / "lib"
+    _touch(lib_dir / "TLE-UM.pdf")
+    _make_unencodable_pdf(lib_dir)
+    lib = make_library([str(lib_dir)], scan_root)
+    got = lib.find()
+    assert _names(got) == ["TLE-UM.pdf"]
+    assert got["roots"][0]["skipped_files"] == 1
+    json.dumps(got, ensure_ascii=False).encode("utf-8")
+    assert load_cache(cache_file(cache_dir, str(lib_dir)), str(lib_dir)) is not None
 
 
 def test_tool_def_description_names_roots_and_schema_caps_limit(tmp_path):
