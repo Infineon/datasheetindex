@@ -5,7 +5,9 @@ This server is a thin adapter over the framework-neutral tool session
 same five tools -- with the same names, descriptions, and JSON schemas -- that the
 Claude Agent SDK surface (``create_datasheet_tools_server``) and non-SDK hosts
 get. There is a single source of truth for the tool definitions; this module only
-wires them onto MCP transports (stdio / streamable-http / sse).
+wires them onto MCP transports (stdio / streamable-http / sse). The one addition
+is opt-in and MCP-only: a sixth tool, ``find_documents``, served only when
+``DATASHEETINDEX_LIBRARY_ROOTS`` names a folder (see ``datasheetindex.library``).
 """
 
 from __future__ import annotations
@@ -14,12 +16,24 @@ import argparse
 import contextlib
 import importlib
 import inspect
+import os
 import sys
+from collections.abc import Sequence
 from typing import Any
 
 from datasheetindex._version import package_version
+from datasheetindex.library import (
+    LIBRARY_INSTRUCTIONS,
+    LIBRARY_ROOTS_ENV_VAR,
+    DocumentLibrary,
+    create_find_documents_def,
+    default_cache_dir,
+    parse_library_roots,
+)
+from datasheetindex.llm.client import ensure_dotenv_loaded
 from datasheetindex.tools.defs import (
     DATASHEET_TOOL_INSTRUCTIONS,
+    DatasheetToolDef,
     DatasheetToolSession,
     create_datasheet_tool_session,
 )
@@ -165,7 +179,12 @@ def _passthrough_exceptions() -> tuple[type[BaseException], ...]:
 
 
 def _build_mcp_server(
-    session: DatasheetToolSession, server_cls: Any, types_module: Any
+    session: DatasheetToolSession,
+    server_cls: Any,
+    types_module: Any,
+    *,
+    extra_defs: Sequence[DatasheetToolDef] = (),
+    instructions: str = SERVER_INSTRUCTIONS,
 ):
     """Register the neutral tool session's defs onto a low-level MCP ``Server``.
 
@@ -183,9 +202,13 @@ def _build_mcp_server(
     ``try``/``except`` enforces "always return a result" structurally rather
     than leaving it to be maintained by counting guards -- which is how (c) was
     missed the first time. Do not "simplify" any of it away.
+
+    ``extra_defs`` (the opt-in ``find_documents``) join ``session.defs`` in one
+    list, so listing, validation and dispatch cover them through the same path.
     """
-    by_name = {d.name: d for d in session.defs}
-    validators = _compile_validators(session.defs)
+    all_defs = [*session.defs, *extra_defs]
+    by_name = {d.name: d for d in all_defs}
+    validators = _compile_validators(all_defs)
     passthrough = _passthrough_exceptions()
 
     # Positive probe rather than letting the constructor fail. The extra has no
@@ -221,7 +244,7 @@ def _build_mcp_server(
                     description=d.description,
                     input_schema=d.input_schema,
                 )
-                for d in session.defs
+                for d in all_defs
             ]
         )
 
@@ -269,7 +292,7 @@ def _build_mcp_server(
     return server_cls(
         name="datasheetindex",
         version=package_version(),
-        instructions=SERVER_INSTRUCTIONS,
+        instructions=instructions,
         on_list_tools=_on_list_tools,
         on_call_tool=_on_call_tool,
     )
@@ -290,7 +313,10 @@ class LocalMcpServer:
         host: str,
         port: int,
         streamable_http_path: str,
+        *,
+        library: DocumentLibrary | None = None,
     ) -> None:
+        self.library = library
         self.mcp_server = mcp_server
         self.session = session
         self.host = host
@@ -388,8 +414,32 @@ def create_local_mcp_server(
     """
     server_cls, types_module = _load_mcp_modules()
     session = create_datasheet_tool_session()
-    mcp_server = _build_mcp_server(session, server_cls, types_module)
-    return LocalMcpServer(mcp_server, session, host, port, streamable_http_path)
+    # Read .env before the library settings below: nothing else loads it until
+    # the first build_datasheet, and the roots and the cache's output dir are
+    # read only here, at startup.
+    ensure_dotenv_loaded()
+    roots = parse_library_roots(os.environ.get(LIBRARY_ROOTS_ENV_VAR))
+    library: DocumentLibrary | None = None
+    extra_defs: list[DatasheetToolDef] = []
+    instructions = SERVER_INSTRUCTIONS
+    if roots:
+        # Opt-in: with no roots configured the server serves exactly its five
+        # tools. warm() only starts background scans, so an unreachable root
+        # cannot stop the server from starting.
+        library = DocumentLibrary(roots, default_cache_dir())
+        library.warm()
+        extra_defs.append(create_find_documents_def(library))
+        instructions = SERVER_INSTRUCTIONS + " " + LIBRARY_INSTRUCTIONS
+    mcp_server = _build_mcp_server(
+        session,
+        server_cls,
+        types_module,
+        extra_defs=extra_defs,
+        instructions=instructions,
+    )
+    return LocalMcpServer(
+        mcp_server, session, host, port, streamable_http_path, library=library
+    )
 
 
 def run_mcp_server(

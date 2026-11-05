@@ -166,6 +166,12 @@ def _hermetic_llm_env(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _hermetic_library_env(monkeypatch):
+    """Keep a developer's library roots from adding find_documents to tool lists."""
+    monkeypatch.delenv("DATASHEETINDEX_LIBRARY_ROOTS", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _hermetic_wsl_env(monkeypatch):
     """Keep the developer's own distro out of every test.
 

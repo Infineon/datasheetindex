@@ -11,7 +11,7 @@ Agent-first parameter extraction from technical datasheets.
 - [What it does](#what-it-does) · [Philosophy](#philosophy) · [Supported products](#supported-products)
 - [Token economy](#token-economy) · [Benchmark](#benchmark) · [Links](#links)
 - **Getting started** — [Setup](#setup) · [Development](#development) · [Input sources](#input-sources)
-- **Using it from an agent** — [Hand the MCP server to an agent](#hand-the-mcp-server-to-an-agent) · [Realize the tools without the Claude Agent SDK](#realize-the-tools-without-the-claude-agent-sdk) · [Run a local MCP server](#run-a-local-mcp-server)
+- **Using it from an agent** — [Hand the MCP server to an agent](#hand-the-mcp-server-to-an-agent) · [Realize the tools without the Claude Agent SDK](#realize-the-tools-without-the-claude-agent-sdk) · [Run a local MCP server](#run-a-local-mcp-server) · [Find documents in a library](#find-documents-in-a-library)
 - **What the artifacts tell an agent** — [Datasheets without a ToC](#datasheets-without-a-toc) · [Knowing where the ToC came from](#knowing-where-the-toc-came-from) · [Asking for a better ToC](#asking-for-a-better-toc) · [Datasheets that cover a product family](#datasheets-that-cover-a-product-family) · [Figure indexing and captions](#figure-indexing-and-captions)
 - **Reference** — [Python API](#python-api) · [CLI](#cli) · [Project structure](#project-structure) · [License](#license)
 
@@ -177,15 +177,19 @@ uv sync --extra mcp
 uv pip install claude-agent-sdk
 ```
 
-For LLM-backed ToC fallback, summaries and figure captions, configure
-`LITELLM_BASE_URL` and `LITELLM_MASTER_KEY` (see `.env.example`). Two optional
-variables name the models, since which ones a gateway serves is a property of
-your deployment rather than of this library:
+For LLM-backed ToC fallback, summaries and figure captions, these are the only
+settings most deployments need (see `.env.example`):
 
-| variable | names | default |
+| variable | sets | default |
 |---|---|---|
-| `DATASHEETINDEX_MODEL` | summaries and the ToC fallback | `qwen3.8-27b` |
-| `DATASHEETINDEX_VISION_MODEL` | figure captions only | follows the text model |
+| `LITELLM_BASE_URL` | the gateway URL | required |
+| `LITELLM_MASTER_KEY` | your gateway key | required |
+| `DATASHEETINDEX_MODEL` | model for summaries and the ToC fallback | `qwen3.8-27b` |
+| `DATASHEETINDEX_VISION_MODEL` | model for figure captions only | follows the text model |
+| `LITELLM_TLS_VERIFY` | gateway certificate verification | on |
+
+The model names are settings because which models a gateway serves is a
+property of your deployment rather than of this library.
 
 `build_datasheet`'s `model` argument overrides `DATASHEETINDEX_MODEL` for one
 call; the vision model is deployment-level only, and deliberately not a tool
@@ -195,10 +199,22 @@ Deployments that do not serve `qwen3.8-27b` must explicitly name an available
 model with `DATASHEETINDEX_MODEL`. Unless separately overridden, captions use
 that same model and require image-input support.
 
-### Chat Completions configuration
+TLS verification is **on** by default. `LITELLM_TLS_VERIFY=false` (also `0`,
+`no`, `off`) turns it off, for a gateway whose certificate the local trust store
+cannot accept -- an internal CA missing from the image, or a self-signed cert on
+localhost. Adding that CA to the trust store is the better fix: `LITELLM_MASTER_KEY`
+travels on this channel. A certificate that fails verification raises
+`LlmTlsVerificationError` (exported from the package root) naming the gateway
+and both remedies, rather than degrading to an index with no ToC entries. Figure
+captioning is the exception: it still degrades, because the artifact is complete
+without captions.
 
-All library LLM calls use Chat Completions, including images and strict JSON
-schemas; there is no automatic fallback to a different API or different model.
+### Advanced: gateway compatibility
+
+Rarely needed: these settings exist for gateways or models that need different
+request parameters, and every one has a working default. All library LLM calls
+use Chat Completions, including images and strict JSON schemas; there is no
+automatic fallback to a different API or different model.
 
 | variable | controls | default |
 |---|---|---|
@@ -272,16 +288,6 @@ responses, but not for terminal API errors. It may run on concurrent caption
 threads, so use a thread-safe collector in applications. Callback exceptions are
 ignored with a payload-free warning. Optional metadata fields remain `None` when
 the gateway does not supply them.
-
-TLS verification is **on** by default. `LITELLM_TLS_VERIFY=false` (also `0`,
-`no`, `off`) turns it off, for a gateway whose certificate the local trust store
-cannot accept -- an internal CA missing from the image, or a self-signed cert on
-localhost. Adding that CA to the trust store is the better fix: `LITELLM_MASTER_KEY`
-travels on this channel. A certificate that fails verification raises
-`LlmTlsVerificationError` (exported from the package root) naming the gateway
-and both remedies, rather than degrading to an index with no ToC entries. Figure
-captioning is the exception: it still degrades, because the artifact is complete
-without captions.
 
 `claude-agent-sdk` is only required for the SDK-flavored handoff
 (`create_datasheet_tools_server`). The tool logic itself is framework-neutral --
@@ -512,6 +518,51 @@ This local server is for direct MCP testing. If you need an in-process SDK
 server object inside another Python runtime, use
 `create_datasheet_tools_server()` instead; it exposes the same tool surface, with
 the document loaded at runtime via the `build_datasheet` tool.
+
+### Find documents in a library
+
+`build_datasheet` needs a PDF path the server can open. When the datasheets sit
+on a network share, the agent's own shell often cannot see it (a Linux dev
+container, say), so it cannot tell which PDF to load -- but the server can.
+Set `DATASHEETINDEX_LIBRARY_ROOTS` and the server adds a sixth tool,
+`find_documents`, which lists PDFs under those folders. Unset or blank, the
+tool is not registered and the server serves exactly its five datasheet tools.
+
+```json
+{
+  "servers": {
+    "datasheetindex": {
+      "command": "uvx",
+      "args": ["--from", "datasheetindex[mcp]", "datasheetindex-mcp-server"],
+      "env": {
+        "DATASHEETINDEX_LIBRARY_ROOTS": "\\\\server\\share\\Datasheets;D:\\Manuals"
+      }
+    }
+  }
+}
+```
+
+- Several roots are separated like `PATH`: `;` on Windows, `:` on Linux and macOS.
+  A server running under WSL (or any Linux) therefore takes `/mnt/z/...`-style
+  roots: a `Z:\...` root would split at its colon. Quotes around a root and
+  blank entries are tolerated. On a source checkout the variable may also be set
+  in `.env`; an installed server takes it from the MCP client config's `env`
+  block.
+- A mapped drive (`Z:\...`) works only if the server process itself sees the
+  mapping; a UNC path does not depend on that.
+- Arguments: `query` (whitespace-separated terms; a document matches when its
+  path below a root contains every term, case-insensitively), `limit` (default
+  50, maximum 500) and `refresh` (rescan now).
+- Results are path matches, not content matches: only file and folder names are
+  searched, and the root itself never matches. Each result has `path`,
+  `modified` (date) and `size_kb`; pass `path` to `build_datasheet` unchanged.
+  The response also carries `total_matches`, `truncated` and a status per root.
+- The list is cached on disk for one day (fixed), so a restarted server does not
+  rescan. The server refreshes a missing or stale list in the background at
+  startup, and `refresh=true` forces a rescan. An unreachable root or an
+  unreadable folder is reported in the response, never raised. A PDF that
+  cannot be read, or whose name is not valid UTF-8, is left out and counted in
+  its root's `skipped_files`.
 
 ### Datasheets without a ToC
 
@@ -796,6 +847,7 @@ src/datasheetindex/
         defs.py            # create_datasheet_tool_defs (framework-neutral defs)
         registry.py        # Claude Agent SDK adapter (re-exports DatasheetTools)
     mcp_server.py          # Local stdio/HTTP MCP server entry point
+    library.py             # find_documents: PDF listing for MCP library roots
     llm/
         client.py          # LLM client factory (free-text + structured_json + vision)
         toc_fallback.py    # LLM-based ToC generation fallback
