@@ -1,14 +1,20 @@
-"""Tests for library discovery: root parsing, scanning and matching."""
+"""Tests for library discovery: root parsing, scanning, matching and serving."""
 
 import json
+import logging
 import os
 import re
+import threading
+import time
+from datetime import datetime
 
 import pytest
 
 from datasheetindex import library
 from datasheetindex.library import (
+    MAX_LIMIT,
     DocumentEntry,
+    DocumentLibrary,
     ScanResult,
     cache_file,
     default_cache_dir,
@@ -242,3 +248,302 @@ def test_save_cache_is_atomic(tmp_path, monkeypatch):
     monkeypatch.undo()
     assert load_cache(path, root) == old
     assert [p.name for p in tmp_path.iterdir()] == ["x.json"]
+
+
+# --- DocumentLibrary -------------------------------------------------------
+
+NOW = 1_000_000.0
+DAY = 86400.0
+
+
+def _listing(root, relpaths, *, listed_at=NOW, size=1):
+    return ScanResult(
+        root=root,
+        listed_at=listed_at,
+        entries=tuple(
+            DocumentEntry(relpath=r, path=os.path.join(root, r), mtime=NOW, size=size)
+            for r in relpaths
+        ),
+        skipped_folders=0,
+    )
+
+
+def _lists(*relpaths):
+    """A scanner outcome: list ``relpaths`` under whichever root is scanned."""
+    return lambda root: _listing(root, relpaths)
+
+
+class FakeScanner:
+    """Canned outcomes in call order (the last repeats); optionally gated."""
+
+    def __init__(self, *outcomes, gated=False):
+        self.outcomes = list(outcomes)
+        self.gated = gated
+        self.gate = threading.Event()
+        self.calls = []
+
+    def __call__(self, root):
+        self.calls.append(root)
+        if self.gated:
+            assert self.gate.wait(5), "test never released the scanner gate"
+        outcome = self.outcomes.pop(0) if len(self.outcomes) > 1 else self.outcomes[0]
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome(root)
+
+
+@pytest.fixture
+def cache_dir(tmp_path):
+    return tmp_path / "cache"
+
+
+@pytest.fixture
+def make_library(cache_dir):
+    made = []
+
+    def make(roots, scanner, **kwargs):
+        kwargs.setdefault("clock", lambda: NOW)
+        kwargs.setdefault("wait_seconds", 5.0)
+        lib = DocumentLibrary(list(roots), cache_dir, scanner=scanner, **kwargs)
+        made.append((lib, scanner))
+        return lib
+
+    yield make
+    for lib, scanner in made:
+        if isinstance(scanner, FakeScanner):
+            scanner.gate.set()
+        assert lib.wait_for_scans(timeout=5)
+
+
+def _seed(cache_dir, root, relpaths, *, age):
+    save_cache(
+        cache_file(cache_dir, root), _listing(root, relpaths, listed_at=NOW - age)
+    )
+
+
+def _names(response):
+    return [os.path.basename(d["path"]) for d in response["documents"]]
+
+
+def test_find_serves_fresh_cache_without_scanning(tmp_path, cache_dir, make_library):
+    root = str(tmp_path / "lib")
+    _seed(cache_dir, root, ["a.pdf", "b.pdf"], age=60)
+    scanner = FakeScanner(_lists("new.pdf"))
+    got = make_library([root], scanner).find()
+    assert scanner.calls == []
+    assert _names(got) == ["a.pdf", "b.pdf"]
+    [status] = got["roots"]
+    assert status["root"] == root and status["status"] == "ok"
+    assert status["documents"] == 2 and "error" not in status
+
+
+def test_warm_scans_missing_and_stale_roots_in_background(
+    tmp_path, cache_dir, make_library
+):
+    missing, stale, fresh = (str(tmp_path / n) for n in ("missing", "stale", "fresh"))
+    _seed(cache_dir, stale, ["old.pdf"], age=DAY + 1)
+    _seed(cache_dir, fresh, ["kept.pdf"], age=60)
+    scanner = FakeScanner(_lists("new.pdf"), gated=True)
+    lib = make_library([missing, stale, fresh], scanner)
+    lib.warm()  # returns although both scans are blocked on the gate
+    assert not scanner.gate.is_set()
+    scanner.gate.set()
+    assert lib.wait_for_scans(timeout=5)
+    assert sorted(scanner.calls) == sorted([missing, stale])
+    got = lib.find()
+    assert [r["status"] for r in got["roots"]] == ["ok", "ok", "ok"]
+    assert _names(got) == ["new.pdf", "new.pdf", "kept.pdf"]
+
+
+def test_stale_list_is_served_at_once_and_refreshed(tmp_path, cache_dir, make_library):
+    root = str(tmp_path / "lib")
+    _seed(cache_dir, root, ["old.pdf"], age=DAY + 1)
+    scanner = FakeScanner(_lists("new.pdf"), gated=True)
+    lib = make_library([root], scanner)
+    start = time.monotonic()
+    got = lib.find()
+    assert time.monotonic() - start < 1.0
+    assert _names(got) == ["old.pdf"]
+    assert got["roots"][0]["status"] == "refreshing"
+    assert "scan_elapsed_seconds" not in got["roots"][0]
+    scanner.gate.set()
+    assert lib.wait_for_scans(timeout=5)
+    got = lib.find()
+    assert _names(got) == ["new.pdf"]
+    assert got["roots"][0]["status"] == "ok"
+    assert scanner.calls == [root]
+
+
+def test_refresh_true_waits_for_the_new_list(tmp_path, cache_dir, make_library):
+    root = str(tmp_path / "lib")
+    _seed(cache_dir, root, ["old.pdf"], age=60)
+    scanner = FakeScanner(_lists("new.pdf"), gated=True)
+    lib = make_library([root], scanner)
+    timer = threading.Timer(0.05, scanner.gate.set)
+    timer.start()
+    try:
+        got = lib.find(refresh=True)
+    finally:
+        timer.join()
+    assert _names(got) == ["new.pdf"]
+    assert got["roots"][0]["status"] == "ok"
+
+
+def test_call_during_running_scan_does_not_start_another(
+    tmp_path, cache_dir, make_library
+):
+    root = str(tmp_path / "lib")
+    scanner = FakeScanner(_lists("a.pdf"), gated=True)
+    lib = make_library([root], scanner, wait_seconds=0.05)
+    lib.warm()
+    assert lib.find()["roots"][0]["status"] == "scanning"
+    assert lib.find(refresh=True)["roots"][0]["status"] == "scanning"
+    scanner.gate.set()
+    assert lib.wait_for_scans(timeout=5)
+    assert _names(lib.find()) == ["a.pdf"]
+    assert scanner.calls == [root]
+
+
+def test_wait_is_bounded_and_reports_scanning(tmp_path, cache_dir, make_library):
+    root = str(tmp_path / "lib")
+    now = [NOW]
+    scanner = FakeScanner(_lists("a.pdf"), gated=True)
+    lib = make_library([root], scanner, clock=lambda: now[0], wait_seconds=0.2)
+    lib.warm()
+    now[0] += 7.0
+    start = time.monotonic()
+    got = lib.find()
+    elapsed = time.monotonic() - start
+    assert 0.15 <= elapsed < 1.0
+    [status] = got["roots"]
+    assert status["status"] == "scanning"
+    assert status["scan_elapsed_seconds"] == 7
+    assert status["listed_at"] is None and status["documents"] == 0
+    assert got["documents"] == [] and got["total_matches"] == 0
+
+
+def test_unreachable_root_without_cache_is_unavailable_not_error(
+    tmp_path, cache_dir, make_library
+):
+    root = str(tmp_path / "lib")
+    scanner = FakeScanner(OSError("share offline"))
+    got = make_library([root], scanner).find()
+    [status] = got["roots"]
+    assert status["status"] == "unavailable"
+    assert status["error"].startswith("OSError")
+    assert "share offline" in status["error"]
+    assert status["listed_at"] is None
+    assert got["documents"] == []
+
+
+def test_any_scan_exception_is_recorded_not_raised(tmp_path, cache_dir, make_library):
+    root = str(tmp_path / "lib")
+    scanner = FakeScanner(ValueError("bad entry"))
+    status = make_library([root], scanner).find()["roots"][0]
+    assert status["status"] == "unavailable"
+    assert status["error"] == "ValueError: bad entry"
+
+
+def test_unreachable_root_with_cache_serves_old_list(tmp_path, cache_dir, make_library):
+    root = str(tmp_path / "lib")
+    _seed(cache_dir, root, ["old.pdf"], age=60)
+    scanner = FakeScanner(OSError("share offline"))
+    lib = make_library([root], scanner)
+    got = lib.find(refresh=True)
+    assert _names(got) == ["old.pdf"]
+    [status] = got["roots"]
+    assert status["status"] == "ok"
+    assert status["error"].startswith("OSError")
+    assert status["listed_at"] is not None
+    # The fresh list is still served without another attempt; the error stays.
+    got = lib.find()
+    assert _names(got) == ["old.pdf"]
+    assert got["roots"][0]["error"].startswith("OSError")
+    assert scanner.calls == [root]
+
+
+def test_failed_scan_without_cache_is_retried_on_next_call(
+    tmp_path, cache_dir, make_library
+):
+    root = str(tmp_path / "lib")
+    scanner = FakeScanner(OSError("share offline"), _lists("a.pdf"))
+    lib = make_library([root], scanner)
+    assert lib.find()["roots"][0]["status"] == "unavailable"
+    got = lib.find()
+    assert got["roots"][0]["status"] == "ok"
+    assert "error" not in got["roots"][0]
+    assert _names(got) == ["a.pdf"]
+    assert scanner.calls == [root, root]
+
+
+def test_overlapping_roots_list_each_pdf_once(tmp_path, cache_dir, make_library):
+    lib_dir = tmp_path / "lib"
+    _touch(lib_dir / "Datasheet" / "a.pdf")
+    _touch(lib_dir / "b.pdf")
+    outer, inner = str(lib_dir), str(lib_dir / "Datasheet")
+    got = make_library([outer, inner], scan_root).find()
+    assert [d["path"] for d in got["documents"]] == [
+        str(lib_dir / "b.pdf"),
+        str(lib_dir / "Datasheet" / "a.pdf"),
+    ]
+    assert got["total_matches"] == 2
+    assert [r["documents"] for r in got["roots"]] == [2, 1]
+
+
+def test_limit_truncates_and_reports_total(tmp_path, cache_dir, make_library):
+    root = str(tmp_path / "lib")
+    _seed(cache_dir, root, ["tle-a.pdf", "tle-b.pdf", "tle-c.pdf", "x.pdf"], age=60)
+    lib = make_library([root], FakeScanner(_lists()))
+    got = lib.find("tle", limit=2)
+    assert _names(got) == ["tle-a.pdf", "tle-b.pdf"]
+    assert got["total_matches"] == 3 and got["truncated"] is True
+    assert len(lib.find(limit=0)["documents"]) == 1
+    assert lib.find(limit=MAX_LIMIT + 1)["truncated"] is False
+
+
+def test_result_fields_are_formatted(tmp_path, cache_dir, make_library):
+    root = str(tmp_path / "lib")
+    save_cache(cache_file(cache_dir, root), _listing(root, ["a.pdf"], size=1025))
+    lib = make_library([root], FakeScanner(_lists()))
+    got = lib.find()
+    json.dumps(got)
+    [doc] = got["documents"]
+    assert doc == {
+        "path": os.path.join(root, "a.pdf"),
+        "modified": datetime.fromtimestamp(NOW).strftime("%Y-%m-%d"),
+        "size_kb": 2,
+    }
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", doc["modified"])
+    listed_at = datetime.fromisoformat(got["roots"][0]["listed_at"])
+    assert listed_at.tzinfo is not None
+    assert listed_at.timestamp() == NOW
+    assert got["roots"][0]["skipped_folders"] == 0
+    assert lib.roots == [root]
+
+
+def test_successful_scan_is_persisted_for_the_next_process(
+    tmp_path, cache_dir, make_library
+):
+    root = str(tmp_path / "lib")
+    assert _names(make_library([root], FakeScanner(_lists("a.pdf"))).find()) == [
+        "a.pdf"
+    ]
+    second = FakeScanner(OSError("must not scan"))
+    got = make_library([root], second).find()
+    assert _names(got) == ["a.pdf"]
+    assert second.calls == []
+
+
+def test_cache_save_failure_is_logged_not_raised(
+    tmp_path, cache_dir, make_library, monkeypatch, caplog
+):
+    def fail(path, result):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(library, "save_cache", fail)
+    root = str(tmp_path / "lib")
+    with caplog.at_level(logging.WARNING, logger="datasheetindex.library"):
+        got = make_library([root], FakeScanner(_lists("a.pdf"))).find()
+    assert _names(got) == ["a.pdf"]
+    assert got["roots"][0]["status"] == "ok"
+    assert "disk full" in caplog.text

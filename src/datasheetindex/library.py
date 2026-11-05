@@ -4,17 +4,29 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import math
 import os
 import tempfile
+import threading
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from datasheetindex.index import resolve_default_output_dir
 
 LIBRARY_ROOTS_ENV_VAR = "DATASHEETINDEX_LIBRARY_ROOTS"
 CACHE_SCHEMA_VERSION = 1
+CACHE_TTL_SECONDS = 86400.0
+SCAN_WAIT_SECONDS = 30.0
+DEFAULT_LIMIT = 50
+MAX_LIMIT = 500
+SCAN_THREAD_NAME = "datasheetindex-library-scan"
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -165,3 +177,236 @@ def load_cache(path: Path, root: str) -> ScanResult | None:
         )
     except (OSError, ValueError, KeyError, TypeError):
         return None
+
+
+def _local_time(ts: float) -> datetime | None:
+    # A share can report an mtime the platform cannot represent; that file's
+    # date is unknown, which must not fail the whole listing.
+    try:
+        return datetime.fromtimestamp(ts).astimezone()
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _document(entry: DocumentEntry) -> dict[str, Any]:
+    modified = _local_time(entry.mtime)
+    return {
+        "path": entry.path,
+        "modified": modified.strftime("%Y-%m-%d") if modified else None,
+        "size_kb": math.ceil(entry.size / 1024),
+    }
+
+
+@dataclass
+class _RootState:
+    """One root's listing; every field is read and written under the library lock."""
+
+    root: str
+    cache_path: Path
+    loaded: bool = False
+    result: ScanResult | None = None
+    error: str | None = None
+    done: threading.Event | None = None
+    thread: threading.Thread | None = None
+    started_at: float = 0.0
+
+    @property
+    def scanning(self) -> bool:
+        return self.done is not None and not self.done.is_set()
+
+
+class DocumentLibrary:
+    """PDFs under configured roots, listed by background scans and cached on disk.
+
+    A root has at most one scan thread at a time. ``find`` serves a fresh list at
+    once and a stale one at once while it is rescanned; it waits, for at most
+    ``wait_seconds``, only for a root with no list or when ``refresh`` is asked
+    for. A root that cannot be scanned is reported in its status entry and never
+    raised. The lock guards state only: nothing scans or waits while holding it.
+    """
+
+    def __init__(
+        self,
+        roots: list[str],
+        cache_dir: Path,
+        *,
+        scanner: Callable[[str], ScanResult] = scan_root,
+        clock: Callable[[], float] = time.time,
+        ttl: float = CACHE_TTL_SECONDS,
+        wait_seconds: float = SCAN_WAIT_SECONDS,
+    ) -> None:
+        self._roots = list(roots)
+        self._states = [_RootState(r, cache_file(cache_dir, r)) for r in self._roots]
+        self._scanner = scanner
+        self._clock = clock
+        self._ttl = ttl
+        self._wait_seconds = wait_seconds
+        self._lock = threading.Lock()
+
+    @property
+    def roots(self) -> list[str]:
+        return list(self._roots)
+
+    def warm(self) -> None:
+        """Load cached lists and rescan, in the background, any missing or stale."""
+        for state in self._states:
+            self._load(state)
+            with self._lock:
+                if state.result is None or self._is_stale(state.result):
+                    self._start_scan_locked(state)
+
+    def find(
+        self, query: str = "", limit: int = DEFAULT_LIMIT, refresh: bool = False
+    ) -> dict[str, Any]:
+        """Documents whose path under a root contains every term of ``query``."""
+        limit = max(1, min(int(limit), MAX_LIMIT))
+        pending: list[threading.Event] = []
+        for state in self._states:
+            self._load(state)
+            with self._lock:
+                result = state.result
+                if refresh or result is None:
+                    pending.append(self._start_scan_locked(state))
+                elif self._is_stale(result):
+                    self._start_scan_locked(state)
+        # One deadline for all roots, so the call waits wait_seconds at most.
+        deadline = time.monotonic() + self._wait_seconds
+        for done in pending:
+            done.wait(max(0.0, deadline - time.monotonic()))
+        with self._lock:
+            snapshot = [
+                (s.root, s.result, s.error, s.scanning, s.started_at)
+                for s in self._states
+            ]
+        return self._response(snapshot, query, limit)
+
+    def wait_for_scans(self, timeout: float | None = None) -> bool:
+        """Join the scan threads running now; ``False`` if ``timeout`` ran out.
+
+        The server never needs this (scan threads are daemons). It lets tests
+        and embedding code finish without leaving a scan behind.
+        """
+        with self._lock:
+            threads = [s.thread for s in self._states if s.thread is not None]
+        deadline = None if timeout is None else time.monotonic() + timeout
+        for thread in threads:
+            if deadline is None:
+                thread.join()
+            else:
+                thread.join(max(0.0, deadline - time.monotonic()))
+        return not any(t.is_alive() for t in threads)
+
+    def _is_stale(self, result: ScanResult) -> bool:
+        return self._clock() - result.listed_at > self._ttl
+
+    def _load(self, state: _RootState) -> None:
+        """Adopt the root's on-disk cache once; read outside the lock."""
+        with self._lock:
+            if state.loaded:
+                return
+        cached = load_cache(state.cache_path, state.root)
+        with self._lock:
+            if not state.loaded:
+                state.loaded = True
+                # A scan that finished meanwhile is newer than the file.
+                if state.result is None:
+                    state.result = cached
+
+    def _start_scan_locked(self, state: _RootState) -> threading.Event:
+        """Start a scan of ``state.root`` unless one runs; return its done event."""
+        if state.done is not None and not state.done.is_set():
+            return state.done
+        done = threading.Event()
+        thread = threading.Thread(
+            target=self._scan, args=(state, done), name=SCAN_THREAD_NAME, daemon=True
+        )
+        state.done, state.thread, state.started_at = done, thread, self._clock()
+        try:
+            thread.start()
+        except RuntimeError as exc:  # interpreter cannot start another thread
+            state.error = f"{type(exc).__name__}: {exc}"
+            state.thread = None
+            done.set()
+        return done
+
+    def _scan(self, state: _RootState, done: threading.Event) -> None:
+        result: ScanResult | None = None
+        error = "scan ended without a result"
+        started = time.monotonic()
+        try:
+            result = self._scanner(state.root)
+            try:
+                save_cache(state.cache_path, result)
+            except Exception:
+                logger.warning(
+                    "could not save the library cache for %s",
+                    state.root,
+                    exc_info=True,
+                )
+        except BaseException as exc:
+            # Nothing above this thread would see it: record it for the status.
+            error = f"{type(exc).__name__}: {exc}"
+        finally:
+            # Publishing and setting `done` together means a waiter that wakes
+            # always sees the outcome, and the next call can start a new scan.
+            with self._lock:
+                if result is None:
+                    state.error = error
+                else:
+                    state.result, state.error = result, None
+                done.set()
+        elapsed = time.monotonic() - started
+        if result is None:
+            logger.warning("library scan of %s failed: %s", state.root, error)
+        else:
+            logger.info(
+                "library scan of %s listed %d PDFs in %.1fs",
+                state.root,
+                len(result.entries),
+                elapsed,
+            )
+
+    def _response(
+        self,
+        snapshot: list[tuple[str, ScanResult | None, str | None, bool, float]],
+        query: str,
+        limit: int,
+    ) -> dict[str, Any]:
+        now = self._clock()
+        roots: list[dict[str, Any]] = []
+        matches: list[DocumentEntry] = []
+        seen: set[str] = set()
+        for root, result, error, scanning, started_at in snapshot:
+            if scanning:
+                status = "scanning" if result is None else "refreshing"
+            else:
+                status = "unavailable" if result is None else "ok"
+            listed_at = _local_time(result.listed_at) if result else None
+            entry: dict[str, Any] = {
+                "root": root,
+                "status": status,
+                "listed_at": (
+                    listed_at.isoformat(timespec="seconds") if listed_at else None
+                ),
+                "documents": len(result.entries) if result else 0,
+                "skipped_folders": result.skipped_folders if result else 0,
+            }
+            if error is not None:
+                entry["error"] = error
+            if status == "scanning":
+                entry["scan_elapsed_seconds"] = int(max(0.0, now - started_at))
+            roots.append(entry)
+            if result is None:
+                continue
+            # Overlapping roots list a file twice; the first root keeps it.
+            for doc in match_entries(result.entries, query):
+                key = os.path.normcase(doc.path)
+                if key not in seen:
+                    seen.add(key)
+                    matches.append(doc)
+        return {
+            "roots": roots,
+            "total_matches": len(matches),
+            "truncated": len(matches) > limit,
+            "documents": [_document(e) for e in matches[:limit]],
+        }
