@@ -177,15 +177,19 @@ uv sync --extra mcp
 uv pip install claude-agent-sdk
 ```
 
-For LLM-backed ToC fallback, summaries and figure captions, configure
-`LITELLM_BASE_URL` and `LITELLM_MASTER_KEY` (see `.env.example`). Two optional
-variables name the models, since which ones a gateway serves is a property of
-your deployment rather than of this library:
+For LLM-backed ToC fallback, summaries and figure captions, these are the only
+settings most deployments need (see `.env.example`):
 
-| variable | names | default |
+| variable | sets | default |
 |---|---|---|
-| `DATASHEETINDEX_MODEL` | summaries and the ToC fallback | `qwen3.8-27b` |
-| `DATASHEETINDEX_VISION_MODEL` | figure captions only | follows the text model |
+| `LITELLM_BASE_URL` | the gateway URL | required |
+| `LITELLM_MASTER_KEY` | your gateway key | required |
+| `DATASHEETINDEX_MODEL` | model for summaries and the ToC fallback | `qwen3.8-27b` |
+| `DATASHEETINDEX_VISION_MODEL` | model for figure captions only | follows the text model |
+| `LITELLM_TLS_VERIFY` | gateway certificate verification | on |
+
+The model names are settings because which models a gateway serves is a
+property of your deployment rather than of this library.
 
 `build_datasheet`'s `model` argument overrides `DATASHEETINDEX_MODEL` for one
 call; the vision model is deployment-level only, and deliberately not a tool
@@ -195,10 +199,22 @@ Deployments that do not serve `qwen3.8-27b` must explicitly name an available
 model with `DATASHEETINDEX_MODEL`. Unless separately overridden, captions use
 that same model and require image-input support.
 
-### Chat Completions configuration
+TLS verification is **on** by default. `LITELLM_TLS_VERIFY=false` (also `0`,
+`no`, `off`) turns it off, for a gateway whose certificate the local trust store
+cannot accept -- an internal CA missing from the image, or a self-signed cert on
+localhost. Adding that CA to the trust store is the better fix: `LITELLM_MASTER_KEY`
+travels on this channel. A certificate that fails verification raises
+`LlmTlsVerificationError` (exported from the package root) naming the gateway
+and both remedies, rather than degrading to an index with no ToC entries. Figure
+captioning is the exception: it still degrades, because the artifact is complete
+without captions.
 
-All library LLM calls use Chat Completions, including images and strict JSON
-schemas; there is no automatic fallback to a different API or different model.
+### Advanced: gateway compatibility
+
+Rarely needed: these settings exist for gateways or models that need different
+request parameters, and every one has a working default. All library LLM calls
+use Chat Completions, including images and strict JSON schemas; there is no
+automatic fallback to a different API or different model.
 
 | variable | controls | default |
 |---|---|---|
@@ -272,16 +288,6 @@ responses, but not for terminal API errors. It may run on concurrent caption
 threads, so use a thread-safe collector in applications. Callback exceptions are
 ignored with a payload-free warning. Optional metadata fields remain `None` when
 the gateway does not supply them.
-
-TLS verification is **on** by default. `LITELLM_TLS_VERIFY=false` (also `0`,
-`no`, `off`) turns it off, for a gateway whose certificate the local trust store
-cannot accept -- an internal CA missing from the image, or a self-signed cert on
-localhost. Adding that CA to the trust store is the better fix: `LITELLM_MASTER_KEY`
-travels on this channel. A certificate that fails verification raises
-`LlmTlsVerificationError` (exported from the package root) naming the gateway
-and both remedies, rather than degrading to an index with no ToC entries. Figure
-captioning is the exception: it still degrades, because the artifact is complete
-without captions.
 
 `claude-agent-sdk` is only required for the SDK-flavored handoff
 (`create_datasheet_tools_server`). The tool logic itself is framework-neutral --

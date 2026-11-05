@@ -24,6 +24,14 @@ All notable changes to this project will be documented in this file.
   tool is not registered and the server serves its five tools as before. The
   tool is MCP-server-only and is not in `create_datasheet_tool_defs()`.
 
+### Changed
+- **Shorter configuration docs.** The README and `.env.example` now lead with
+  the five settings most deployments need (`LITELLM_BASE_URL`,
+  `LITELLM_MASTER_KEY`, `DATASHEETINDEX_MODEL`, `DATASHEETINDEX_VISION_MODEL`,
+  `LITELLM_TLS_VERIFY`). The gateway-tuning variables (reasoning effort, output
+  budgets, token-limit spelling, `store`, timeout and retries) moved to an
+  "Advanced: gateway compatibility" section. No variable was removed or renamed.
+
 ## [0.45.0] - 2026-11-03
 
 ### Fixed
