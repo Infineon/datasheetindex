@@ -1,14 +1,21 @@
 """Tests for library discovery: root parsing, scanning and matching."""
 
+import json
 import os
+import re
 
 import pytest
 
 from datasheetindex import library
 from datasheetindex.library import (
     DocumentEntry,
+    ScanResult,
+    cache_file,
+    default_cache_dir,
+    load_cache,
     match_entries,
     parse_library_roots,
+    save_cache,
     scan_root,
 )
 
@@ -117,3 +124,121 @@ def test_match_searches_folders_too():
 def test_match_normalises_separators_and_case(sep, query):
     rel = "TLE987x" + sep + "UM-guide.pdf"
     assert [e.relpath for e in match_entries([_entry(rel)], query)] == [rel]
+
+
+def _result(root, relpaths=("a.pdf",)):
+    return ScanResult(
+        root=root,
+        listed_at=123.5,
+        entries=tuple(_entry(r) for r in relpaths),
+        skipped_folders=2,
+    )
+
+
+def test_cache_round_trip(tmp_path):
+    path = tmp_path / "cache" / "x.json"
+    result = _result(str(tmp_path / "lib"), ("a.pdf", os.path.join("d", "b.pdf")))
+    save_cache(path, result)
+    assert load_cache(path, result.root) == result
+
+
+def test_cache_round_trip_preserves_non_ascii_and_upper_case_names(tmp_path):
+    path = tmp_path / "x.json"
+    result = _result(str(tmp_path / "lib"), ("Datenblatt-Gr\u00f6\u00dfe.PDF",))
+    save_cache(path, result)
+    loaded = load_cache(path, result.root)
+    assert loaded is not None
+    assert loaded.entries[0].relpath == "Datenblatt-Gr\u00f6\u00dfe.PDF"
+
+
+def test_load_cache_missing_corrupt_or_old_schema_is_none(tmp_path):
+    root = str(tmp_path / "lib")
+    assert load_cache(tmp_path / "absent.json", root) is None
+    bad = tmp_path / "bad.json"
+    bad.write_bytes(b"{not json")
+    assert load_cache(bad, root) is None
+    old = tmp_path / "old.json"
+    old.write_text(
+        json.dumps(
+            {
+                "schema": 0,
+                "root": root,
+                "listed_at": 1.0,
+                "skipped_folders": 0,
+                "entries": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert load_cache(old, root) is None
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        [],
+        {"schema": 1},
+        {"schema": 1, "root": "R", "listed_at": 1.0, "skipped_folders": 0},
+        {
+            "schema": 1,
+            "root": "R",
+            "listed_at": 1.0,
+            "skipped_folders": 0,
+            "entries": ["notalist"],
+        },
+        {
+            "schema": 1,
+            "root": "R",
+            "listed_at": "x",
+            "skipped_folders": 0,
+            "entries": [],
+        },
+        {
+            "schema": 1,
+            "root": "R",
+            "listed_at": 1.0,
+            "skipped_folders": 0,
+            "entries": [["a", "b", 1.0]],
+        },
+    ],
+)
+def test_load_cache_wrong_shape_is_none(tmp_path, payload):
+    path = tmp_path / "x.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert load_cache(path, "R") is None
+
+
+def test_load_cache_for_other_root_is_none(tmp_path):
+    path = tmp_path / "x.json"
+    save_cache(path, _result(str(tmp_path / "one")))
+    assert load_cache(path, str(tmp_path / "two")) is None
+
+
+def test_cache_file_is_stable_and_distinct_per_root(tmp_path):
+    a = cache_file(tmp_path, str(tmp_path / "a"))
+    assert a == cache_file(tmp_path, str(tmp_path / "a"))
+    assert a != cache_file(tmp_path, str(tmp_path / "b"))
+    assert a.parent == tmp_path
+    assert re.fullmatch(r"[0-9a-f]{16}\.json", a.name)
+
+
+def test_default_cache_dir_is_under_output_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATASHEETINDEX_OUTPUT_DIR", str(tmp_path))
+    assert default_cache_dir() == tmp_path / "library"
+
+
+def test_save_cache_is_atomic(tmp_path, monkeypatch):
+    path = tmp_path / "x.json"
+    root = str(tmp_path / "lib")
+    old = _result(root, ("old.pdf",))
+    save_cache(path, old)
+
+    def boom(src, dst):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(os, "replace", boom)
+    with pytest.raises(OSError):
+        save_cache(path, _result(root, ("new.pdf",)))
+    monkeypatch.undo()
+    assert load_cache(path, root) == old
+    assert [p.name for p in tmp_path.iterdir()] == ["x.json"]
