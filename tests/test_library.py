@@ -547,3 +547,17 @@ def test_cache_save_failure_is_logged_not_raised(
     assert _names(got) == ["a.pdf"]
     assert got["roots"][0]["status"] == "ok"
     assert "disk full" in caplog.text
+
+
+def test_tool_def_description_names_roots_and_schema_caps_limit(tmp_path):
+    from datasheetindex.library import create_find_documents_def
+
+    lib = DocumentLibrary(["/a", "/b"], tmp_path)
+    d = create_find_documents_def(lib)
+    assert d.name == "find_documents"
+    assert "Library roots: /a; /b." in d.description
+    props = d.input_schema["properties"]
+    assert props["limit"]["maximum"] == MAX_LIMIT
+    assert props["limit"]["default"] == 50
+    assert props["query"]["default"] == ""
+    assert props["refresh"]["default"] is False

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -17,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from datasheetindex.index import resolve_default_output_dir
+from datasheetindex.tools.defs import DatasheetToolDef
 
 LIBRARY_ROOTS_ENV_VAR = "DATASHEETINDEX_LIBRARY_ROOTS"
 CACHE_SCHEMA_VERSION = 1
@@ -410,3 +412,64 @@ class DocumentLibrary:
             "truncated": len(matches) > limit,
             "documents": [_document(e) for e in matches[:limit]],
         }
+
+
+#: Appended to the server ``instructions`` when a library is configured.
+LIBRARY_INSTRUCTIONS = (
+    "A document library is configured: when you need a datasheet or manual "
+    "and do not have its path, call find_documents with a part number first "
+    "and pass a result's path to build_datasheet."
+)
+
+_FIND_DOCUMENTS_DESCRIPTION = (
+    "Find PDF documents in the configured library by file name and folder path "
+    "(not by content). Library roots: {roots}. query: whitespace-separated "
+    "terms, case-insensitive; a document matches when its path below a root "
+    'contains every term (e.g. "tle987" or "tle987 um"). Each result\'s path is '
+    "ready to pass to build_datasheet as pdf_source unchanged; modified and "
+    "size_kb help tell versions apart. If truncated is true, narrow the query. "
+    "The list is cached for a day: set refresh=true only when a document you "
+    'expect is missing. A root with status "scanning" is still being listed '
+    "for the first time: call again shortly."
+)
+
+
+def create_find_documents_def(library: DocumentLibrary) -> DatasheetToolDef:
+    """The ``find_documents`` tool over ``library``.
+
+    Lives here, not in ``tools.defs``, so embedders of the neutral defs never
+    get a tool that needs configured roots.
+    """
+
+    async def handler(args: dict[str, Any]) -> dict[str, Any]:
+        result = await asyncio.to_thread(
+            library.find,
+            args.get("query", ""),
+            args.get("limit", DEFAULT_LIMIT),
+            args.get("refresh", False),
+        )
+        return {
+            "content": [
+                {"type": "text", "text": json.dumps(result, ensure_ascii=False)}
+            ],
+            "is_error": False,
+        }
+
+    return DatasheetToolDef(
+        name="find_documents",
+        description=_FIND_DOCUMENTS_DESCRIPTION.format(roots="; ".join(library.roots)),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "default": ""},
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": MAX_LIMIT,
+                    "default": DEFAULT_LIMIT,
+                },
+                "refresh": {"type": "boolean", "default": False},
+            },
+        },
+        handler=handler,
+    )
