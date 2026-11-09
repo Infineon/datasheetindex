@@ -1529,6 +1529,61 @@ any one agent framework:
 single pattern or a list and tags each hit with its section breadcrumb;
 `get_section_text` returns a page range prefixed with a position header.
 
+**The agent's ToC is slimmer than the artifact's.** The `build_datasheet`
+handler (`tools/defs.py:_agent_toc`) drops `breadcrumb`, `level`, `node_id`,
+`has_tables`, `cross_references` and `footnote_markers` from every node, and
+`table_count` where it is zero; `DatasheetTools.get_artifact_manifest()` and
+the ToC JSON keep them all. The manifest stays in the conversation and is
+re-sent on every later turn, and on large documents it was most of the agent's
+context: 270K chars on PIC16F887 and 192K on ESP32 TRM, where a probe lookup
+that read one 2.7K-char page peaked near 80K prompt tokens. Titles were 13% of
+the node data; the dropped fields were 72%. `breadcrumb` and `has_tables`
+restate other fields (equal on all 3,734 corpus nodes), no tool takes a
+`node_id`, and `level` differs from the nesting only when an outline skips a
+level. The other two are a judgement: both are in the page text the agent
+reads. Only section references are ever resolved (`target_node_id`, 988 of
+2,248), and only to a section whose title starts with the referenced number,
+so the target is still findable by title; table and figure references carry
+only their label. The tool description says these fields are left out and
+sends the agent to the page text -- not to `json_path`, which no tool reads
+and which may not resolve where the agent runs. It is a denylist so that a
+new enrichment reaches the agent unless someone decides it should not.
+
+Measured before merging (2026-11-09): 20 questions across 16 documents, 15 of
+them chosen so the answer sits in a footnote or a cross-referenced table, 3
+models, 3 runs per question per arm -- 360 runs, 180 per arm, full manifest
+(`main`) against slim (this change):
+
+| Model | Correct before -> after | Turns | Prompt tokens / question |
+|---|---|---|---|
+| Sonnet 4.6 | 60/60 -> 60/60 | 3.67 -> 3.50 | 129K -> 48K |
+| GPT-5.1 | 55/60 -> 56/60 | 4.00 -> 3.93 | 121K -> 46K |
+| Qwen 3.6 27B | 60/60 -> 59/60 | 5.42 -> 5.38 | 202K -> 82K |
+
+175/180 correct in both arms. Every miss was read by hand, and none involves
+the dropped fields: GPT misses the same four questions in both arms (an
+answer from priors instead of the note on the page, a value the text layer
+puts on the wrong line, a register's generic defaults read instead of the
+per-pin table, a curve read instead of a table), and Qwen's one miss is that
+same register misread. Turns fell slightly in every model, and prompt tokens
+per question fell 2.5-2.7x. Grading is by string match with exotic spaces,
+hyphens and markdown normalised; one question (ESP32 GPIO2 reset state) was
+graded by hand, because correct answers quote the register defaults before
+concluding. An earlier, smaller run of the same design (10 questions, 2
+models) agreed.
+
+The measurement was prompted by Belcak et al., "You don't need long context"
+(arXiv:2611.05306, 2026). Their agent reads long inputs selectively, with grep
+and bounded windows of about 6,000 characters, instead of holding the whole
+input in context, and does as well or better: 84.0% vs 65.0% on AA-LCR with
+Opus 4.5. That supports this library's split, where the agent navigates with
+tools rather than ingesting the document. The paper does not test PDFs, tables
+or any pre-processing, so it says nothing either way about the enriched ToC.
+Its specific remedy did not carry over: a read-size cap was measured here and
+not adopted, because agents already read narrowly (largest read 47K
+characters, most under 10K) and the context was being filled by the manifest
+ToC instead.
+
 `search_text` also carries the text-layer limitation on **both** surfaces its
 consumer reads: in the tool description, and — when a search returns nothing on
 a document that holds raster regions — as a `note` on the result itself. The

@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.47.0] - 2026-11-09
+
+### Changed
+- **Slimmer ToC in the agent's `build_datasheet` result.** Each ToC node the
+  agent receives now omits `breadcrumb`, `level`, `node_id`, `has_tables`,
+  `cross_references` and `footnote_markers`, and omits `table_count` when it is
+  zero. Every node is still there, with its title, page range and nesting,
+  along with `boilerplate_category`, `continued_tables`, `summary` and any field
+  not on that list. The manifest stays in the conversation and is re-sent on
+  every turn; on large documents it was most of the agent's context (270K
+  characters on PIC16F887, 192K on ESP32 TRM) and is now about 3.5x smaller.
+  On a before/after test of 360 runs (Sonnet 4.6, GPT-5.1, Qwen 3.6 27B; 20
+  questions, most answered from footnotes and cross-referenced tables),
+  accuracy was 175/180 in both arms, turns fell slightly, and prompt tokens
+  per question fell 2.5-2.7x.
+- **Token economy re-measured** (`docs/token-economy.md`, README). The
+  script now prices the manifest the agent is actually sent, through the same
+  function the tool handler uses, rather than `get_artifact_manifest()`. The
+  median first answer (map plus one section) is now 4,293 tokens, 7.3x
+  cheaper than the document (was 9,637, 3.1x). The further-answer median
+  moved from 625 to 760 tokens because sections grew in earlier releases, not
+  in this one.
+- Applies to the MCP server, `create_datasheet_tool_defs()` and the Agent SDK
+  server. `DatasheetTools.get_artifact_manifest()` and the ToC JSON artifact
+  are unchanged and keep every field; `search_text` hits still carry their
+  breadcrumb, and the `build_datasheet` description tells the agent that
+  breadcrumbs, cross-references and footnote markers are left out and to read
+  them in the page text.
+
 ## [0.46.0] - 2026-11-05
 
 ### Added
