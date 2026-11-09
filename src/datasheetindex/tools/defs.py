@@ -81,11 +81,15 @@ _EMPTY_SEARCH_BLOCKED_CAPTIONS_NOTE = (
 #: ``node_id``. ``level`` is the outline's own depth number, which differs from
 #: the nesting only when an outline skips a level -- the nesting is what the
 #: agent navigates by. ``cross_references`` and ``footnote_markers`` are a
-#: judgement call: their text is in the pages the agent reads, and the 988 of
-#: 2,248 references that resolve (``target_node_id``) point at a section whose
-#: title starts with the referenced number, so the target is still findable by
-#: title. A denylist, not an allowlist, so a new enrichment reaches the agent
-#: unless deliberately cut.
+#: judgement call: their text is in the pages the agent reads. Only section
+#: references are ever resolved (``target_node_id``, 988 of 2,248 on the
+#: corpus), and only to a section whose title starts with the referenced
+#: number, so the target is still findable by title; table and figure
+#: references carry only their label. The description points the agent at
+#: the page text, not at ``json_path``: no tool reads that file, and the path
+#: may not resolve on the agent's side (see the preamble's pending-work note).
+#: A denylist, not an allowlist, so a new enrichment reaches the agent unless
+#: deliberately cut.
 #: ``DatasheetTools.get_artifact_manifest`` and the ToC JSON keep every field.
 _AGENT_TOC_OMITTED_FIELDS = frozenset(
     {
@@ -110,10 +114,10 @@ def _agent_toc(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
         out = {
             key: value
             for key, value in node.items()
-            if key not in _AGENT_TOC_OMITTED_FIELDS
-            and key != "nodes"
-            and not (key == "table_count" and not value)
+            if key not in _AGENT_TOC_OMITTED_FIELDS and key != "nodes"
         }
+        if not out.get("table_count"):
+            out.pop("table_count", None)
         if node.get("nodes"):
             out["nodes"] = _agent_toc(node["nodes"])
         slim.append(out)
@@ -398,9 +402,9 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                 "pdf_source switches documents.\n\n"
                 "The manifest carries the source, total pages, ToC quality, and "
                 "the enriched ToC -- section hierarchy, page "
-                "ranges, nonzero table counts, boilerplate flags; breadcrumbs, "
-                "cross-references and footnote markers are only in the ToC "
-                "JSON at json_path -- "
+                "ranges, nonzero table counts, boilerplate flags (no "
+                "breadcrumbs, cross-references or footnote markers: read those "
+                "in the page text) -- "
                 "plus a 'figures' digest: total/raster/captioned counts and up "
                 "to 40 {page, figures, caption} rows ('truncated' says when "
                 "more exist), each row carrying that page's largest figure. A "
@@ -561,8 +565,8 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
             name="search_text",
             description=(
                 "Locate a term across the datasheet: returns page-aware snippets "
-                "with surrounding context, each tagged with the ToC 'breadcrumb' "
-                "of the section holding the match (and, for a list query, the "
+                "with surrounding context, each tagged with the 'breadcrumb' "
+                "path of the section holding the match (and, for a list query, the "
                 "'pattern' that matched).\n\n"
                 "Searches the extracted text layer only. A table, schematic or "
                 "label placed as an image has no text layer, so a term inside it "

@@ -20,8 +20,8 @@ All notable changes to this project will be documented in this file.
   server. `DatasheetTools.get_artifact_manifest()` and the ToC JSON artifact
   are unchanged and keep every field; `search_text` hits still carry their
   breadcrumb, and the `build_datasheet` description tells the agent that
-  breadcrumbs, cross-references and footnote markers are in the ToC JSON at
-  `json_path`.
+  breadcrumbs, cross-references and footnote markers are left out and to read
+  them in the page text.
 
 ## [0.46.0] - 2026-11-05
 

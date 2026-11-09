@@ -542,14 +542,10 @@ def test_agent_manifest_toc_drops_derivable_and_bulky_fields(tmp_path):
             "text"
         ]
     )
+    full = json.loads(
+        open(manifest["json_path"], encoding="utf-8").read()  # noqa: SIM115
+    )["toc"]
 
-    nodes = list(_walk(manifest["toc"]))
-    assert [n["title"] for n in nodes] == [
-        "1 Electrical characteristics",
-        "1.1 Supply",
-        "2 Revision history",
-    ]
-    assert manifest["toc"][0]["nodes"][0]["title"] == "1.1 Supply"
     dropped = {
         "breadcrumb",
         "level",
@@ -558,6 +554,18 @@ def test_agent_manifest_toc_drops_derivable_and_bulky_fields(tmp_path):
         "cross_references",
         "footnote_markers",
     }
+    # Guard against a vacuous pass: the unslimmed tree really had every field.
+    present = set().union(*(n.keys() for n in _walk(full)))
+    assert dropped <= present, dropped - present
+    assert any(n.get("table_count") == 0 for n in _walk(full))
+
+    nodes = list(_walk(manifest["toc"]))
+    assert [n["title"] for n in nodes] == [
+        "1 Electrical characteristics",
+        "1.1 Supply",
+        "2 Revision history",
+    ]
+    assert manifest["toc"][0]["nodes"][0]["title"] == "1.1 Supply"
     for node in nodes:
         assert not dropped & node.keys(), node
         assert {"start_page", "end_page"} <= node.keys()
@@ -600,7 +608,7 @@ def test_agent_toc_passes_unknown_fields_through():
             "table_count": 0,
             "has_tables": False,
             "summary": "s",
-            "continued_tables": [{"page": 2}],
+            "continued_tables": ["Table 3"],
             "future_signal": True,
             "nodes": [{"title": "B", "start_page": 2, "end_page": 2, "level": 2}],
         }
@@ -611,7 +619,7 @@ def test_agent_toc_passes_unknown_fields_through():
             "start_page": 1,
             "end_page": 2,
             "summary": "s",
-            "continued_tables": [{"page": 2}],
+            "continued_tables": ["Table 3"],
             "future_signal": True,
             "nodes": [{"title": "B", "start_page": 2, "end_page": 2}],
         }
@@ -624,15 +632,19 @@ def test_agent_toc_passes_unknown_fields_through():
 def test_build_datasheet_description_matches_the_slim_toc():
     """The description must not promise dropped fields as manifest content.
 
-    It names them once, as living in the ToC JSON, so an agent that needs a
-    breadcrumb or cross-reference knows where to look. Checked against the
-    denylist so a field added there without a description update fails here.
+    It names them once, as absent, and sends the agent to the page text -- a
+    place it can reach. Not to json_path: no tool reads that file, and the
+    path may not resolve where the agent runs. Checked against the denylist so
+    a field added there without a description update fails here.
     """
     from datasheetindex.tools.defs import _AGENT_TOC_OMITTED_FIELDS
 
     description = _defs_by_name()["build_datasheet"].description
-    manifest_part, _, rest = description.partition("only in the ToC JSON at json_path")
-    assert rest, "description no longer says where the omitted fields live"
+    toc_part = description[: description.index("'figures' digest")]
+    before, absent, _ = toc_part.partition("(no ")
+    assert absent, "description no longer says which fields are left out"
+    note = toc_part[len(before) :]
+    assert "read those in the page text" in note
     spoken = {
         "breadcrumb": "breadcrumbs",
         "cross_references": "cross-references",
@@ -640,10 +652,8 @@ def test_build_datasheet_description_matches_the_slim_toc():
     }
     for field, phrase in spoken.items():
         assert field in _AGENT_TOC_OMITTED_FIELDS
-        # Named in the json_path sentence, not earlier as manifest content.
-        sentence_start = manifest_part.rfind(";")
-        assert phrase in manifest_part[sentence_start:], phrase
-        assert phrase not in manifest_part[:sentence_start], phrase
+        assert phrase in note, phrase
+        assert phrase not in before, phrase
 
 
 def test_build_datasheet_schema_bounds_max_figure_captions():

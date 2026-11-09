@@ -1541,11 +1541,13 @@ the node data; the dropped fields were 72%. `breadcrumb` and `has_tables`
 restate other fields (equal on all 3,734 corpus nodes), no tool takes a
 `node_id`, and `level` differs from the nesting only when an outline skips a
 level. The other two are a judgement: both are in the page text the agent
-reads, and the 988 of 2,248 references that resolve (`target_node_id`) point
-at a section whose title starts with the referenced number, so the target is
-still findable by title. The tool description tells the agent the dropped
-fields are in the ToC JSON at `json_path`. It is a denylist so that a new
-enrichment reaches the agent unless someone decides it should not.
+reads. Only section references are ever resolved (`target_node_id`, 988 of
+2,248), and only to a section whose title starts with the referenced number,
+so the target is still findable by title; table and figure references carry
+only their label. The tool description says these fields are left out and
+sends the agent to the page text -- not to `json_path`, which no tool reads
+and which may not resolve where the agent runs. It is a denylist so that a
+new enrichment reaches the agent unless someone decides it should not.
 
 Measured before merging (2026-11-09): 10 questions chosen so that their
 answers sit in a footnote or a cross-referenced table, 9 of them on large-ToC
