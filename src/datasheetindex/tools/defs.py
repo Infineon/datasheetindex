@@ -124,6 +124,20 @@ def _agent_toc(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return slim
 
 
+def _agent_manifest(tools: DatasheetTools) -> dict[str, object]:
+    """The manifest exactly as ``build_datasheet`` sends it to the agent.
+
+    One function so the handler and ``scripts/token_economy.py`` cannot drift:
+    the study prices what the agent is really sent, not the Python API's
+    fuller manifest.
+    """
+    manifest = tools.get_artifact_manifest()
+    toc = manifest.get("toc")
+    if isinstance(toc, list):
+        manifest["toc"] = _agent_toc(toc)
+    return manifest
+
+
 @dataclass(frozen=True)
 class DatasheetToolDef:
     """A single datasheet tool, described independently of any agent framework.
@@ -294,11 +308,7 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
             tools_instance = target
             if previous is not None:
                 _safe_close(previous)
-            manifest = tools_instance.get_artifact_manifest()
-            toc = manifest.get("toc")
-            if isinstance(toc, list):
-                manifest["toc"] = _agent_toc(toc)
-            return _ok(manifest)
+            return _ok(_agent_manifest(tools_instance))
         except Exception as exc:
             return _err_exc(exc)
 

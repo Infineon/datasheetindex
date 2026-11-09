@@ -13,9 +13,17 @@ All notable changes to this project will be documented in this file.
   not on that list. The manifest stays in the conversation and is re-sent on
   every turn; on large documents it was most of the agent's context (270K
   characters on PIC16F887, 192K on ESP32 TRM) and is now about 3.5x smaller.
-  On a before/after test with Sonnet 4.6 and GPT-5.1, over questions whose
-  answers sit in footnotes and cross-referenced tables, accuracy and turn
-  counts were unchanged while prompt tokens per question fell 2.7-2.9x.
+  On a before/after test of 360 runs (Sonnet 4.6, GPT-5.1, Qwen 3.6 27B; 20
+  questions, most answered from footnotes and cross-referenced tables),
+  accuracy was 175/180 in both arms, turns fell slightly, and prompt tokens
+  per question fell 2.5-2.7x.
+- **Token economy re-measured** (`docs/token-economy.md`, README). The
+  script now prices the manifest the agent is actually sent, through the same
+  function the tool handler uses, rather than `get_artifact_manifest()`. The
+  median first answer (map plus one section) is now 4,293 tokens, 7.3x
+  cheaper than the document (was 9,637, 3.1x). The further-answer median
+  moved from 625 to 760 tokens because sections grew in earlier releases, not
+  in this one.
 - Applies to the MCP server, `create_datasheet_tool_defs()` and the Agent SDK
   server. `DatasheetTools.get_artifact_manifest()` and the ToC JSON artifact
   are unchanged and keep every field; `search_text` hits still carry their

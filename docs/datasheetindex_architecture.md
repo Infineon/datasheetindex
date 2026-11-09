@@ -1549,18 +1549,28 @@ sends the agent to the page text -- not to `json_path`, which no tool reads
 and which may not resolve where the agent runs. It is a denylist so that a
 new enrichment reaches the agent unless someone decides it should not.
 
-Measured before merging (2026-11-09): 10 questions chosen so that their
-answers sit in a footnote or a cross-referenced table, 9 of them on large-ToC
-documents, Sonnet 4.6 and GPT-5.1. Run counts per arm are unequal (50-59) and
-not exactly paired: the run was cut short by a harness bug that duplicated
-runs. Sonnet was 51/51 before and 52/52 after. GPT was 42/50 (84%) before and
-48/59 (81%) after, with per-question changes in both directions (q0 3/5 ->
-4/6, q6 3/5 -> 2/6) -- no measurable effect at this n, not a demonstrated
-zero. Some GPT misses were grading artefacts (it writes U+202F between number
-and unit) and hit both arms; the after-arm misses read by hand were a register
-table misread, a wrong page and a text-layout quirk, none involving the cut.
-Turns did not move (3.94 -> 3.90, 4.04 -> 4.02), and mean prompt tokens per
-question fell 2.7-2.9x (206K -> 76K, 168K -> 58K).
+Measured before merging (2026-11-09): 20 questions across 16 documents, 15 of
+them chosen so the answer sits in a footnote or a cross-referenced table, 3
+models, 3 runs per question per arm -- 360 runs, 180 per arm, full manifest
+(`main`) against slim (this change):
+
+| Model | Correct before -> after | Turns | Prompt tokens / question |
+|---|---|---|---|
+| Sonnet 4.6 | 60/60 -> 60/60 | 3.67 -> 3.50 | 129K -> 48K |
+| GPT-5.1 | 55/60 -> 56/60 | 4.00 -> 3.93 | 121K -> 46K |
+| Qwen 3.6 27B | 60/60 -> 59/60 | 5.42 -> 5.38 | 202K -> 82K |
+
+175/180 correct in both arms. Every miss was read by hand, and none involves
+the dropped fields: GPT misses the same four questions in both arms (an
+answer from priors instead of the note on the page, a value the text layer
+puts on the wrong line, a register's generic defaults read instead of the
+per-pin table, a curve read instead of a table), and Qwen's one miss is that
+same register misread. Turns fell slightly in every model, and prompt tokens
+per question fell 2.5-2.7x. Grading is by string match with exotic spaces,
+hyphens and markdown normalised; one question (ESP32 GPIO2 reset state) was
+graded by hand, because correct answers quote the register defaults before
+concluding. An earlier, smaller run of the same design (10 questions, 2
+models) agreed.
 
 The measurement was prompted by Belcak et al., "You don't need long context"
 (arXiv:2611.05306, 2026). Their agent reads long inputs selectively, with grep

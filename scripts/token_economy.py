@@ -11,8 +11,10 @@ So, per document, it counts three things:
     the datasheet". This is a *conservative* baseline: attaching the PDF
     itself costs more, since the pages arrive as images too.
 ``manifest``
-    What ``get_artifact_manifest`` actually hands the agent -- the enriched
-    ToC and the build's signals.
+    What the ``build_datasheet`` agent tool actually hands the agent -- the
+    enriched ToC, slimmed as the tool slims it, and the build's signals.
+    Measured through the same function the tool handler calls, so it is not
+    the Python API's fuller ``get_artifact_manifest``.
 ``section``
     What ``get_section_text`` returns for one leaf ToC section, summarised
     across every leaf as a median and a p90.
@@ -217,6 +219,7 @@ def measure_document(
     the published ones.
     """
     from datasheetindex import DatasheetTools
+    from datasheetindex.tools.defs import _agent_manifest
 
     pdf_path = Path(pdf_path)
     notes: list[str] = []
@@ -230,7 +233,7 @@ def measure_document(
         )
         cold_build_s = time.perf_counter() - started
 
-        manifest = tools.get_artifact_manifest()
+        manifest = _agent_manifest(tools)
         # ``json_path``/``text_path`` are absolute and machine-specific. They
         # are a handful of tokens and the agent really is sent them, so they
         # stay in the count rather than being trimmed to make the number look
@@ -446,8 +449,9 @@ def render_markdown(
         "",
         "**The two ratios answer different questions.** The first answer pays "
         "for the map as well as the section, and on large documents the map "
-        "is most of the cost: the enriched ToC of a 322-page datasheet is "
-        "itself half that document's tokens. Every question after it about "
+        "is most of the cost: for a 322-page datasheet it is 27K of a "
+        "28K-token first answer, though only 15% of the document. Every "
+        "question after it about "
         "the same part pays for a section alone, which is where the ratio "
         "gets large. An agent that asks one thing and leaves sees the first "
         "ratio; an agent doing real extraction work sees the second.",

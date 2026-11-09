@@ -59,11 +59,11 @@ credentials. Full results, per document, are in
 | Median across the corpus | |
 |---|---|
 | Whole document in context | 33,973 tokens |
-| First answer (map + one section) | 9,637 tokens |
-| Every further answer about the same part | 625 tokens |
-| First answer vs. the document | **3.1x** cheaper |
-| Further answer vs. the document | **54x** cheaper |
-| Build | ~6s cold, 0.01s warm (cached artifact) |
+| First answer (map + one section) | 4,293 tokens |
+| Every further answer about the same part | 760 tokens |
+| First answer vs. the document | **7.3x** cheaper |
+| Further answer vs. the document | **47x** cheaper |
+| Build | ~5s cold, 0.01s warm (cached artifact) |
 
 Each ratio is the **median of the per-document ratios**, so it is deliberately
 not the quotient of the two token medians above: every document is priced on
@@ -76,10 +76,10 @@ an order of magnitude and a cold/warm ratio.
 
 **The two ratios are different claims, and the first one is the weaker.** The
 first answer pays for the enriched ToC as well as the section, and on a large
-document that map is most of the cost -- for the 322-page PIC16F887 it is half
-the document's tokens on its own. The compounding is in the second row: the
+document that map is most of the cost -- for the 322-page PIC16F887 it is 27K
+of a 28K-token first answer, though only 15% of the document. The compounding is in the second row: the
 map is paid once, so the tenth question about a part costs a section alone.
-That is 45x on a 31-page datasheet and 728x on a 784-page reference manual,
+That is 39x on a 31-page datasheet and 518x on a 784-page reference manual,
 which is the shape to expect -- the bigger the document, the more there is not
 to read.
 
