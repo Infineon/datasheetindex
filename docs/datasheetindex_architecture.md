@@ -1562,6 +1562,18 @@ table misread, a wrong page and a text-layout quirk, none involving the cut.
 Turns did not move (3.94 -> 3.90, 4.04 -> 4.02), and mean prompt tokens per
 question fell 2.7-2.9x (206K -> 76K, 168K -> 58K).
 
+The measurement was prompted by Belcak et al., "You don't need long context"
+(arXiv:2611.05306, 2026). Their agent reads long inputs selectively, with grep
+and bounded windows of about 6,000 characters, instead of holding the whole
+input in context, and does as well or better: 84.0% vs 65.0% on AA-LCR with
+Opus 4.5. That supports this library's split, where the agent navigates with
+tools rather than ingesting the document. The paper does not test PDFs, tables
+or any pre-processing, so it says nothing either way about the enriched ToC.
+Its specific remedy did not carry over: a read-size cap was measured here and
+not adopted, because agents already read narrowly (largest read 47K
+characters, most under 10K) and the context was being filled by the manifest
+ToC instead.
+
 `search_text` also carries the text-layer limitation on **both** surfaces its
 consumer reads: in the tool description, and — when a search returns nothing on
 a document that holds raster regions — as a `note` on the result itself. The
