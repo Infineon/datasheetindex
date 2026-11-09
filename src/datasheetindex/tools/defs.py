@@ -73,6 +73,52 @@ _EMPTY_SEARCH_BLOCKED_CAPTIONS_NOTE = (
     "figures array in the ToC JSON at json_path is the complete set."
 )
 
+#: ToC node fields left out of the manifest the *agent* receives. The manifest
+#: is re-sent on every later turn, and these were 72% of its node data on the
+#: 25-document corpus (PIC16F887 270K -> 79K chars, ESP32 TRM 192K -> 54K).
+#: ``breadcrumb`` restates the nesting and ``has_tables`` restates
+#: ``table_count`` (both equal on all 3,734 corpus nodes); no tool takes a
+#: ``node_id``. ``level`` is the outline's own depth number, which differs from
+#: the nesting only when an outline skips a level -- the nesting is what the
+#: agent navigates by. ``cross_references`` and ``footnote_markers`` are a
+#: judgement call: their text is in the pages the agent reads, and the 988 of
+#: 2,248 references that resolve (``target_node_id``) point at a section whose
+#: title starts with the referenced number, so the target is still findable by
+#: title. A denylist, not an allowlist, so a new enrichment reaches the agent
+#: unless deliberately cut.
+#: ``DatasheetTools.get_artifact_manifest`` and the ToC JSON keep every field.
+_AGENT_TOC_OMITTED_FIELDS = frozenset(
+    {
+        "breadcrumb",
+        "level",
+        "node_id",
+        "has_tables",
+        "cross_references",
+        "footnote_markers",
+    }
+)
+
+
+def _agent_toc(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return a copy of ``nodes`` slimmed for the agent; the input is untouched.
+
+    ``table_count`` is kept only when nonzero: its absence then says what
+    ``has_tables: false`` used to.
+    """
+    slim = []
+    for node in nodes:
+        out = {
+            key: value
+            for key, value in node.items()
+            if key not in _AGENT_TOC_OMITTED_FIELDS
+            and key != "nodes"
+            and not (key == "table_count" and not value)
+        }
+        if node.get("nodes"):
+            out["nodes"] = _agent_toc(node["nodes"])
+        slim.append(out)
+    return slim
+
 
 @dataclass(frozen=True)
 class DatasheetToolDef:
@@ -244,7 +290,11 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
             tools_instance = target
             if previous is not None:
                 _safe_close(previous)
-            return _ok(tools_instance.get_artifact_manifest())
+            manifest = tools_instance.get_artifact_manifest()
+            toc = manifest.get("toc")
+            if isinstance(toc, list):
+                manifest["toc"] = _agent_toc(toc)
+            return _ok(manifest)
         except Exception as exc:
             return _err_exc(exc)
 
@@ -347,8 +397,10 @@ def create_datasheet_tool_session() -> DatasheetToolSession:
                 "before the other tools; calling it again with a different "
                 "pdf_source switches documents.\n\n"
                 "The manifest carries the source, total pages, ToC quality, and "
-                "the enriched Table of Contents -- section hierarchy, page "
-                "ranges, table counts, footnote markers, cross-references -- "
+                "the enriched ToC -- section hierarchy, page "
+                "ranges, nonzero table counts, boilerplate flags; breadcrumbs, "
+                "cross-references and footnote markers are only in the ToC "
+                "JSON at json_path -- "
                 "plus a 'figures' digest: total/raster/captioned counts and up "
                 "to 40 {page, figures, caption} rows ('truncated' says when "
                 "more exist), each row carrying that page's largest figure. A "

@@ -442,7 +442,9 @@ You can run the local MCP server directly from the repository. It exposes these
 tools for the bound PDF source:
 
 - `build_datasheet` - build and save the `.json` / `.txt` artifacts, and return
-  the manifest: source info, total pages, ToC quality, the full enriched ToC,
+  the manifest: source info, total pages, ToC quality, every ToC node (title,
+  page range, nonzero table count, boilerplate and continued-table flags --
+  breadcrumbs, cross-references and footnote markers stay in the `.json`),
   and a bounded `figures` digest naming the pages that carry figure entries
   (see "Figure indexing and captions"). For a PDF with no usable ToC the
   manifest also carries a `hint` telling the agent to navigate by `search_text`

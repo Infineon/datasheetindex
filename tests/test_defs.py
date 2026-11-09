@@ -495,6 +495,157 @@ def test_manifest_has_no_hint_when_toc_is_present(tmp_path):
     assert "hint" not in manifest
 
 
+def _nested_toc_pdf(path):
+    """Two chapters, one with a subsection, enough to produce every enrichment."""
+    doc = pymupdf.open()
+    texts = [
+        "1 Electrical characteristics\nSupply current 3 mA (1), see Table 2\n"
+        "(1) Measured at 25 C.",
+        "1.1 Supply\nVDD 1.8 V to 3.6 V, see Figure 4",
+        "2 Revision history\nRev A initial release",
+    ]
+    for text in texts:
+        page = doc.new_page()
+        page.insert_text((72, 72), text)
+    doc.set_toc(
+        [
+            [1, "1 Electrical characteristics", 1],
+            [2, "1.1 Supply", 2],
+            [1, "2 Revision history", 3],
+        ]
+    )
+    doc.save(str(path))
+    doc.close()
+
+
+def _walk(nodes):
+    for node in nodes:
+        yield node
+        yield from _walk(node.get("nodes", []))
+
+
+def test_agent_manifest_toc_drops_derivable_and_bulky_fields(tmp_path):
+    """The agent's ToC keeps navigation and judgement fields, not bulk.
+
+    Measured on the 25-document corpus: the manifest ToC reached 270K chars
+    (PIC16F887), titles were 13% of it, and the result is re-sent on every
+    later turn. breadcrumb/level restate the nesting, has_tables restates
+    table_count, node_id feeds no tool, and cross_references/footnote_markers
+    carry no page to navigate to -- their text is in the pages the agent reads.
+    """
+    pdf = tmp_path / "nested.pdf"
+    _nested_toc_pdf(pdf)
+    defs = _defs_by_name()
+
+    manifest = json.loads(
+        _run(defs["build_datasheet"].handler, {"pdf_source": str(pdf)})["content"][0][
+            "text"
+        ]
+    )
+
+    nodes = list(_walk(manifest["toc"]))
+    assert [n["title"] for n in nodes] == [
+        "1 Electrical characteristics",
+        "1.1 Supply",
+        "2 Revision history",
+    ]
+    assert manifest["toc"][0]["nodes"][0]["title"] == "1.1 Supply"
+    dropped = {
+        "breadcrumb",
+        "level",
+        "node_id",
+        "has_tables",
+        "cross_references",
+        "footnote_markers",
+    }
+    for node in nodes:
+        assert not dropped & node.keys(), node
+        assert {"start_page", "end_page"} <= node.keys()
+        assert node.get("table_count", 1) > 0
+    # Judgement signals still reach the agent.
+    assert manifest["toc"][1]["boilerplate_category"] == "revision"
+
+
+def test_python_manifest_keeps_the_full_toc(tmp_path):
+    """Slimming is the agent adapter's job; the Python API is unchanged."""
+    pdf = tmp_path / "nested.pdf"
+    _nested_toc_pdf(pdf)
+    from datasheetindex import DatasheetTools
+
+    with DatasheetTools(str(pdf)) as tools:
+        tools.build_datasheet(output_dir=str(tmp_path))
+        toc = tools.get_artifact_manifest()["toc"]
+
+    assert isinstance(toc, list)
+    first = toc[0]
+    assert first["breadcrumb"] == "1 Electrical characteristics"
+    assert {"node_id", "level", "has_tables", "table_count"} <= first.keys()
+    assert first["cross_references"]
+    assert first["footnote_markers"]
+
+
+def test_agent_toc_passes_unknown_fields_through():
+    """A denylist, so a future enrichment reaches the agent by default.
+
+    An allowlist would hide every new signal from the agent until someone
+    remembered to list it -- the way the preamble never reached it.
+    """
+    from datasheetindex.tools.defs import _agent_toc
+
+    toc = [
+        {
+            "title": "A",
+            "start_page": 1,
+            "end_page": 2,
+            "table_count": 0,
+            "has_tables": False,
+            "summary": "s",
+            "continued_tables": [{"page": 2}],
+            "future_signal": True,
+            "nodes": [{"title": "B", "start_page": 2, "end_page": 2, "level": 2}],
+        }
+    ]
+    assert _agent_toc(toc) == [
+        {
+            "title": "A",
+            "start_page": 1,
+            "end_page": 2,
+            "summary": "s",
+            "continued_tables": [{"page": 2}],
+            "future_signal": True,
+            "nodes": [{"title": "B", "start_page": 2, "end_page": 2}],
+        }
+    ]
+    # The input is the cached artifact's tree: it must not be mutated.
+    assert toc[0]["has_tables"] is False
+    assert toc[0]["nodes"][0]["level"] == 2
+
+
+def test_build_datasheet_description_matches_the_slim_toc():
+    """The description must not promise dropped fields as manifest content.
+
+    It names them once, as living in the ToC JSON, so an agent that needs a
+    breadcrumb or cross-reference knows where to look. Checked against the
+    denylist so a field added there without a description update fails here.
+    """
+    from datasheetindex.tools.defs import _AGENT_TOC_OMITTED_FIELDS
+
+    description = _defs_by_name()["build_datasheet"].description
+    manifest_part, _, rest = description.partition("only in the ToC JSON at json_path")
+    assert rest, "description no longer says where the omitted fields live"
+    spoken = {
+        "breadcrumb": "breadcrumbs",
+        "cross_references": "cross-references",
+        "footnote_markers": "footnote markers",
+    }
+    for field, phrase in spoken.items():
+        assert field in _AGENT_TOC_OMITTED_FIELDS
+        # Named in the json_path sentence, not earlier as manifest content.
+        sentence_start = manifest_part.rfind(";")
+        assert phrase in manifest_part[sentence_start:], phrase
+        assert phrase not in manifest_part[:sentence_start], phrase
+
+
 def test_build_datasheet_schema_bounds_max_figure_captions():
     defs = {d.name: d for d in create_datasheet_tool_defs()}
     props = defs["build_datasheet"].input_schema["properties"]

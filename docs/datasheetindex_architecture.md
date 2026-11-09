@@ -1529,6 +1529,37 @@ any one agent framework:
 single pattern or a list and tags each hit with its section breadcrumb;
 `get_section_text` returns a page range prefixed with a position header.
 
+**The agent's ToC is slimmer than the artifact's.** The `build_datasheet`
+handler (`tools/defs.py:_agent_toc`) drops `breadcrumb`, `level`, `node_id`,
+`has_tables`, `cross_references` and `footnote_markers` from every node, and
+`table_count` where it is zero; `DatasheetTools.get_artifact_manifest()` and
+the ToC JSON keep them all. The manifest stays in the conversation and is
+re-sent on every later turn, and on large documents it was most of the agent's
+context: 270K chars on PIC16F887 and 192K on ESP32 TRM, where a probe lookup
+that read one 2.7K-char page peaked near 80K prompt tokens. Titles were 13% of
+the node data; the dropped fields were 72%. `breadcrumb` and `has_tables`
+restate other fields (equal on all 3,734 corpus nodes), no tool takes a
+`node_id`, and `level` differs from the nesting only when an outline skips a
+level. The other two are a judgement: both are in the page text the agent
+reads, and the 988 of 2,248 references that resolve (`target_node_id`) point
+at a section whose title starts with the referenced number, so the target is
+still findable by title. The tool description tells the agent the dropped
+fields are in the ToC JSON at `json_path`. It is a denylist so that a new
+enrichment reaches the agent unless someone decides it should not.
+
+Measured before merging (2026-11-09): 10 questions chosen so that their
+answers sit in a footnote or a cross-referenced table, 9 of them on large-ToC
+documents, Sonnet 4.6 and GPT-5.1. Run counts per arm are unequal (50-59) and
+not exactly paired: the run was cut short by a harness bug that duplicated
+runs. Sonnet was 51/51 before and 52/52 after. GPT was 42/50 (84%) before and
+48/59 (81%) after, with per-question changes in both directions (q0 3/5 ->
+4/6, q6 3/5 -> 2/6) -- no measurable effect at this n, not a demonstrated
+zero. Some GPT misses were grading artefacts (it writes U+202F between number
+and unit) and hit both arms; the after-arm misses read by hand were a register
+table misread, a wrong page and a text-layout quirk, none involving the cut.
+Turns did not move (3.94 -> 3.90, 4.04 -> 4.02), and mean prompt tokens per
+question fell 2.7-2.9x (206K -> 76K, 168K -> 58K).
+
 `search_text` also carries the text-layer limitation on **both** surfaces its
 consumer reads: in the tool description, and — when a search returns nothing on
 a document that holds raster regions — as a `note` on the result itself. The
