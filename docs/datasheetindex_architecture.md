@@ -1596,6 +1596,42 @@ searchable and nothing is hidden. Both negatives are load-bearing — no note on
 a successful search, none on a caption-only document — because a note that
 appears unconditionally is one the agent learns to skip.
 
+#### `search_text` matching: shadow-form normalization was measured and not adopted
+
+Tamang et al., "Beyond Top-K: Replacing Black-Box Retrieval with Interpretable
+Agentic Operations" (arXiv:2608.06305, 2026), describe a system close to this
+one: an embedding-free MCP server whose `grep` returns line numbers that `read`
+accepts, over one 780-page converted finance report. Its matching runs each
+query against two normalized "shadow" forms of every line. One replaces
+table-cell boundaries with spaces. The other removes separators and thousands
+commas. Of 12 probes, normalization changed the outcome on two: an ungrouped
+figure (`48964.89` against the printed `48,964.89`) and a word split across
+table cells. Their document prints 14,269 digit-grouped numbers, and an agent
+checking a computed value types it without separators.
+
+Neither failure carries over to datasheets, so `search_text` keeps its ladder
+(literal, then collapsed whitespace, then token sequence):
+
+- **Digit grouping is rare.** 74 grouped numbers across the 11 built corpus
+  texts (3.7 MB), and the space-grouped ones include false positives.
+  Datasheet values are written `3.3`, `1000 pF` or `0x1F`.
+- **Hyphenated line breaks** (`perfor-\nmance`, `high-\nspeed`) are the
+  datasheet analogue of a split word. 25 corpus PDFs (3,397 pages) hold 221,
+  130 of them in PIC16F887. 410 distinct `search_text` queries were taken from
+  datasheet-agent's eval traces (2,787 calls) and replayed against 36 PDFs,
+  with the page set compared against both rejoined forms (`performance`,
+  `high-speed`). 10 of 14,760 query-document pairs gained a page. One was a
+  false hit: `IDD` matched the rejoined "middle". Eight added a prose page,
+  such as a page-1 product description or a footnote, to a query that already
+  found the table holding the answer. These are pages a zero-hit fallback
+  would not reach anyway. The one zero-hit query it rescued
+  (`analog-to-digital` on TLV9061) was never sent against that document.
+  Hyphens wrap running prose, while agents search for parameter names and
+  values, which sit in table cells.
+
+Reopen this only on a logged query that missed its answer page because of one
+of these forms.
+
 #### How the tool text is divided, and why it is short
 
 A tool definition is re-sent on every request, so its length is a standing
