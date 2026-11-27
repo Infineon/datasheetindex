@@ -27,8 +27,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# `httpx2`, not `httpx`: the two are one project either side of a rename, and
-# `httpx` ended at 0.28.1 while 2.x ships under the new distribution name.
+# `httpx2`, not `httpx`: they are separate distributions. httpx2 is the 2.x line
+# maintained at github.com/pydantic/httpx2; `httpx` itself continues on 0.x
+# (0.29.0 in 2026-11), so it is not httpx under a new name.
 #
 # The floor on `openai` is what makes this a pair. openai 3.x declares `httpx2`
 # and no longer declares `httpx`, so its own transport is httpx2 -- and the

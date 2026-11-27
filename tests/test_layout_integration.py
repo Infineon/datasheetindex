@@ -393,8 +393,14 @@ def test_layout_use_leaves_classic_reads_unchanged():
     extract_table_markdown, so every later build in that process differed.
     Reads *inside* layout_engine() stand in for another thread's build, whose
     page reads take no lock: the flag is process-global, so they see whatever
-    layout_engine() leaves it at. Page 10 of the PSoC datasheet reads "Buck
-    Regulator" with corrections and "BuckRegulator" without them.
+    layout_engine() leaves it at.
+
+    The fixture page must be one the flag still changes, on every PyMuPDF the
+    floor admits. Page 10 ("Buck Regulator" -> "BuckRegulator") was, until
+    PyMuPDF 2.2 stopped most of the cell mangling (91 PSoC pages on 2.1, one
+    on 2.2: this one, page 118, where the "Package theta-JA" header loses its
+    subscript). The sensitivity check therefore compares whole reads instead
+    of naming a string one version produces.
     """
     from datasheetindex.core.engine import layout_engine
 
@@ -413,20 +419,21 @@ def test_layout_use_leaves_classic_reads_unchanged():
         return found, page.get_text("blocks")
 
     doc = pymupdf.open(str(pdf))
+    page = doc[117]
     try:
-        before = read(doc[9])
-        assert "Buck Regulator" in str(before[0])
+        before = read(page)
+        assert before[0], "fixture page has no classic tables"
         # The page is one the flag changes, so the equalities below are not
         # vacuous.
         pymupdf.TOOLS.unset_quad_corrections(True)
         try:
-            assert "BuckRegulator" in str(cells(doc[9])), "fixture not sensitive"
+            assert cells(page) != before[0], "fixture not sensitive"
         finally:
             pymupdf.TOOLS.unset_quad_corrections(False)
 
         with layout_engine():
-            assert (cells(doc[9]), doc[9].get_text("blocks")) == before
-        assert read(doc[9]) == before
+            assert (cells(page), page.get_text("blocks")) == before
+        assert read(page) == before
     finally:
         doc.close()
 
