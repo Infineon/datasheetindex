@@ -10,11 +10,11 @@ All notable changes to this project will be documented in this file.
   resolves 2.2 without this change. The difference from 2.1 was measured on 30
   corpus documents with parallel and sequential scans:
   - page text is byte-identical;
-  - `table_count` rises 0.7% in total (5,096 -> 5,130) on 18 documents. The
-    added "tables" are mostly figures, such as package pin drawings, timing
-    diagrams and test circuits. 2.2 now detects frames drawn as filled
-    rectangles (`chars_in_rect` compares `top`/`bottom`) and removes a phantom
-    row (pymupdf/PyMuPDF#5175);
+  - `table_count` rises 0.7% (5,096 -> 5,130, summed over top-level ToC
+    sections) on 18 documents. The added "tables" are mostly figures, such as
+    package pin drawings, timing diagrams and test circuits. 2.2 now detects
+    frames drawn as filled rectangles (`chars_in_rect` compares
+    `top`/`bottom`) and removes a phantom row (pymupdf/PyMuPDF#5175);
   - `extract_table_markdown` differs on a few pages, for example code blocks
     keep their indentation.
 
@@ -37,8 +37,10 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - The quad-correction guard test used PSoC page 10, which no longer changes
   when the flag is unset on PyMuPDF 2.2, so its sensitivity check failed. It
-  now uses page 118, which changes on both 2.1 and 2.2, and compares whole
-  reads instead of naming a string that only one version produces.
+  now picks its page at run time (page 118 first), choosing one whose cells or
+  text blocks change with the flag unset. Both reads are unguarded, so the flag
+  is the only difference. If no page changes any more, the test fails rather
+  than passing on vacuous equalities.
 - ty 0.0.112 renamed `unresolved-import` to `import-not-found`. The suppression
   in `tools/registry.py` uses the new name.
 

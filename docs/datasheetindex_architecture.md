@@ -65,11 +65,11 @@ The import-time reset reaches every page reader through `datasheetindex/core/__i
 
 The two engines are different heuristics, not better and worse. On a real 68-page datasheet the classic detector finds 75 tables to the ML engine's 39 and is ~4.4x faster; the ML engine's extra misses are the "Typical Characteristics" plot pages, where the classic detector false-positives on chart gridlines. Counts are defined as the classic detector's answer so they do not depend on what else the process has done with PyMuPDF.
 
-**The classic detector runs with `strategy="lines"`, and `"lines_strict"` was measured and not adopted** (PyMuPDF 2.2, 29 corpus PDFs, 3,960 pages). `lines_strict` builds cell borders only from stroked lines, ignoring fill-only rectangles. The hope was that it would remove the figures 2.2 began counting as tables (package pin drawings, timing diagrams, test circuits framed by filled rectangles). It does not do that job:
+**The classic detector runs with `strategy="lines"`, and `"lines_strict"` was measured and not adopted** (PyMuPDF 2.2; per-page classic detector counts over 29 corpus PDFs, 3,960 pages). `lines_strict` builds cell borders only from stroked lines, ignoring fill-only rectangles. The hope was that it would remove the figures 2.2 began counting as tables (package pin drawings, timing diagrams, test circuits framed by filled rectangles). It does not do that job:
 
 - **It drops real tables.** The total falls from 5,088 to 4,929 tables. Measured by the nearest caption, the tables it drops sit beside a "Table N" caption (10) as often as beside a "Figure N" caption (9); the rest have no caption. Some vendors draw table borders as filled rectangles: the ESP8266 TRM falls from 60 tables to 7 because every pin table disappears.
 - **It is not a filter.** 96 pages gain tables (ATmega328 363 -> 405, RP2040 +21), because ignoring the fills re-segments the cells instead of removing tables.
-- **It misses most of its target.** Of the 40 tables 2.2 added over 2.1, 25 are still counted under `lines_strict`.
+- **It misses most of its target.** On the pages where 2.2 finds more tables than 2.1, it adds 40 (a net +34 across the corpus, 5,054 -> 5,088). 25 of those 40 are still counted under `lines_strict`.
 - **It is no faster** (1,046 s against 1,084 s of scan time). Switching would also redefine `table_count` and invalidate every cached artifact.
 
 ---
