@@ -65,6 +65,13 @@ The import-time reset reaches every page reader through `datasheetindex/core/__i
 
 The two engines are different heuristics, not better and worse. On a real 68-page datasheet the classic detector finds 75 tables to the ML engine's 39 and is ~4.4x faster; the ML engine's extra misses are the "Typical Characteristics" plot pages, where the classic detector false-positives on chart gridlines. Counts are defined as the classic detector's answer so they do not depend on what else the process has done with PyMuPDF.
 
+**The classic detector runs with `strategy="lines"`, and `"lines_strict"` was measured and not adopted** (PyMuPDF 2.2, 29 corpus PDFs, 3,960 pages). `lines_strict` builds cell borders only from stroked lines, ignoring fill-only rectangles. The hope was that it would remove the figures 2.2 began counting as tables (package pin drawings, timing diagrams, test circuits framed by filled rectangles). It does not do that job:
+
+- **It drops real tables.** The total falls from 5,088 to 4,929 tables. Measured by the nearest caption, the tables it drops sit beside a "Table N" caption (10) as often as beside a "Figure N" caption (9); the rest have no caption. Some vendors draw table borders as filled rectangles: the ESP8266 TRM falls from 60 tables to 7 because every pin table disappears.
+- **It is not a filter.** 96 pages gain tables (ATmega328 363 -> 405, RP2040 +21), because ignoring the fills re-segments the cells instead of removing tables.
+- **It misses most of its target.** Of the 40 tables 2.2 added over 2.1, 25 are still counted under `lines_strict`.
+- **It is no faster** (1,046 s against 1,084 s of scan time). Switching would also redefine `table_count` and invalidate every cached artifact.
+
 ---
 
 ## The Two Deliverables
@@ -1631,6 +1638,40 @@ Neither failure carries over to datasheets, so `search_text` keeps its ladder
 
 Reopen this only on a logged query that missed its answer page because of one
 of these forms.
+
+#### `search_text` matching: PyMuPDF's `search_for_fuzzy` was measured and not adopted
+
+PyMuPDF 2.2 added `Page.search_for_fuzzy(needle, max_edits=k)`, which finds
+matches within `k` insertions, deletions or substitutions after case-folding,
+whitespace folding and dehyphenation. It was tested as a fallback for queries
+that return no hits. The test replayed 422 distinct `search_text` queries from
+datasheet-agent's chamber traces against their own PDFs (Si115x, DPS310,
+ACS70331; 26 to 65 pages). 167 of the queries return no hits today. Allowing 1
+edit gave hits on 12 of them; allowing edits up to 20% of the query length gave
+hits on 43.
+
+- **The useful hits are spelling variants:** `155 us` for `155 μs`, `±0.06` for
+  `± 0.06`, `300 to 1200` for `300 - 1200`, `lux` for `lx`.
+- **The harmful hits are wrong values.** Edit distance treats a different digit
+  as a near match: `300 hPa` matched `200 hPa`, `0.2 Pa` matched `0.5 Pa`,
+  `20 mV` matched `200 mV` and `20 mA`, and `1 Hz` matched `1 hP`. A
+  parameter-extraction tool must not return a near value as a hit.
+- **It is 130 to 160 times slower.** A query took 0.40 to 0.47 s (median; 5.9 s
+  worst case) on these short documents, against about 3 ms for the current
+  ladder. The cost grows with page count.
+- **It searches the PDF, not the built text.** Running headers that the build
+  strips would match again, and hits would carry no position in the served
+  text, which breadcrumb attribution needs.
+- **The exact matches it found came from cell order, not spelling.** In 4 of
+  the zero-hit queries, fuzzy search matched with zero edits, for example
+  `Supply Current ICC` on ACS70331 page 5. The built text emits that table's
+  symbol cell before its label cell (`ICC`, then `Supply Current`), so a query
+  typed label-first misses.
+
+Reopen this on the same terms as above: a logged query that missed its answer
+page because of a spelling variant. Even then, the cheaper fix is to normalize
+those variants (`µ`/`μ`/`u`, spacing around `±`) in the existing ladder rather
+than to add edit-distance matching.
 
 #### How the tool text is divided, and why it is short
 
