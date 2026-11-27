@@ -35,7 +35,7 @@ def create_datasheet_tools_server():
     prompt yourself.
     """
     try:
-        from claude_agent_sdk import (  # type: ignore[import-not-found]  # ty: ignore[unresolved-import]
+        from claude_agent_sdk import (  # type: ignore[import-not-found]  # ty: ignore[import-not-found]
             create_sdk_mcp_server,
             tool,
         )

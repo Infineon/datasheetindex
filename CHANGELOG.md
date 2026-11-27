@@ -2,6 +2,50 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.47.1] - 2026-11-27
+
+### Changed
+- **Dependency refresh; the lock now tests PyMuPDF 2.2** (released 2026-11-26).
+  The bound stays `pymupdf>=2.1` with no cap, so a fresh install already
+  resolves 2.2 without this change. The difference from 2.1 was measured on 30
+  corpus documents with parallel and sequential scans:
+  - page text is byte-identical;
+  - `table_count` rises 0.7% (5,096 -> 5,130, summed over top-level ToC
+    sections; the architecture doc's per-page count over 29 PDFs, 5,054 ->
+    5,088, shows the same +34) on 18 documents. The added "tables" are mostly figures, such as
+    package pin drawings, timing diagrams and test circuits. 2.2 now detects
+    frames drawn as filled rectangles (`chars_in_rect` compares
+    `top`/`bottom`) and removes a phantom row (pymupdf/PyMuPDF#5175);
+  - `extract_table_markdown` differs on a few pages, for example code blocks
+    keep their indentation.
+
+  2.2 also fixes the classic cell-text mangling that quad corrections cause
+  when they are unset (pymupdf/PyMuPDF#5198): 91 PSoC pages were affected on
+  2.1 and 1 is on 2.2. Text-block coordinates still shift, on 23 ADS1115 pages
+  on both versions, so `engine.py` still holds the flag off.
+- Other moves: openai 3.60.0, claude-agent-sdk 0.2.189, onnxruntime 1.32.0,
+  httpx2 2.16.2, ruff 0.17.6, ty 0.0.112. Hooks: uv-pre-commit 0.13.10, ruff
+  v0.17.6, ty v0.0.112. No floor or cap changed.
+- `benchmark/uv.lock` keeps its pins, since it takes security updates only.
+  Only its record of the local `datasheetindex` version is corrected
+  (0.45.0 -> 0.47.1).
+- The architecture doc records two PyMuPDF 2.2 features that were measured and
+  not adopted. `find_tables(strategy="lines_strict")` drops real tables and
+  still counts most of the new figures. `Page.search_for_fuzzy` turns a
+  different value into a match (`300 hPa` -> `200 hPa`) and is 130-160x slower
+  than `search_text`.
+
+### Fixed
+- The quad-correction guard test used PSoC page 10, which no longer changes
+  when the flag is unset on PyMuPDF 2.2, so its sensitivity check failed. It
+  now uses page 118, which changes on both 2.1 and 2.2. It fails fast if an
+  upstream fix leaves that page unchanged, rather than passing on vacuous
+  equalities. It also asserts that the flag is off when it starts. It compares
+  unguarded reads only with unguarded reads, and guarded with guarded, because
+  the guard also changes the text-page flags.
+- ty 0.0.112 renamed `unresolved-import` to `import-not-found`. The suppression
+  in `tools/registry.py` uses the new name.
+
 ## [0.47.0] - 2026-11-09
 
 ### Changed

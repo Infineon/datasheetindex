@@ -971,11 +971,11 @@ def create_llm_client(
     )
     resolved_model = (model or "").strip() or text_model_env() or DEFAULT_TEXT_MODEL
     resolved_vision_model = vision_model_env()
-    # `httpx2` is httpx 2.x under its new distribution name, and it is openai
-    # 3.x's own transport -- the injected `http_client` comes from the same
-    # library the SDK is built on rather than a second HTTP stack installed
-    # only for this line. Imported lazily, like `openai`, so `[llm]` stays
-    # optional; the extra pins the two together.
+    # `httpx2` (github.com/pydantic/httpx2, a distribution separate from
+    # `httpx`) is openai 3.x's own transport -- the injected `http_client`
+    # comes from the same library the SDK is built on rather than a second
+    # HTTP stack installed only for this line. Imported lazily, like `openai`,
+    # so `[llm]` stays optional; the extra pins the two together.
     httpx2 = importlib.import_module("httpx2")
     openai = importlib.import_module("openai")
     http_client = httpx2.Client(verify=tls_verify, timeout=timeout_seconds)
