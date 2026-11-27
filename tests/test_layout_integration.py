@@ -399,12 +399,13 @@ def test_layout_use_leaves_classic_reads_unchanged():
     are vacuous. Page 10 ("Buck Regulator" -> "BuckRegulator") was, until
     PyMuPDF 2.2 stopped most of the cell mangling: 91 PSoC pages on 2.1, one
     on 2.2 (page 118, where the "Package theta-JA" header loses its
-    subscript). So the page is chosen at run time, page 118 first: the first
-    page whose unguarded read (cells and text blocks) differs with the flag
-    unset. Both reads are unguarded, so the flag is the only difference --
-    classic_tables() also changes the text-page flags. If an upstream fix
-    leaves no such page, the test fails and asks for a new fixture rather
-    than passing on equalities that prove nothing.
+    subscript). The test fails fast if an upstream fix makes page 118
+    insensitive too, rather than passing on equalities that prove nothing.
+
+    Unguarded reads are only ever compared with unguarded reads, and guarded
+    with guarded: classic_tables() also holds ``pymupdf._layout_enabled`` on,
+    which changes the text-page flags, so a mixed comparison would test that
+    too.
     """
     from datasheetindex.core.engine import layout_engine
 
@@ -414,10 +415,12 @@ def test_layout_use_leaves_classic_reads_unchanged():
     if not pdf.exists():
         pytest.skip("bundled PSoC datasheet not present")
 
+    # A bare find_tables(), not engine.find_classic_tables(), on purpose: it
+    # stands in for a read that takes no lock, which is what sees the flag.
     def cells(page: pymupdf.Page) -> list:
         return [t.extract() for t in page.find_tables(use_layout=False)]
 
-    def read(page: pymupdf.Page) -> tuple[list, list]:
+    def guarded(page: pymupdf.Page) -> tuple[list, list]:
         with classic_tables():
             found = [t.extract() for t in find_classic_tables(page)]
         return found, page.get_text("blocks")
@@ -425,30 +428,31 @@ def test_layout_use_leaves_classic_reads_unchanged():
     def unguarded(page: pymupdf.Page) -> tuple[list, list]:
         return cells(page), page.get_text("blocks")
 
-    def sensitive(page: pymupdf.Page) -> bool:
-        corrected = unguarded(page)
-        pymupdf.TOOLS.unset_quad_corrections(True)
-        try:
-            return unguarded(page) != corrected
-        finally:
-            pymupdf.TOOLS.unset_quad_corrections(False)
+    # engine.py resets the flag at import. Checked first, so a regression
+    # there fails here instead of as "fixture not sensitive".
+    assert not pymupdf.TOOLS.unset_quad_corrections(), "quad flag is on at start"
 
     doc = pymupdf.open(str(pdf))
     try:
-        order = [117, *(i for i in range(doc.page_count) if i != 117)]
-        page = next(
-            (doc[i] for i in order if i < doc.page_count and sensitive(doc[i])),
-            None,
+        assert doc.page_count > 117, "PSoC fixture has fewer than 118 pages"
+        page = doc[117]
+        before_unguarded = unguarded(page)
+        before_guarded = guarded(page)
+
+        pymupdf.TOOLS.unset_quad_corrections(True)
+        try:
+            mangled = unguarded(page)
+        finally:
+            pymupdf.TOOLS.unset_quad_corrections(False)
+        assert mangled != before_unguarded, (
+            "page 118 no longer changes with quad corrections unset; pick a "
+            "fixture page the flag still affects"
         )
-        assert page is not None, (
-            "no PSoC page changes with quad corrections unset any more; pick a "
-            "fixture from a document the flag still affects"
-        )
-        before = read(page)
 
         with layout_engine():
-            assert unguarded(page) == before
-        assert read(page) == before
+            assert unguarded(page) == before_unguarded
+        assert unguarded(page) == before_unguarded
+        assert guarded(page) == before_guarded
     finally:
         doc.close()
 
