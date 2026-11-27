@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.47.1] - 2026-11-27
 
 ### Changed
 - **Dependency refresh; the lock now tests PyMuPDF 2.2** (released 2026-11-26).
@@ -27,7 +27,12 @@ All notable changes to this project will be documented in this file.
   v0.17.6, ty v0.0.112. No floor or cap changed.
 - `benchmark/uv.lock` keeps its pins, since it takes security updates only.
   Only its record of the local `datasheetindex` version is corrected
-  (0.45.0 -> 0.47.0).
+  (0.45.0 -> 0.47.1).
+- The architecture doc records two PyMuPDF 2.2 features that were measured and
+  not adopted. `find_tables(strategy="lines_strict")` drops real tables and
+  still counts most of the new figures. `Page.search_for_fuzzy` turns a
+  different value into a match (`300 hPa` -> `200 hPa`) and is 130-160x slower
+  than `search_text`.
 
 ### Fixed
 - The quad-correction guard test used PSoC page 10, which no longer changes
